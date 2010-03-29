@@ -33,6 +33,7 @@ if [[ "$?" == "0" ]]; then
   MEM="--mem $MEM"
 else
   COUNT='1'
+  echo
 fi
 
 for slave in $SLAVES; do
