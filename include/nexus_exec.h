@@ -13,8 +13,8 @@ struct nexus_exec {
                 slave_id,
                 framework_id,
                 const char*,  // framework_name
-                const void*,  // init_arg
-                int);         // init_arg_len
+                const void*,  // data
+                int);         // data_len
   void (*run) (struct nexus_exec*, struct nexus_task_desc*);
   void (*kill) (struct nexus_exec*, task_id tid);
   void (*message) (struct nexus_exec*, struct nexus_framework_message*);

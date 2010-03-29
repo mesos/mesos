@@ -76,14 +76,16 @@ void operator & (deserializer& s, FrameworkMessage& message)
 void operator & (serializer& s, const ExecutorInfo& info)
 {
   s & info.uri;
-  s & info.initArg;
+  s & info.dir;
+  s & info.data;
 }
 
 
 void operator & (deserializer& s, ExecutorInfo& info)
 {
   s & info.uri;
-  s & info.initArg;
+  s & info.dir;
+  s & info.data;
 }
 
 

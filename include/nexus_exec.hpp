@@ -41,6 +41,7 @@ public:
 
   // Non-overridable lifecycle methods
   void run();
+  void stop();
 
   // Non-overridable communication methods
   void sendStatusUpdate(const TaskStatus &status);

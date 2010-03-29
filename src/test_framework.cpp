@@ -53,7 +53,7 @@ void framework_message(nexus_sched *sched, nexus_framework_message *msg)
 void slave_lost(nexus_sched *sched, slave_id sid)
 {
   cout << "Lost slave " << sid << endl;
-}  
+}
 
 
 void error(nexus_sched *sched, int code, const char *message)
@@ -62,29 +62,36 @@ void error(nexus_sched *sched, int code, const char *message)
 }
 
 
-nexus_sched sched = {
-  "test framework",
-  "", // Executor (will be set in main to get absolute path)
-  registered,
-  slot_offer,
-  slot_offer_rescinded,
-  status_update,
-  framework_message,
-  slave_lost,
-  error,
-  (void *) "test",
-  4,
-  0
-};
+
 
 
 int main(int argc, char **argv)
 {
-  // Get current directory to set executor
+  // Setup the scheduler.
+  nexus_sched sched;
+
+  sched.framework_name = "test framework";
+  ""; // Executor (will be set in main to get absolute path);
+
+  sched.registered = registered;
+  sched.slot_offer = slot_offer;
+  sched.slot_offer_rescinded = slot_offer_rescinded;
+  sched.status_update = status_update;
+  sched.framework_message = framework_message;
+  sched.slave_lost = slave_lost;
+  sched.error = error;
+
+  sched.data = NULL;
+
+  // Setup the executor info.
   char cwd[512];
   getcwd(cwd, sizeof(cwd));
-  string executor = string(cwd) + "/test-executor";
-  sched.executor_name = executor.c_str();
+  sched.exec_info.uri = (string(cwd) + "/test-executor").c_str();
+
+  sched.exec_info.dir = "";
+
+  sched.exec_info.data = (void *) "test";
+  sched.exec_info.data_len = 4;
 
   if (nexus_sched_init(&sched) < 0) {
     perror("nexus_sched_init");

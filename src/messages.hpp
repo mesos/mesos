@@ -220,7 +220,7 @@ TUPLE(E2S_FRAMEWORK_MESSAGE,
 TUPLE(S2E_REGISTER_REPLY,
       (SlaveID,
        std::string /*frameworkName*/,
-       std::string /*initArg*/));
+       std::string /*data*/));
 
 TUPLE(S2E_RUN_TASK,
       (TaskID,

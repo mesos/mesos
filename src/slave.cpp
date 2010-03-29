@@ -190,6 +190,7 @@ void Slave::operator () ()
 
       case M2S_FRAMEWORK_MESSAGE: {
         unpack<M2S_FRAMEWORK_MESSAGE>(fid, message);
+	std::cout << "\nslave says: " << message.data << "\n" << std::endl;
         if (Executor *ex = getExecutor(fid)) {
           send(ex->pid, pack<S2E_FRAMEWORK_MESSAGE>(message));
         }
@@ -226,7 +227,7 @@ void Slave::operator () ()
           // Tell executor that it's registered and give it its queued tasks
           send(from(), pack<S2E_REGISTER_REPLY>(this->id,
                                                 fw->name,
-                                                fw->executorInfo.initArg));
+                                                fw->executorInfo.data));
           sendQueuedTasks(fw);
         } else {
           // Framework is gone; tell the executor to exit
@@ -402,8 +403,12 @@ void Slave::executorExited(FrameworkID fid, int status)
 };
 
 
-string Slave::getWorkDirectory(FrameworkID fid) {
-  ostringstream workDir;
-  workDir << "work/slave-" << id << "/framework-" << fid;
-  return workDir.str();
+string Slave::getWorkDirectory(FrameworkID fid, const std::string& dir)
+{
+  if (dir != "")
+    return dir;
+
+  ostringstream oss;
+  oss << "/tmp/nexus/slave-" << id << "/framework-" << fid;
+  return oss.str();
 }

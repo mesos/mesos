@@ -37,10 +37,11 @@ protected:
   FrameworkID fid;
   SlaveID sid;
   Executor* executor;
+  volatile bool terminate;
 
 public:
   ExecutorProcess(const PID& _slave, FrameworkID _fid, Executor* _executor)
-    : slave(_slave), fid(_fid), executor(_executor) {}
+    : slave(_slave), fid(_fid), executor(_executor), terminate(false) {}
 
 protected:
   void operator() ()
@@ -48,56 +49,63 @@ protected:
     link(slave);
     send(slave, pack<E2S_REGISTER_EXECUTOR>(fid));
     while(true) {
-      switch(receive()) {
-        case S2E_REGISTER_REPLY: {
-          string name;
-          string args;
-          unpack<S2E_REGISTER_REPLY>(sid, name, args);
-          ExecutorArgs ea(sid, fid, name, args);
-          invoke(bind(&Executor::init, executor, ea));
-          break;
-        }
+      if (terminate)
+	return;
+      switch(receive(1)) { // Timed receive to check if terminate was set.
+      case S2E_REGISTER_REPLY: {
+	string name;
+	string data;
+	unpack<S2E_REGISTER_REPLY>(sid, name, data);
+	ExecutorArgs args(sid, fid, name, data);
+	invoke(bind(&Executor::init, executor, ref(args)));
+	break;
+      }
 
-        case S2E_RUN_TASK: {
-          TaskID tid;
-          string name;
-          string args;
-          Params params;
-          unpack<S2E_RUN_TASK>(tid, name, args, params);
-          TaskDescription task(tid, sid, name, params.getMap(), args);
-          send(slave, pack<E2S_STATUS_UPDATE>(fid, tid, TASK_RUNNING, ""));
-          invoke(bind(&Executor::startTask, executor, ref(task)));
-          break;
-        }
+      case S2E_RUN_TASK: {
+	TaskID tid;
+	string name;
+	string args;
+	Params params;
+	unpack<S2E_RUN_TASK>(tid, name, args, params);
+	TaskDescription task(tid, sid, name, params.getMap(), args);
+	send(slave, pack<E2S_STATUS_UPDATE>(fid, tid, TASK_RUNNING, ""));
+	invoke(bind(&Executor::startTask, executor, ref(task)));
+	break;
+      }
 
-        case S2E_KILL_TASK: {
-          TaskID tid;
-          unpack<S2E_KILL_TASK>(tid);
-          invoke(bind(&Executor::killTask, executor, tid));
-          break;
-        }
+      case S2E_KILL_TASK: {
+	TaskID tid;
+	unpack<S2E_KILL_TASK>(tid);
+	invoke(bind(&Executor::killTask, executor, tid));
+	break;
+      }
 
-        case S2E_FRAMEWORK_MESSAGE: {
-          FrameworkMessage message;
-          unpack<S2E_FRAMEWORK_MESSAGE>(message);
-          invoke(bind(&Executor::frameworkMessage, executor, ref(message)));
-          break;
-        }
+      case S2E_FRAMEWORK_MESSAGE: {
+	FrameworkMessage message;
+	unpack<S2E_FRAMEWORK_MESSAGE>(message);
+	std::cout << "\nexec says: " << message.data << "\n" << std::endl;
+	invoke(bind(&Executor::frameworkMessage, executor, ref(message)));
+	break;
+      }
 
-        case S2E_KILL_EXECUTOR: {
-          invoke(bind(&Executor::shutdown, executor));
-          return; // Shut down this libpocess process
-        }
+      case S2E_KILL_EXECUTOR: {
+	invoke(bind(&Executor::shutdown, executor));
+	return; // Shut down this libpocess process
+      }
 
-        case PROCESS_EXIT: {
-          exit(1);
-        }
+      case PROCESS_EXIT: {
+	exit(1);
+      }
 
-        default: {
-          cerr << "Received unknown message ID " << msgid()
-               << " from " << from() << endl;
-          break;
-        }
+      case PROCESS_TIMEOUT: {
+	break;
+      }
+
+      default: {
+	cerr << "Received unknown message ID " << msgid()
+	     << " from " << from() << endl;
+	break;
+      }
       }
     }
   }
@@ -180,9 +188,26 @@ void Executor::run()
   if (!(iss >> fid))
     fatal("cannot parse NEXUS_FRAMEWORK_ID");
 
-  _process = new ExecutorProcess(slave, fid, this);
+  ExecutorProcess* temp = new ExecutorProcess(slave, fid, this);
+
+  _process = temp;
 
   Process::wait(Process::spawn(_process));
+
+  _process = NULL;
+
+  delete temp;
+}
+
+
+void Executor::stop()
+{
+  Lock lock(&mutex);
+
+  if (!_process)
+    error(EINVAL, "Executor not running");
+
+  _process->terminate = true;
 
   _process = NULL;
 }
@@ -195,7 +220,7 @@ void Executor::sendStatusUpdate(const TaskStatus &status)
   /* TODO(benh): Increment ref count on process. */
   
   if (!_process)
-    error(EINVAL, "Executor has exited");
+    error(EINVAL, "Executor not running");
 
   _process->send(_process->slave,
                  _process->pack<E2S_STATUS_UPDATE>(_process->fid,
@@ -214,7 +239,7 @@ void Executor::sendFrameworkMessage(const FrameworkMessage &message)
   /* TODO(benh): Increment ref count on process. */
   
   if (!_process)
-    error(EINVAL, "Executor has exited");
+    error(EINVAL, "Executor not running");
 
   _process->send(_process->slave,
                  _process->pack<E2S_FRAMEWORK_MESSAGE>(_process->fid,

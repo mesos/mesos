@@ -21,7 +21,7 @@ HAPROXY_EXE = "/home/andyk/nexus/frameworks/haproxy+apache/haproxy-1.3.20/haprox
 class Scheduler(nexus.Scheduler):
   def __init__(self):
     nexus.Scheduler.__init__(self, "haproxy+apache",
-        os.path.join(os.getcwd(), "startapache.sh"), "")
+        os.path.join(os.getcwd(), "startapache.sh"), "", "")
     self.lock = threading.RLock()
     self.id = 0
     self.haproxy = -1

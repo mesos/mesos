@@ -198,7 +198,7 @@ public:
   // Callback used by isolation module to tell us when an executor exits
   void executorExited(FrameworkID frameworkId, int status);
 
-  string getWorkDirectory(FrameworkID fid);
+  string getWorkDirectory(FrameworkID fid, const std::string& dir);
 
   // TODO(benh): Can this be cleaner?
   // Make self() public so that isolation modules and tests can access it

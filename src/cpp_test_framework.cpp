@@ -30,7 +30,7 @@ public:
   }
 
   virtual ExecutorInfo getExecutorInfo(SchedulerDriver*) {
-    return ExecutorInfo(executor, "");
+    return ExecutorInfo(executor, "", "");
   }
 
   virtual void registered(SchedulerDriver*, FrameworkID fid) {

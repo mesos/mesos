@@ -21,6 +21,7 @@ public class TestFramework {
       try {
         return new ExecutorInfo(
             new File("./test_executor").getCanonicalPath(),
+	    "",
             new byte[0]);
       } catch (Exception e) {
         e.printStackTrace();

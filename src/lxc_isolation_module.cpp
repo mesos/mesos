@@ -98,7 +98,8 @@ void LxcIsolationModule::startExecutor(Framework *fw)
     setenv("NEXUS_USER", fw->user.c_str(), 1);
     setenv("NEXUS_SLAVE_PID", lexical_cast<string>(slave->self()).c_str(), 1);
     setenv("NEXUS_REDIRECT_IO", slave->local ? "1" : "0", 1);
-    setenv("NEXUS_WORK_DIRECTORY", slave->getWorkDirectory(fw->id).c_str(), 1);
+    setenv("NEXUS_WORK_DIRECTORY",
+	   slave->getWorkDirectory(fw->id, fw->executorInfo.dir).c_str(), 1);
 
     // Run lxc-execute.
     execlp("lxc-execute", "lxc-execute", "-n", containerName.c_str(),

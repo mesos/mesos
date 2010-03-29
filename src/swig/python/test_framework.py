@@ -20,7 +20,7 @@ class MyScheduler(nexus.Scheduler):
 
   def getExecutorInfo(self, driver):
     execPath = os.path.join(os.getcwd(), "test_exec.sh")
-    return nexus.ExecutorInfo(execPath, "")
+    return nexus.ExecutorInfo(execPath, "", "")
 
   def registered(self, driver, fid):
     print "Registered!"

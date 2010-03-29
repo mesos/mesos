@@ -331,6 +331,7 @@ void Master::operator () ()
         Slave *slave = lookupSlave(message.slaveId);
         if (slave != NULL) {
           LOG(INFO) << "Sending framework message to " << slave;
+	  std::cout << "\nmaster says: " << message.data << "\n" << std::endl;
           send(slave->pid, pack<M2S_FRAMEWORK_MESSAGE>(fid, message));
         }
       }
@@ -419,8 +420,23 @@ void Master::operator () ()
             oss << "Executor on " << slave << " (" << slave->hostname
                 << ") exited with status " << status;
           }
-          terminateFramework(framework, status, oss.str());
-        }
+
+	  // Collect all the lost tasks for this framework.
+	  set<Task*> tasks;
+	  foreachpair (_, Task* task, framework->tasks)
+	    if (task->slaveId == slave->id)
+	      tasks.insert(task);
+
+	  // Tell the framework they have been lost and remove them.
+	  foreach (Task* task, tasks) {
+	    send(framework->pid, pack<M2F_STATUS_UPDATE>(task->id, TASK_LOST,
+							 task->message));
+	    LOG(INFO) << "Removing " << task << " because of lost executor";
+	    removeTask(task, TRR_EXECUTOR_LOST);
+	  }
+
+	  // TODO(benh): Might we still want something like M2F_EXECUTOR_LOST?
+	}
       }
       break;
     }

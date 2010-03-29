@@ -43,7 +43,7 @@ public:
     ostringstream arg;
     arg << memToHog << " " << taskLen << " " << threadsPerTask;
     cout << "Executor arg: " << arg.str() << endl;
-    return ExecutorInfo(executor, arg.str());
+    return ExecutorInfo(executor, "", arg.str());
   }
 
   virtual void registered(SchedulerDriver*, FrameworkID fid) {

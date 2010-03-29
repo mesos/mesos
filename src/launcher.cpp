@@ -76,21 +76,25 @@ void ExecutorLauncher::run()
 }
 
 
-// Create the executor's working directory and return its path.
+// Create executor's working directory (if doesn't exist).
 void ExecutorLauncher::createWorkingDirectory()
 {
   // Split the path into tokens by "/" and make each directory
   vector<string> tokens;
   split(workDirectory, "/", &tokens);
   string dir;
+
+  // Add '/' if this was an absolute path.
+  if (workDirectory.size() > 0 && workDirectory.at(0) == '/')
+    dir += "/";
+
   foreach (const string& token, tokens) {
-    if (dir != "")
-      dir += "/";
     dir += token;
     if (mkdir(dir.c_str(), 0755) < 0 && errno != EEXIST)
       fatalerror("mkdir failed");
+    dir += "/";
   }
-  // TODO: chown the final directory to the framework's user
+  // TODO: if we created any new directories chown to framework's user
 }
 
 

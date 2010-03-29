@@ -10,14 +10,16 @@
 extern "C" {
 #endif
 
+
+
 struct nexus_sched {
-  // Human-readable framework name
+  // Human-readable framework name.
   const char* framework_name;
-  
-  // Executor library name
-  const char* executor_name;
-  
-  // Callbacks
+
+  // Executor information.
+  struct nexus_exec_info exec_info;
+
+  // Callbacks.
   void (*registered) (struct nexus_sched*, framework_id);
   void (*slot_offer) (struct nexus_sched*,
                       offer_id,
@@ -29,12 +31,8 @@ struct nexus_sched {
                              struct nexus_framework_message*);
   void (*slave_lost) (struct nexus_sched*, slave_id);
   void (*error) (struct nexus_sched*, int, const char*);
-  
-  // Executor init argument
-  void* init_arg;
-  size_t init_arg_len;
-  
-  // Opaque data that can be used to associate extra info with the scheduler
+
+  // Opaque data to associate extra info with scheduler.
   void* data;
 };
 

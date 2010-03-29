@@ -40,6 +40,13 @@ struct nexus_framework_message {
   size_t data_len;
 };
 
+struct nexus_exec_info {
+  const char *uri;
+  const char *dir;
+  const void *data;
+  size_t data_len;
+};
+
 int params_get_int(const char *params, const char *key, int default_value);
 
 int32_t params_get_int32(const char *params,

@@ -9,7 +9,7 @@ class MyScheduler < Nexus::Scheduler
   end
 
   def get_executor_info(driver)
-    Nexus::ExecutorInfo.new(Dir.pwd + "/../../test-executor", "")
+    Nexus::ExecutorInfo.new(Dir.pwd + "/../../test-executor", "", "")
   end
 
   def registered(driver, fid)

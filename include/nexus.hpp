@@ -28,7 +28,7 @@ struct TaskDescription
   TaskDescription() {}
 
   TaskDescription(TaskID _taskId, SlaveID _slaveId, const std::string& _name,
-      const string_map& _params, const data_string& _arg)
+		  const string_map& _params, const data_string& _arg)
     : taskId(_taskId), slaveId(_slaveId), name(_name),
       params(_params), arg(_arg) {}
 
@@ -95,11 +95,14 @@ struct ExecutorInfo
 {
   ExecutorInfo() {}
   
-  ExecutorInfo(const std::string& _uri, const data_string& _initArg)
-    : uri(_uri), initArg(_initArg) {}
+  ExecutorInfo(const std::string& _uri,
+	       const std::string& _dir,
+	       const data_string& _data)
+    : uri(_uri), dir(_dir), data(_data) {}
 
   std::string uri;
-  data_string initArg;
+  std::string dir;
+  data_string data;
 };
 
 

@@ -42,7 +42,7 @@ class MyScheduler(nexus.Scheduler):
   def getExecutorInfo(self, driver):
     execPath = os.path.join(os.getcwd(), "startmpd.sh")
     initArg = ip + ":" + port
-    return nexus.ExecutorInfo(execPath, initArg)
+    return nexus.ExecutorInfo(execPath, "", initArg)
 
   def registered(self, driver, fid):
     print "Nexus MPI scheduler and mpd running at "+self.ip+":"+self.port

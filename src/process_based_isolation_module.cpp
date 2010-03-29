@@ -96,8 +96,10 @@ void ProcessBasedIsolationModule::resourcesChanged(Framework* fw)
 
 ExecutorLauncher* ProcessBasedIsolationModule::createExecutorLauncher(Framework* fw)
 {
-  return new ExecutorLauncher(fw->id, fw->executorInfo.uri, fw->user,
-			      slave->getWorkDirectory(fw->id),
+  // Determine the work directory based on what the scheduler passed.
+  const string& dir = slave->getWorkDirectory(fw->id, fw->executorInfo.dir);
+
+  return new ExecutorLauncher(fw->id, fw->executorInfo.uri, fw->user, dir,
 			      slave->self(), !slave->local);
 }
 

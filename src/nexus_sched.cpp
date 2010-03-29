@@ -110,7 +110,7 @@ protected:
       if (terminate)
         return;
 
-      switch(receive()) {
+      switch(receive(1)) { // Timed receive to check if terminate was set.
       case M2F_REGISTER_REPLY: {
         unpack<M2F_REGISTER_REPLY>(fid);
         invoke(bind(&Scheduler::registered, sched, driver, fid));
@@ -171,6 +171,10 @@ protected:
         break;
       }
 
+      case PROCESS_TIMEOUT: {
+	break;
+      }
+
       default: {
         ostringstream oss;
         oss << "SchedulerProcess received unknown message " << msgid()
@@ -229,7 +233,7 @@ string Scheduler::getFrameworkName(SchedulerDriver*)
  */
 ExecutorInfo Scheduler::getExecutorInfo(SchedulerDriver*)
 {
-  return ExecutorInfo("null", "");
+  return ExecutorInfo("null", "", "");
 }
 
 
@@ -307,7 +311,10 @@ void NexusSchedulerDriver::start()
   const string& frameworkName = sched->getFrameworkName(this);
   const ExecutorInfo& executorInfo = sched->getExecutorInfo(this);
 
-  process = new SchedulerProcess(pid, this, sched, frameworkName, executorInfo);
+  // TODO(benh): Check that executor working directory is empty or absolute?
+
+  process = new SchedulerProcess(pid, this, sched,
+				 frameworkName, executorInfo);
   Process::spawn(process);
 
   running = true;
@@ -413,6 +420,10 @@ void NexusSchedulerDriver::sendFrameworkMessage(const FrameworkMessage &message)
     return;
   }
 
+  // TODO(benh): Do a Process::post instead?
+
+  std::cout << "\nsched says: " << message.data << "\n" << std::endl;
+
   process->send(process->master,
                 process->pack<F2M_FRAMEWORK_MESSAGE>(process->fid, message));
 }
@@ -463,11 +474,12 @@ public:
   SchedulerDriver* scheduler;
 
   CScheduler(string fwName,
-                      string execUri,
-                      string execArg,
-                      nexus_sched* _sched)
+	     string execUri,
+	     string execDir,
+	     string execData,
+	     nexus_sched* _sched)
     : frameworkName(fwName),
-      execInfo(execUri, execArg),
+      execInfo(execUri, execDir, execData),
       sched(_sched),
       scheduler(NULL) {}
 
@@ -574,9 +586,10 @@ CScheduler* lookup(nexus_sched* sched)
 
   if (csi == NULL) {
     string fw_name = sched->framework_name;
-    string exec_name = sched->executor_name;
-    string init_arg((char*) sched->init_arg, sched->init_arg_len);
-    csi = new CScheduler(fw_name, exec_name, init_arg, sched);
+    string uri = sched->exec_info.uri;
+    string dir = sched->exec_info.dir;
+    string data((char*) sched->exec_info.data, sched->exec_info.data_len);
+    csi = new CScheduler(fw_name, uri, dir, data, sched);
     schedulers[sched] = csi;
   }
 
