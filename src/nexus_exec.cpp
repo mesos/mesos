@@ -53,58 +53,58 @@ protected:
 	return;
       switch(receive(1)) { // Timed receive to check if terminate was set.
       case S2E_REGISTER_REPLY: {
-	string name;
-	string data;
-	unpack<S2E_REGISTER_REPLY>(sid, name, data);
-	ExecutorArgs args(sid, fid, name, data);
-	invoke(bind(&Executor::init, executor, ref(args)));
-	break;
+        string name;
+        string data;
+        unpack<S2E_REGISTER_REPLY>(sid, name, data);
+        ExecutorArgs args(sid, fid, name, data);
+        invoke(bind(&Executor::init, executor, ref(args)));
+        break;
       }
 
       case S2E_RUN_TASK: {
-	TaskID tid;
-	string name;
-	string args;
-	Params params;
-	unpack<S2E_RUN_TASK>(tid, name, args, params);
-	TaskDescription task(tid, sid, name, params.getMap(), args);
-	send(slave, pack<E2S_STATUS_UPDATE>(fid, tid, TASK_RUNNING, ""));
-	invoke(bind(&Executor::startTask, executor, ref(task)));
-	break;
+        TaskID tid;
+        string name;
+        string args;
+        Params params;
+        unpack<S2E_RUN_TASK>(tid, name, args, params);
+        TaskDescription task(tid, sid, name, params.getMap(), args);
+        send(slave, pack<E2S_STATUS_UPDATE>(fid, tid, TASK_RUNNING, ""));
+        invoke(bind(&Executor::startTask, executor, ref(task)));
+        break;
       }
 
       case S2E_KILL_TASK: {
-	TaskID tid;
-	unpack<S2E_KILL_TASK>(tid);
-	invoke(bind(&Executor::killTask, executor, tid));
-	break;
+        TaskID tid;
+        unpack<S2E_KILL_TASK>(tid);
+        invoke(bind(&Executor::killTask, executor, tid));
+        break;
       }
 
       case S2E_FRAMEWORK_MESSAGE: {
-	FrameworkMessage message;
-	unpack<S2E_FRAMEWORK_MESSAGE>(message);
-	std::cout << "\nexec says: " << message.data << "\n" << std::endl;
-	invoke(bind(&Executor::frameworkMessage, executor, ref(message)));
-	break;
+        FrameworkMessage message;
+        unpack<S2E_FRAMEWORK_MESSAGE>(message);
+        std::cout << "\nexec says: " << message.data << "\n" << std::endl;
+        invoke(bind(&Executor::frameworkMessage, executor, ref(message)));
+        break;
       }
 
       case S2E_KILL_EXECUTOR: {
-	invoke(bind(&Executor::shutdown, executor));
-	return; // Shut down this libpocess process
+        invoke(bind(&Executor::shutdown, executor));
+        return; // Shut down this libpocess process
       }
 
       case PROCESS_EXIT: {
-	exit(1);
+        exit(1);
       }
 
       case PROCESS_TIMEOUT: {
-	break;
+        break;
       }
 
       default: {
-	cerr << "Received unknown message ID " << msgid()
-	     << " from " << from() << endl;
-	break;
+        cerr << "Received unknown message ID " << msgid()
+             << " from " << from() << endl;
+        break;
       }
       }
     }
