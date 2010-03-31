@@ -86,22 +86,33 @@ using std::stack;
 
 
 #ifdef __sun__
-
 #define gethostbyname2(name, _) gethostbyname(name)
-
 #ifndef MSG_NOSIGNAL
 #define MSG_NOSIGNAL 0
 #endif
-
 #ifndef SOL_TCP
 #define SOL_TCP IPPROTO_TCP
 #endif
-
 #ifndef MAP_32BIT
 #define MAP_32BIT 0
 #endif
-
 #endif /* __sun__ */
+
+#ifdef __APPLE__
+#ifndef MAP_ANONYMOUS
+#define MAP_ANONYMOUS MAP_ANON
+#endif
+#ifndef MSG_NOSIGNAL
+#define MSG_NOSIGNAL 0
+#endif
+#ifndef SOL_TCP
+#define SOL_TCP IPPROTO_TCP
+#endif
+#ifndef MAP_32BIT
+#define MAP_32BIT 0
+#endif
+#endif /* __APPLE__ */
+
 
 
 #define Byte (1)
@@ -288,8 +299,12 @@ bool PID::operator ! () const
 
 std::ostream& operator << (std::ostream& stream, const PID& pid)
 {
-  stream << pid.pipe << "@" << inet_ntoa(*((in_addr *) &pid.ip))
-         << ":" << pid.port;
+  /* Call inet_ntop since inet_ntoa is not thread-safe! */
+  char ip[INET_ADDRSTRLEN];
+  if (inet_ntop(AF_INET, (in_addr *) &pid.ip, ip, INET_ADDRSTRLEN) == NULL)
+    memset(ip, 0, INET_ADDRSTRLEN);
+
+  stream << pid.pipe << "@" << ip << ":" << pid.port;
   return stream;
 }
 
