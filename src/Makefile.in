@@ -66,8 +66,8 @@ CXXFLAGS += -DBUILD_DATE="\"$$(date '+%Y-%m-%d %H:%M:%S')\""
 CFLAGS += -DBUILD_USER="\"$$USER\""
 CXXFLAGS += -DBUILD_USER="\"$$USER\""
 
-# Add libev, libprocess, pthread, and dl to LIBS.
-LIBS += -lglog -lgtest -lprocess -lev -lpthread -ldl
+# Add zookeeper_st, libev, libprocess, pthread, and dl to LIBS.
+LIBS += -lzookeeper_st -lglog -lgtest -lprocess -lev -lpthread -ldl
 
 NEXUS_EXES = nexus-master nexus-slave nexus-local nexus-launcher alltests \
 	     test-framework test-executor cpp-test-framework cpp-test-executor \
