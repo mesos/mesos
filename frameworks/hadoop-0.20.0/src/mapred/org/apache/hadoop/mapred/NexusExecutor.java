@@ -21,7 +21,9 @@ import org.apache.hadoop.mapred.TaskStatus.State;
 
 import nexus.Executor;
 import nexus.ExecutorArgs;
+import nexus.ExecutorDriver;
 import nexus.FrameworkMessage;
+import nexus.NexusExecutorDriver;
 import nexus.TaskDescription;
 import nexus.TaskState;
 
@@ -32,6 +34,9 @@ public class NexusExecutor extends Executor
 
   private JobConf conf;
   private TaskTracker taskTracker;
+
+  private ExecutorDriver driver;
+  private int slaveId;
   
   private AtomicInteger nextRpcId = new AtomicInteger();
   
@@ -67,8 +72,10 @@ public class NexusExecutor extends Executor
   }
   
   @Override
-  public void init(ExecutorArgs args) {
+  public void init(ExecutorDriver driver, ExecutorArgs args) {
     try {
+      this.driver = driver;
+      slaveId = args.getSlaveId();
       conf = new JobConf();
       conf.set("mapred.job.tracker", new String(args.getData()));
       taskTracker = new TaskTracker(conf, this);
@@ -83,7 +90,7 @@ public class NexusExecutor extends Executor
       System.exit(1);
     }
   }
-  
+
   /**
    * Remove expired unmapped tasks. We call this right before sending out every
    * heartbeat to ensure that we never kill an unmapped task that we'll
@@ -120,12 +127,12 @@ public class NexusExecutor extends Executor
       }
     }
     for (nexus.TaskStatus update: updates) {
-      sendStatusUpdate(update);
+      driver.sendStatusUpdate(update);
     }
   }
 
   @Override
-  public void killTask(int taskId) {
+  public void killTask(ExecutorDriver d, int taskId) {
     synchronized (this) {
       TaskAttemptID hadoopId = nexusIdToHadoopId.get(taskId);
       taskTracker.killTask(hadoopId);
@@ -133,7 +140,7 @@ public class NexusExecutor extends Executor
   }
 
   @Override
-  public void startTask(TaskDescription taskDesc) {
+  public void launchTask(ExecutorDriver d, TaskDescription taskDesc) {
     String taskType = new String(taskDesc.getArg());
     LOG.info("start_task " + taskDesc.getTaskId() + ": " + taskType);
     if (taskType.equals("map")) {
@@ -152,7 +159,7 @@ public class NexusExecutor extends Executor
   }
   
   @Override
-  public void frameworkMessage(FrameworkMessage message) {
+  public void frameworkMessage(ExecutorDriver d, FrameworkMessage message) {
     try {
       //LOG.info("Got RPC response of size " + message.getData().length);
       ObjectWritable writable = new ObjectWritable();
@@ -160,6 +167,8 @@ public class NexusExecutor extends Executor
       DataInputStream in = new DataInputStream(
           new ByteArrayInputStream(message.getData()));
       int rpcId = in.readInt();
+      //LOG.info("Executor on " + slaveId + " got RPC response for ID " + 
+      //         rpcId + " with length " + message.getData().length);
       writable.readFields(in);
       RpcResponse response = rpcResponses.get(rpcId);
       synchronized(response) {
@@ -189,10 +198,10 @@ public class NexusExecutor extends Executor
   }
 
   private Object invokeRPC(String method, Object... args) throws IOException {
-    //LOG.info("Making RPC: " + method);
-    
     // Get a unique RPC ID for this call
     int rpcId = nextRpcId.getAndIncrement();
+    //LOG.info("Executor on " + slaveId + " making RPC: " + method + 
+    //         " with ID " + rpcId);
     
     // Create an RpcResponse for this call
     RpcResponse response = new RpcResponse(rpcId);
@@ -222,7 +231,7 @@ public class NexusExecutor extends Executor
     byte[] bytes = bos.toByteArray();
     //LOG.info("RPC message length: " + bytes.length);
     FrameworkMessage msg = new FrameworkMessage(0, 0, bytes);
-    sendFrameworkMessage(msg);
+    driver.sendFrameworkMessage(msg);
     
     // Wait for a reply
     synchronized(response) {
@@ -300,7 +309,7 @@ public class NexusExecutor extends Executor
       }
       for (nexus.TaskStatus update: updates) {
         if (update != null) {
-          sendStatusUpdate(update);
+          driver.sendStatusUpdate(update);
         }
       }
       
@@ -382,7 +391,8 @@ public class NexusExecutor extends Executor
     }
   }
 
-  public synchronized nexus.TaskStatus createTaskDoneUpdate(TaskStatus taskStatus) {
+  public synchronized nexus.TaskStatus createTaskDoneUpdate(
+      TaskStatus taskStatus) {
     TaskAttemptID hadoopId = taskStatus.getTaskID();
     if (hadoopIdToNexusId.containsKey(hadoopId)) {
       Integer nexusId = hadoopIdToNexusId.get(hadoopId);
@@ -418,9 +428,13 @@ public class NexusExecutor extends Executor
     }
     return null;
   }
+  
+  public ExecutorDriver getDriver() {
+    return driver;
+  }
 
   public static void main(String[] args) throws Exception {
     System.loadLibrary("nexus");
-    new NexusExecutor().run();
+    new NexusExecutorDriver(new NexusExecutor()).run();
   }
 }

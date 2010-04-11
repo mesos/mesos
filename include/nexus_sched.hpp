@@ -9,7 +9,6 @@
 
 namespace nexus {
 
-
 class SchedulerDriver;
 
 namespace internal { class SchedulerProcess; }
@@ -48,7 +47,6 @@ public:
  * framework to Nexus (such as replies to offers). Concrete implementations
  * of SchedulerDriver will take a Scheduler as a parameter in order to make
  * callbacks into it on various events.
- * TODO: Improve this comment
  */
 class SchedulerDriver
 {
@@ -73,7 +71,8 @@ public:
 
 
 /**
- * Concrete implementation of SchedulerDriver that communicates with a Nexus master.
+ * Concrete implementation of SchedulerDriver that communicates with
+ * a Nexus master.
  */
 class NexusSchedulerDriver : public SchedulerDriver
 {
@@ -95,11 +94,12 @@ public:
                             const string_map& params);
   virtual void reviveOffers();
   virtual void sendHints(const string_map& hints);
-  
-  // Scheduler getter; mostly used in SWIG proxies
+
+  // Scheduler getter; required by some of the SWIG proxies
   virtual Scheduler* getScheduler() { return sched; }
 
 private:
+  // Internal utility method to report an error to the scheduler
   void error(int code, const std::string& message);
 
   std::string master;

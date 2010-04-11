@@ -11,6 +11,7 @@
 #include "nexus_exec.h"
 
 #include "fatal.hpp"
+#include "lock.hpp"
 #include "messages.hpp"
 #include "nexus_exec.hpp"
 
@@ -30,18 +31,21 @@ namespace nexus { namespace internal {
 class ExecutorProcess : public Tuple<Process>
 {
 public:
-  friend class nexus::Executor;
+  friend class nexus::NexusExecutorDriver;
   
 protected:
   PID slave;
+  NexusExecutorDriver* driver;
+  Executor* executor;
   FrameworkID fid;
   SlaveID sid;
-  Executor* executor;
-  volatile bool terminate;
 
 public:
-  ExecutorProcess(const PID& _slave, FrameworkID _fid, Executor* _executor)
-    : slave(_slave), fid(_fid), executor(_executor), terminate(false) {}
+  ExecutorProcess(const PID& _slave,
+                  NexusExecutorDriver* _driver,
+                  Executor* _executor,
+                  FrameworkID _fid)
+    : slave(_slave), driver(_driver), executor(_executor), fid(_fid) {}
 
 protected:
   void operator() ()
@@ -49,63 +53,60 @@ protected:
     link(slave);
     send(slave, pack<E2S_REGISTER_EXECUTOR>(fid));
     while(true) {
-      if (terminate)
-	return;
-      switch(receive(1)) { // Timed receive to check if terminate was set.
-      case S2E_REGISTER_REPLY: {
-        string name;
-        string data;
-        unpack<S2E_REGISTER_REPLY>(sid, name, data);
-        ExecutorArgs args(sid, fid, name, data);
-        invoke(bind(&Executor::init, executor, ref(args)));
-        break;
-      }
+      switch(receive()) {
+        case S2E_REGISTER_REPLY: {
+          string name;
+          string args;
+          unpack<S2E_REGISTER_REPLY>(sid, name, args);
+          ExecutorArgs execArg(sid, fid, name, args);
+          invoke(bind(&Executor::init, executor, driver, ref(execArg)));
+          break;
+        }
 
-      case S2E_RUN_TASK: {
-        TaskID tid;
-        string name;
-        string args;
-        Params params;
-        unpack<S2E_RUN_TASK>(tid, name, args, params);
-        TaskDescription task(tid, sid, name, params.getMap(), args);
-        send(slave, pack<E2S_STATUS_UPDATE>(fid, tid, TASK_RUNNING, ""));
-        invoke(bind(&Executor::startTask, executor, ref(task)));
-        break;
-      }
+        case S2E_RUN_TASK: {
+          TaskID tid;
+          string name;
+          string args;
+          Params params;
+          unpack<S2E_RUN_TASK>(tid, name, args, params);
+          TaskDescription task(tid, sid, name, params.getMap(), args);
+          send(slave, pack<E2S_STATUS_UPDATE>(fid, tid, TASK_RUNNING, ""));
+          invoke(bind(&Executor::launchTask, executor, driver, ref(task)));
+          break;
+        }
 
-      case S2E_KILL_TASK: {
-        TaskID tid;
-        unpack<S2E_KILL_TASK>(tid);
-        invoke(bind(&Executor::killTask, executor, tid));
-        break;
-      }
+        case S2E_KILL_TASK: {
+          TaskID tid;
+          unpack<S2E_KILL_TASK>(tid);
+          invoke(bind(&Executor::killTask, executor, driver, tid));
+          break;
+        }
 
-      case S2E_FRAMEWORK_MESSAGE: {
-        FrameworkMessage message;
-        unpack<S2E_FRAMEWORK_MESSAGE>(message);
-        std::cout << "\nexec says: " << message.data << "\n" << std::endl;
-        invoke(bind(&Executor::frameworkMessage, executor, ref(message)));
-        break;
-      }
+        case S2E_FRAMEWORK_MESSAGE: {
+          FrameworkMessage msg;
+          unpack<S2E_FRAMEWORK_MESSAGE>(msg);
+          invoke(bind(&Executor::frameworkMessage, executor, driver, ref(msg)));
+          break;
+        }
 
-      case S2E_KILL_EXECUTOR: {
-        invoke(bind(&Executor::shutdown, executor));
-        return; // Shut down this libpocess process
-      }
+        case S2E_KILL_EXECUTOR: {
+          invoke(bind(&Executor::shutdown, executor, driver));
+          exit(0);
+        }
 
-      case PROCESS_EXIT: {
-        exit(1);
-      }
+        case PROCESS_EXIT: {
+          // TODO: Pass an argument to shutdown to tell it this is abnormal?
+          invoke(bind(&Executor::shutdown, executor, driver));
+          exit(1);
+        }
 
-      case PROCESS_TIMEOUT: {
-        break;
-      }
-
-      default: {
-        cerr << "Received unknown message ID " << msgid()
-             << " from " << from() << endl;
-        break;
-      }
+        default: {
+          // TODO: Is this serious enough to exit?
+          cerr << "Received unknown message ID " << msgid()
+               << " from " << from() << endl;
+          break;
+        }
+>>>>>>> origin/master
       }
     }
   }
@@ -114,28 +115,23 @@ protected:
 }} /* namespace nexus { namespace internal { */
 
 
-static ExecutorProcess* _process = NULL;
-
-
-namespace {
-
-// RAII class for locking mutexes
-struct Lock
-{
-  pthread_mutex_t* m;
-  Lock(pthread_mutex_t* _m): m(_m) { pthread_mutex_lock(m); }
-  ~Lock() { pthread_mutex_unlock(m); }
-};
-
-} /* namespace { */
-
-
 /*
  * Implementation of C++ API.
  */
 
 
-Executor::Executor()
+// Default implementation of error() that logs to stderr and exits
+void Executor::error(ExecutorDriver*, int code, const string &message)
+{
+  cerr << "Nexus error: " << message
+       << " (error code: " << code << ")" << endl;
+  // TODO(*): Don't exit here, let errors be recoverable. (?)
+  exit(1);
+}
+
+
+NexusExecutorDriver::NexusExecutorDriver(Executor* _executor)
+  : executor(_executor)
 {
   // Create mutex and condition variable
   pthread_mutexattr_t attr;
@@ -146,13 +142,13 @@ Executor::Executor()
 }
 
 
-Executor::~Executor()
+NexusExecutorDriver::~NexusExecutorDriver()
 {
   pthread_mutex_destroy(&mutex);
 }
 
 
-void Executor::run()
+void NexusExecutorDriver::run()
 {
   // Set stream buffering mode to flush on newlines so that we capture logs
   // from user processes even when output is redirected to a file.
@@ -188,81 +184,47 @@ void Executor::run()
   if (!(iss >> fid))
     fatal("cannot parse NEXUS_FRAMEWORK_ID");
 
-  ExecutorProcess* temp = new ExecutorProcess(slave, fid, this);
+  process = new ExecutorProcess(slave, this, executor, fid);
 
-  _process = temp;
+  Process::wait(Process::spawn(process));
 
-  Process::wait(Process::spawn(_process));
-
-  _process = NULL;
-
-  delete temp;
+  process = NULL;
 }
 
 
-void Executor::stop()
-{
-  Lock lock(&mutex);
-
-  if (!_process)
-    error(EINVAL, "Executor not running");
-
-  _process->terminate = true;
-
-  _process = NULL;
-}
-
-
-void Executor::sendStatusUpdate(const TaskStatus &status)
+void NexusExecutorDriver::sendStatusUpdate(const TaskStatus &status)
 {
   Lock lock(&mutex);
 
   /* TODO(benh): Increment ref count on process. */
   
-  if (!_process)
-    error(EINVAL, "Executor not running");
+  if (!process)
+    executor->error(this, EINVAL, "Executor has exited");
 
-  _process->send(_process->slave,
-                 _process->pack<E2S_STATUS_UPDATE>(_process->fid,
-                                                   status.taskId,
-                                                   status.state,
-                                                   status.data));
+  process->send(process->slave,
+                process->pack<E2S_STATUS_UPDATE>(process->fid,
+                                                 status.taskId,
+                                                 status.state,
+                                                 status.data));
 
   /* TODO(benh): Decrement ref count on process. */
 }
 
 
-void Executor::sendFrameworkMessage(const FrameworkMessage &message)
+void NexusExecutorDriver::sendFrameworkMessage(const FrameworkMessage &message)
 {
   Lock lock(&mutex);
 
   /* TODO(benh): Increment ref count on process. */
   
-  if (!_process)
-    error(EINVAL, "Executor not running");
+  if (!process)
+    executor->error(this, EINVAL, "Executor has exited");
 
-  _process->send(_process->slave,
-                 _process->pack<E2S_FRAMEWORK_MESSAGE>(_process->fid,
-                                                       message));
+  process->send(process->slave,
+                process->pack<E2S_FRAMEWORK_MESSAGE>(process->fid,
+                                                     message));
 
   /* TODO(benh): Decrement ref count on process. */
-}
-
-
-// Default implementation of error() that logs to stderr and exits
-void Executor::error(int code, const string &message)
-{
-  cerr << "Nexus error: " << message
-       << " (error code: " << code << ")" << endl;
-  // TODO(*): Don't exit here, let errors be recoverable.
-  exit(1);
-}
-
-
-// Default implementation of shutdown() that just exits
-void Executor::shutdown()
-{
-  exit(0);
 }
 
 
@@ -271,22 +233,22 @@ void Executor::shutdown()
  */
 
 
-namespace nexus {
+namespace nexus { namespace internal {
 
 /*
  * We wrap calls from the C API into the C++ API with the following
  * specialized implementation of Executor.
  */
 class CExecutor : public Executor {
-private:
-  nexus_exec* exec;
-  
 public:
-  CExecutor(nexus_exec* _exec) : exec(_exec) {}
+  nexus_exec* exec;
+  ExecutorDriver* driver; // Set externally after object is created
+  
+  CExecutor(nexus_exec* _exec) : exec(_exec), driver(NULL) {}
 
   virtual ~CExecutor() {}
 
-  virtual void init(const ExecutorArgs& args)
+  virtual void init(ExecutorDriver*, const ExecutorArgs& args)
   {
     exec->init(exec,
                args.slaveId,
@@ -296,7 +258,7 @@ public:
                args.data.size());
   }
 
-  virtual void startTask(const TaskDescription& task)
+  virtual void launchTask(ExecutorDriver*, const TaskDescription& task)
   {
     // Convert params to key=value list
     Params paramsObj(task.params);
@@ -307,41 +269,45 @@ public:
                            paramsStr.c_str(),
                            task.arg.data(),
                            task.arg.size() };
-    exec->run(exec, &td);
+    exec->launch_task(exec, &td);
   }
 
-  virtual void killTask(TaskID taskId)
+  virtual void killTask(ExecutorDriver*, TaskID taskId)
   {
-    exec->kill(exec, taskId);
+    exec->kill_task(exec, taskId);
   }
   
-  virtual void frameworkMessage(const FrameworkMessage& message)
+  virtual void frameworkMessage(ExecutorDriver*,
+                                const FrameworkMessage& message)
   {
     nexus_framework_message msg = { message.slaveId,
                                     message.taskId,
                                     message.data.data(),
                                     message.data.size() };
-    exec->message(exec, &msg);
+    exec->framework_message(exec, &msg);
   }
   
-  virtual void shutdown()
+  virtual void shutdown(ExecutorDriver*)
   {
     exec->shutdown(exec);
   }
   
-  virtual void error(int code, const std::string& message)
+  virtual void error(ExecutorDriver*, int code, const std::string& message)
   {
     exec->error(exec, code, message.c_str());
   }
 };
 
-} /* namespace nexus { */
-
 
 /*
  * A single CExecutor instance used with the C API.
+ *
+ * TODO: Is this a good idea? How can one unit-test C frameworks? It might
+ *       be better to have a hashtable as in the scheduler API eventually.
  */
-CExecutor* _executor = NULL;
+CExecutor* c_executor = NULL;
+
+}} /* namespace nexus { namespace internal {*/
 
 
 extern "C" {
@@ -349,16 +315,19 @@ extern "C" {
 
 int nexus_exec_run(struct nexus_exec* exec)
 {
-  if (exec == NULL || _executor != NULL) {
+  if (exec == NULL || c_executor != NULL) {
     errno = EINVAL;
     return -1;
   }
 
-  _executor = new CExecutor(exec);
+  CExecutor executor(exec);
+  c_executor = &executor;
   
-  _executor->run();
+  NexusExecutorDriver driver(&executor);
+  executor.driver = &driver;
+  driver.run();
 
-  _executor = NULL;
+  c_executor = NULL;
 
   return 0;
 }
@@ -367,7 +336,7 @@ int nexus_exec_run(struct nexus_exec* exec)
 int nexus_exec_send_message(struct nexus_exec* exec,
                             struct nexus_framework_message* msg)
 {
-  if (exec == NULL || _executor == NULL || msg == NULL) {
+  if (exec == NULL || c_executor == NULL || msg == NULL) {
     errno = EINVAL;
     return -1;
   }
@@ -375,7 +344,7 @@ int nexus_exec_send_message(struct nexus_exec* exec,
   string data((char*) msg->data, msg->data_len);
   FrameworkMessage message(msg->sid, msg->tid, data);
 
-  _executor->sendFrameworkMessage(message);
+  c_executor->driver->sendFrameworkMessage(message);
 
   return 0;
 }
@@ -385,7 +354,7 @@ int nexus_exec_status_update(struct nexus_exec* exec,
                              struct nexus_task_status* status)
 {
 
-  if (exec == NULL || _executor == NULL || status == NULL) {
+  if (exec == NULL || c_executor == NULL || status == NULL) {
     errno = EINVAL;
     return -1;
   }
@@ -393,7 +362,7 @@ int nexus_exec_status_update(struct nexus_exec* exec,
   string data((char*) status->data, status->data_len);
   TaskStatus ts(status->tid, status->state, data);
 
-  _executor->sendStatusUpdate(ts);
+  c_executor->driver->sendStatusUpdate(ts);
 
   return 0;
 }

@@ -21,6 +21,21 @@ AC_CANONICAL_SYSTEM
 UNSUPPORTED_OS="Nexus is currently unsupported on your platform."
 
 case "${target_os}" in
+  linux*)
+    echo ===========================================================
+    echo Setting up build environment for ${target_cpu} ${target_os}
+    echo ===========================================================
+    OS_NAME=linux
+    ;;
+  darwin*)
+    echo ===========================================================
+    echo Setting up build environment for ${target_cpu} ${target_os}
+    echo ===========================================================
+    OS_NAME=darwin
+    CFLAGS="${CFLAGS} -D_XOPEN_SOURCE"
+    CXXFLAGS="${CXXFLAGS} -D_XOPEN_SOURCE"
+    LDFLAGS="${LDFLAGS} `$PYTHON -c 'from distutils import sysconfig; print sysconfig.get_config_var("LINKFORSHARED") + " -lpython" + sysconfig.get_config_var("VERSION")'`"
+    ;;
   solaris*)
     echo ===========================================================
     echo Setting up build environment for ${target_cpu} ${target_os}
@@ -34,12 +49,6 @@ case "${target_os}" in
     LIBS="-lsocket -lnsl -lproject -lproc"
     PYTHON="python2.6"
     OS_NAME=solaris
-    ;;
-  linux*)
-    echo ===========================================================
-    echo Setting up build environment for ${target_cpu} ${target_os}
-    echo ===========================================================
-    OS_NAME=linux
     ;;
   *)
     AC_MSG_ERROR($UNSUPPORTED_OS)
