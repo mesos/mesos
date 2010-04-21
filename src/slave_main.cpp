@@ -60,7 +60,7 @@ int main(int argc, char **argv)
 
   if (!quiet)
     google::SetStderrLogging(google::INFO);
-  else if (isFT)
+  else
     LeaderDetector::setQuiet(true);
 
   FLAGS_log_dir = "/tmp";
