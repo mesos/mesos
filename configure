@@ -632,6 +632,7 @@ PYTHON_HEADERS
 RUBY_HEADERS
 WITH_WEBUI
 WEBUI_FLAGS
+WITH_ZOOKEEPER
 CXX
 CXXFLAGS
 LDFLAGS
@@ -1236,6 +1237,7 @@ Optional Packages:
                           find Python headers in DIR
   --with-ruby-headers=DIR find Ruby headers in DIR
   --with-webui            enable web UI (requires Python)
+  --with-zookeeper        enable ZooKeeper support
 
 Some influential environment variables:
   CXX         C++ compiler command
@@ -1957,6 +1959,24 @@ echo "$as_me: error:
 *** --with-webui does not take arguments" >&5
 echo "$as_me: error:
 *** --with-webui does not take arguments" >&2;}
+   { (exit 1); exit 1; }; } ;;
+	          esac
+fi
+
+
+
+
+WITH_ZOOKEEPER="0"
+
+# Check whether --with-zookeeper was given.
+if test "${with_zookeeper+set}" = set; then
+  withval=$with_zookeeper; case "$with_zookeeper" in
+		    yes) WITH_ZOOKEEPER="1" ;;
+                    no) WITH_ZOOKEEPER="0" ;;
+		    *) { { echo "$as_me:$LINENO: error:
+*** --with-zookeeper does not take arguments" >&5
+echo "$as_me: error:
+*** --with-zookeeper does not take arguments" >&2;}
    { (exit 1); exit 1; }; } ;;
 	          esac
 fi
@@ -3739,6 +3759,7 @@ PYTHON_HEADERS!$PYTHON_HEADERS$ac_delim
 RUBY_HEADERS!$RUBY_HEADERS$ac_delim
 WITH_WEBUI!$WITH_WEBUI$ac_delim
 WEBUI_FLAGS!$WEBUI_FLAGS$ac_delim
+WITH_ZOOKEEPER!$WITH_ZOOKEEPER$ac_delim
 CXX!$CXX$ac_delim
 CXXFLAGS!$CXXFLAGS$ac_delim
 LDFLAGS!$LDFLAGS$ac_delim
@@ -3753,7 +3774,7 @@ LIBOBJS!$LIBOBJS$ac_delim
 LTLIBOBJS!$LTLIBOBJS$ac_delim
 _ACEOF
 
-  if test `sed -n "s/.*$ac_delim\$/X/p" conf$$subs.sed | grep -c X` = 68; then
+  if test `sed -n "s/.*$ac_delim\$/X/p" conf$$subs.sed | grep -c X` = 69; then
     break
   elif $ac_last_try; then
     { { echo "$as_me:$LINENO: error: could not make $CONFIG_STATUS" >&5

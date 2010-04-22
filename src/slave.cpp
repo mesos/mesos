@@ -1,12 +1,19 @@
+#include "config.hpp" // Need to define first to get USING_ZOOKEEPER
+
 #include <getopt.h>
 
+#ifdef USING_ZOOKEEPER
+#include <zookeeper.hpp>
+#endif
+
+#include "isolation_module_factory.hpp"
 #include "slave.hpp"
 #include "slave_webui.hpp"
-#include "isolation_module_factory.hpp"
 
 using std::list;
 using std::make_pair;
 using std::ostringstream;
+using std::istringstream;
 using std::pair;
 using std::queue;
 using std::string;
@@ -20,12 +27,54 @@ using namespace nexus;
 using namespace nexus::internal;
 using namespace nexus::internal::slave;
 
+
 // There's no gethostbyname2 on Solaris, so fake it by calling gethostbyname
 #ifdef __sun__
 #define gethostbyname2(name, _) gethostbyname(name)
 #endif
 
+
+/* List of ZooKeeper host:port pairs (from slave_main.cpp/local.cpp). */
+extern string zookeeper;
+
 namespace {
+
+#ifdef USING_ZOOKEEPER
+class SlaveWatcher : public Watcher
+{
+private:
+  Slave *slave;
+
+public:
+  void process(ZooKeeper *zk, int type, int state, const string &path)
+  {
+    if ((state == ZOO_CONNECTED_STATE) && (type == ZOO_SESSION_EVENT)) {
+      // Lookup master.
+      string znode = "/home/nexus/master";
+      string result;
+      int ret = zk->get(znode, false, &result, NULL);
+
+      if (ret != ZOK)
+	fatal("failed to get %s! (%s)", znode.c_str(), zerror(ret));
+
+      PID master;
+
+      istringstream iss(result);
+      if (!(iss >> master))
+	fatal("bad data at %s!", znode.c_str());
+
+      // TODO(benh): HACK! Don't just set field in slave instance!
+      slave->master = master;
+
+      Process::post(slave->getPID(), S2S_GOT_MASTER);
+    } else {
+      fatal("unhandled ZooKeeper event!");
+    }
+  }
+
+  SlaveWatcher(Slave *_slave) : slave(_slave) {}
+};
+#endif
 
 // Periodically sends heartbeats to the master
 class Heart : public Tuple<Process>
@@ -118,9 +167,11 @@ void Slave::operator () ()
     publicDns = hostname;
   }
 
-  LOG(INFO) << "Connecting to Nexus master at " << master;
-  link(master);
-  send(master, pack<S2M_REGISTER_SLAVE>(hostname, publicDns, resources));
+#ifdef USING_ZOOKEEPER
+  ZooKeeper *zk;
+  if (!zookeeper.empty())
+    zk = new ZooKeeper(zookeeper, 10000, new SlaveWatcher(this));
+#endif
   
   FrameworkID fid;
   TaskID tid;
@@ -131,6 +182,14 @@ void Slave::operator () ()
 
   while (true) {
     switch (receive()) {
+
+      case S2S_GOT_MASTER: {
+	LOG(INFO) << "Connecting to Nexus master at " << master;
+	link(master);
+	send(master, pack<S2M_REGISTER_SLAVE>(hostname, publicDns, resources));
+	break;
+      }
+
       case M2S_REGISTER_REPLY: {
         unpack<M2S_REGISTER_REPLY>(this->id);
         LOG(INFO) << "Registered with master; given slave ID " << this->id;

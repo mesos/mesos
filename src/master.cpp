@@ -1,10 +1,15 @@
-#include "allocator.hpp"
-#include "master.hpp"
-#include "master_webui.hpp"
-#include "allocator_factory.hpp"
+#include "config.hpp" // Need to define first to get USING_ZOOKEEPER
 
 #include <glog/logging.h>
 
+#ifdef USING_ZOOKEEPER
+#include <zookeeper.hpp>
+#endif
+
+#include "allocator.hpp"
+#include "allocator_factory.hpp"
+#include "master.hpp"
+#include "master_webui.hpp"
 
 using std::endl;
 using std::max;
@@ -26,7 +31,55 @@ using namespace nexus::internal;
 using namespace nexus::internal::master;
 
 
+/* List of ZooKeeper host:port pairs (from master_main.cpp/local.cpp). */
+extern string zookeeper;
+
 namespace {
+
+#ifdef USING_ZOOKEEPER
+class MasterWatcher : public Watcher
+{
+private:
+  Master *master;
+
+public:
+  void process(ZooKeeper *zk, int type, int state, const string &path)
+  {
+    if ((state == ZOO_CONNECTED_STATE) && (type == ZOO_SESSION_EVENT)) {
+      // Create znode for master identification.
+      string znode = "/home/nexus/master";
+      string dirname = "/home/nexus";
+      string delimiter = "/";
+      string contents = "";
+
+      int ret;
+      string result;
+
+      // Create directory path znodes as necessary.
+      size_t index = dirname.find(delimiter, 0);
+      while (index < string::npos) {
+	index = dirname.find(delimiter, index+1);
+	string prefix = dirname.substr(0, index);
+	ret = zk->create(prefix, contents, ZOO_CREATOR_ALL_ACL,
+			 0, &result);
+	if (ret != ZOK && ret != ZNODEEXISTS)
+	  fatal("failed to create ZooKeeper znode! (%s)", zk->error(ret));
+      }
+
+      // Now create znode.
+      ret = zk->create(znode, master->getPID(), ZOO_CREATOR_ALL_ACL,
+		       ZOO_EPHEMERAL, &result);
+
+      if (ret != ZOK)
+	fatal("failed to create ZooKeeper znode! (%s)", zk->error(ret));
+    } else {
+      fatal("unhandled ZooKeeper event!");
+    }
+  }
+
+  MasterWatcher(Master *_master) : master(_master) {}
+};
+#endif
 
 // A process that periodically pings the master to check filter expiries, etc
 class AllocatorTimer : public Tuple<Process>
@@ -243,6 +296,12 @@ void Master::operator () ()
 
   link(spawn(new AllocatorTimer(self())));
   //link(spawn(new SharesPrinter(self())));
+
+#ifdef USING_ZOOKEEPER
+  ZooKeeper *zk;
+  if (!zookeeper.empty())
+    zk = new ZooKeeper(zookeeper, 10000, new MasterWatcher(this));
+#endif
 
   while (true) {
     switch (receive()) {

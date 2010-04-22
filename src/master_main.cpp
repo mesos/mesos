@@ -1,13 +1,17 @@
 #include <getopt.h>
+#include <libgen.h>
 
 #include "master.hpp"
 #include "master_webui.hpp"
-#include "zookeeper_master.hpp"
-
 
 using std::cerr;
 using std::endl;
+
 using namespace nexus::internal::master;
+
+
+/* List of ZooKeeper host:port pairs. */
+string zookeeper = "";
 
 
 void usage(const char* programName)
@@ -37,7 +41,6 @@ int main (int argc, char **argv)
 
   bool quiet = false;
   string allocator = "simple";
-  string zookeeper;
 
   int opt;
   int index;
@@ -50,7 +53,13 @@ int main (int argc, char **argv)
         setenv("LIBPROCESS_PORT", optarg, 1);
         break;
       case 'z':
+#ifndef USING_ZOOKEEPER
+	cerr << "--zookeeper not supported in this build" << endl;
+	usage(argv[0]);
+	exit(1);
+#else
         zookeeper = optarg;
+#endif
 	break;
       case 'q':
         quiet = true;
@@ -73,13 +82,13 @@ int main (int argc, char **argv)
 
   LOG(INFO) << "Build: " << BUILD_DATE << " by " << BUILD_USER;
   LOG(INFO) << "Starting Nexus master";
+
   Master* master = new Master(allocator);
   PID pid = Process::spawn(master);
 
-  if (!zookeeper.empty())
-    Process::spawn(new ZooKeeperProcessForMaster(pid, zookeeper));
-
 #ifdef NEXUS_WEBUI
+  if (chdir(dirname(argv[0])) != 0)
+    fatalerror("could not change into %s for running webui", dirname(argv[0]));
   startMasterWebUI(pid);
 #endif
   
