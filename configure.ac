@@ -8,7 +8,7 @@ CFLAGS="${CFLAGS} -O2 -fno-strict-aliasing -fPIC"
 CXXFLAGS="${CXXFLAGS} -O2 -fno-strict-aliasing -fPIC"
 export CFLAGS
 export CXXFLAGS
-PYTHON=python
+PYTHON=python2.6
 ac_configure_args="$ac_configure_args --enable-shared=no"
 
 AC_CONFIG_FILES([Makefile src/Makefile src/config.hpp])
