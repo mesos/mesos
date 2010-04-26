@@ -33,7 +33,7 @@ void SimpleAllocator::frameworkRemoved(Framework* framework)
 
 void SimpleAllocator::slaveAdded(Slave* slave)
 {
-  LOG(INFO) << "Added " << slave;
+  // LOG(INFO) << "Added " << slave;
   refusers[slave] = unordered_set<Framework*>();
   totalResources += slave->resources;
   makeNewOffers(slave);
@@ -74,10 +74,11 @@ void SimpleAllocator::offerReturned(SlotOffer* offer,
     Framework* framework = master->lookupFramework(offer->frameworkId);
     CHECK(framework != 0);
     foreach (const SlaveResources& r, resLeft) {
-      LOG(INFO) << "Framework reply leaves " << r.resources 
-                << " free on " << r.slave;
+      // LOG(INFO) << "Framework reply leaves " << r.resources 
+      //           << " free on " << r.slave;
       if (r.resources.cpus > 0 || r.resources.mem > 0) {
-        LOG(INFO) << "Inserting " << framework << " as refuser for " << r.slave;
+        // LOG(INFO) << "Inserting " << framework << " as refuser for " << r.slave
+	  ;
         refusers[r.slave].insert(framework);
       }
     }
@@ -123,10 +124,33 @@ struct DominantShareComparator
   
   bool operator() (Framework* f1, Framework* f2)
   {
-    double share1 = max(f1->resources.cpus / (double) total.cpus,
-                        f1->resources.mem  / (double) total.mem);
-    double share2 = max(f2->resources.cpus / (double) total.cpus,
-                        f2->resources.mem  / (double) total.mem);
+    double f1_cpus = f1->resources.cpus;
+    double f1_mem = f1->resources.mem;
+    foreach (SlotOffer* offer, f1->slotOffers) {
+      foreach (const SlaveResources& slaveResources, offer->resources) {
+	f1_cpus += slaveResources.resources.cpus;
+	f1_mem += slaveResources.resources.mem;
+      }
+    }
+
+    double f2_cpus = f2->resources.cpus;
+    double f2_mem = f2->resources.mem;
+    foreach (SlotOffer* offer, f2->slotOffers) {
+      foreach (const SlaveResources& slaveResources, offer->resources) {
+	f2_cpus += slaveResources.resources.cpus;
+	f2_mem += slaveResources.resources.mem;
+      }
+    }
+
+    double share1 = max(f1_cpus / (double) total.cpus,
+                        f1_mem  / (double) total.mem);
+    double share2 = max(f2_cpus / (double) total.cpus,
+                        f2_mem  / (double) total.mem);
+
+    // double share1 = max(f1->resources.cpus / (double) total.cpus,
+    //                     f1->resources.mem  / (double) total.mem);
+    // double share2 = max(f2->resources.cpus / (double) total.cpus,
+    //                     f2->resources.mem  / (double) total.mem);
     if (share1 == share2)
       return f1->id < f2->id; // Make the sort deterministic for unit testing
     else
@@ -182,6 +206,7 @@ void SimpleAllocator::makeNewOffers(const vector<Slave*>& slaves)
       }
     }
   }
+
   if (freeResources.size() == 0)
     return;
   
@@ -194,6 +219,33 @@ void SimpleAllocator::makeNewOffers(const vector<Slave*>& slaves)
       refs.clear();
     }
   }
+
+  // unordered_map<Framework*, vector<SlaveResources> > offerings;
+
+  // foreachpair (Slave* slave, Resources resources, freeResources) {
+  //   foreach (Framework* framework, ordering) {
+  //     // See which resources this framework can take (given filters & refusals)
+  //     if (refusers[slave].find(framework) == refusers[slave].end() &&
+  //         !framework->filters(slave, resources)) {
+  //       VLOG(1) << "Offering " << resources << " on " << slave
+  //               << " to framework " << framework->id;
+  // 	// vector<SlaveResources> offerable;
+  // 	// offerable.push_back(SlaveResources(slave, resources));
+  // 	// master->makeOffer(framework, offerable);
+  // 	offerings[framework].push_back(SlaveResources(slave, resources));
+  //     }
+  //     if (offerings[framework].size() == 50) {
+  // 	master->makeOffer(framework, offerings[framework]);
+  // 	offerings[framework].clear();
+  //     }
+  //   }
+  //   ordering = getAllocationOrdering();
+  // }
+
+  // // Offer any remaining resources.
+  // foreachpair (Framework* fw, vector<SlaveResources>& remaining, offerings) {
+  //   master->makeOffer(fw, remaining);
+  // }
   
   foreach (Framework* framework, ordering) {
     // See which resources this framework can take (given filters & refusals)
@@ -205,6 +257,8 @@ void SimpleAllocator::makeNewOffers(const vector<Slave*>& slaves)
                 << " to framework " << framework->id;
         offerable.push_back(SlaveResources(slave, resources));
       }
+      if (offerable.size() >= 100)
+  	break;
     }
     if (offerable.size() > 0) {
       foreach (SlaveResources& r, offerable) {

@@ -21,7 +21,6 @@
 #include "nexus_sched.h"
 
 #include "fatal.hpp"
-#include "hash_pid.hpp"
 #include "lock.hpp"
 #include "messages.hpp"
 #include "nexus_local.hpp"

@@ -22,7 +22,6 @@
 #include <boost/unordered_set.hpp>
 
 #include "foreach.hpp"
-#include "hash_pid.hpp"
 #include "master_state.hpp"
 #include "messages.hpp"
 #include "params.hpp"

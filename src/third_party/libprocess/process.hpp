@@ -43,6 +43,8 @@ std::istream& operator >> (std::istream& stream, PID& pid);
 bool operator < (const PID &left, const PID &right);
 bool operator == (const PID &left, const PID &right);
 
+size_t hash_value(const PID& pid);
+
 PID make_pid(const char *);
 
 struct msg

@@ -344,7 +344,7 @@ void Master::operator () ()
       Slave *slave = new Slave(from(), nextSlaveId++);
       unpack<S2M_REGISTER_SLAVE>(slave->hostname, slave->publicDns,
           slave->resources);
-      LOG(INFO) << "Registering " << slave << " at " << slave->pid;
+      //LOG(INFO) << "Registering " << slave << " at " << slave->pid;
       slaves[slave->id] = slave;
       pidToSid[slave->pid] = slave->id;
       link(slave->pid);
@@ -601,8 +601,8 @@ void Master::processOfferReply(SlotOffer *offer,
       resourcesLeft.push_back(SlaveResources(s, left));
     }
     if (timeout != 0 && respRes.cpus == 0 && respRes.mem == 0) {
-      LOG(INFO) << "Adding filter on " << s << " to " << framework
-                << " for  " << timeout << " seconds";
+      // LOG(INFO) << "Adding filter on " << s << " to " << framework
+      //           << " for  " << timeout << " seconds";
       framework->slaveFilter[s] = expiry;
     }
   }
@@ -695,12 +695,21 @@ void Master::removeSlotOffer(SlotOffer *offer,
 // reschedule slot offers for slots that were assigned to this framework
 void Master::removeFramework(Framework *framework)
 { 
+  if (framework->id == 0)
+    exit(0);
+
   framework->active = false;
   // TODO: Notify allocator that a framework removal is beginning?
-  
-  // Tell slaves to kill the framework
-  foreachpair (_, Slave *slave, slaves)
+
+  foreachpair (_, Task *task, framework->tasks) {
+    Slave *slave = lookupSlave(task->slaveId);
+    CHECK(slave != NULL);
     send(slave->pid, pack<M2S_KILL_FRAMEWORK>(framework->id));
+  }
+
+  // // Tell slaves to kill the framework
+  // foreachpair (_, Slave *slave, slaves)
+  //   send(slave->pid, pack<M2S_KILL_FRAMEWORK>(framework->id));
 
   // Remove pointers to the framework's tasks in slaves
   unordered_map<TaskID, Task *> tasksCopy = framework->tasks;

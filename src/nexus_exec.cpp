@@ -106,7 +106,6 @@ protected:
                << " from " << from() << endl;
           break;
         }
->>>>>>> origin/master
       }
     }
   }

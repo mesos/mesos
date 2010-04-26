@@ -47,6 +47,9 @@
 #include <sys/time.h>
 #include <sys/types.h>
 
+#include <boost/unordered_map.hpp>
+#include <boost/unordered_set.hpp>
+
 #include <boost/tuple/tuple.hpp>
 
 #include <algorithm>
@@ -70,6 +73,8 @@
 
 using boost::make_tuple;
 using boost::tuple;
+using boost::unordered_map;
+using boost::unordered_set;
 
 using std::cout;
 using std::cerr;
@@ -366,6 +371,50 @@ bool operator == (const PID& left, const PID& right)
 }
 
 
+size_t hash_value(const PID& pid)
+{
+  std::size_t seed = 0;
+  boost::hash_combine(seed, pid.pipe);
+  boost::hash_combine(seed, pid.ip);
+  boost::hash_combine(seed, pid.port);
+  return seed;
+}
+
+
+struct node { uint32_t ip; uint16_t port; };
+
+
+bool operator == (const node& left, const node& right)
+{
+  return (left.ip == right.ip && left.port == right.port);
+}
+
+
+bool operator < (const node& left, const node& right)
+{
+  if (left.ip == right.ip)
+    return left.port < right.port;
+  else
+    return left.ip < right.ip;
+}
+
+
+std::ostream& operator << (std::ostream& stream, const node& n)
+{
+  stream << n.ip << ":" << n.port;
+  return stream;
+}
+
+
+size_t hash_value(const node& n)
+{
+  std::size_t seed = 0;
+  boost::hash_combine(seed, n.ip);
+  boost::hash_combine(seed, n.port);
+  return seed;
+}
+
+
 static inline int set_nbio(int fd)
 {
   int flags;
@@ -384,38 +433,21 @@ static inline int set_nbio(int fd)
 }
 
 
-struct node { uint32_t ip; uint16_t port; };
-
-bool operator < (const node& left, const node& right)
-{
-  if (left.ip == right.ip)
-    return left.port < right.port;
-  else
-    return left.ip < right.ip;
-}
-
-std::ostream& operator << (std::ostream& stream, const node& n)
-{
-  stream << n.ip << ":" << n.port;
-  return stream;
-}
-
-
 class LinkManager : public Singleton<LinkManager>
 {
 private:
   /* Map from PID (local/remote) to process. */
-  map<PID, set<Process *> > links;
+  unordered_map<PID, unordered_set<Process *> > links;
 
   /* Map from socket to node (ip, port). */
-  map<int, node> sockets;
+  unordered_map<int, node> sockets;
 
   /* Maps from node (ip, port) to socket. */
-  map<node, int> temps;
-  map<node, int> persists;
+  unordered_map<node, int> temps;
+  unordered_map<node, int> persists;
 
   /* Map from socket to outgoing messages. */
-  map<int, queue<struct msg *> > outgoing;
+  unordered_map<int, queue<struct msg *> > outgoing;
 
   pthread_mutex_t mutex;
 
@@ -519,6 +551,11 @@ public:
 
   void send(struct msg *msg)
   {
+    // cout << "links.size(): " << links.size() << endl;
+    // cout << "sockets.size(): " << sockets.size() << endl;
+    // cout << "temps.size(): " << temps.size() << endl;
+    // cout << "persists.size(): " << persists.size() << endl;
+    // cout << "outgoing.size(): " << outgoing.size() << endl;
     assert(msg != NULL);
 
     //cout << "(1) sending msg to " << msg->to << endl;
@@ -528,7 +565,7 @@ public:
     pthread_mutex_lock(&mutex);
     {
       // Check if there is already a link.
-      map<node, int>::iterator it;
+      unordered_map<node, int>::iterator it;
       if ((it = persists.find(n)) != persists.end() ||
 	  (it = temps.find(n)) != temps.end()) {
 	int s = it->second;
@@ -690,7 +727,7 @@ public:
     //cout << "closed socket " << s << endl;
     pthread_mutex_lock(&mutex);
     {
-      map<int, node>::iterator it = sockets.find(s);
+      unordered_map<int, node>::iterator it = sockets.find(s);
       if (it != sockets.end()) {
 	exited(it->second);
 	persists.erase(sockets[s]);
@@ -716,7 +753,7 @@ public:
     {
       list<PID> removed;
       /* Look up all linked processes. */
-      foreachpair (const PID &pid, set<Process *> &processes, links) {
+      foreachpair (const PID &pid, unordered_set<Process *> &processes, links) {
 	if (pid.ip == n.ip && pid.port == n.port) {
 	  /* N.B. If we call exited(pid) we might invalidate iteration. */
 	  /* Deliver PROCESS_EXIT messages (if we aren't replaying). */
@@ -748,16 +785,17 @@ public:
     pthread_mutex_lock(&mutex);
     {
       /* Remove any links this process might have had. */
-      foreachpair (_, set<Process *> &processes, links)
+      foreachpair (_, unordered_set<Process *> &processes, links)
 	processes.erase(process);
 
       const PID &pid = process->getPID();
 
       /* Look up all linked processes. */
-      map<PID, set<Process *> >::iterator it = links.find(pid);
+      unordered_map<PID, unordered_set<Process *> >::iterator it =
+	links.find(pid);
 
       if (it != links.end()) {
-	set<Process *> &processes = it->second;
+	unordered_set<Process *> &processes = it->second;
 	/* Deliver PROCESS_EXIT messages (if we aren't replaying). */
 	if (!replaying) {
 	  foreach (Process *p, processes) {
@@ -2089,6 +2127,8 @@ void write_msg(struct ev_loop *loop, ev_io *w, int revents)
     return;
   } else if (len == 0 || (len < 0 &&
 			  (errno == ECONNRESET ||
+/* TODO(benh): Non-blocking sockets may be writable before connecting? */
+			   errno == ECONNREFUSED || 
 			   errno == EBADF ||
 			   errno == EHOSTUNREACH ||
 			   errno == EPIPE))) {
