@@ -8,6 +8,7 @@ import sys
 class NestedScheduler(nexus.Scheduler):
   def __init__(self, todo, duration, executor):
     nexus.Scheduler.__init__(self)
+    self.fid = -1
     self.tid = 0
     self.todo = todo
     self.finished = 0
@@ -18,20 +19,23 @@ class NestedScheduler(nexus.Scheduler):
     return "Nested Framework: %d todo at %d secs" % (self.todo, self.duration)
 
   def getExecutorInfo(self, driver):
-    return nexus.ExecutorInfo("nested_exec", os.getcwd(), "")
+    return nexus.ExecutorInfo("/root/nexus/src/scaling/nested_exec", "", "")
 
   def registered(self, driver, fid):
+    self.fid = fid
     print "Nested Scheduler Registered!"
 
   def resourceOffer(self, driver, oid, offers):
     tasks = []
     for offer in offers:
       if self.todo == -1 or self.todo != self.tid:
-        self.tid += 1
+        print "Launching %d:%d on %d" % (self.fid, self.tid, offer.slaveId)
         task = nexus.TaskDescription(self.tid, offer.slaveId,
-                                     "task %d" % self.tid, offer.params,
+                                     "nested %d:%d" % (self.fid, self.tid),
+                                     offer.params,
                                      pickle.dumps(self.duration))
         tasks.append(task)
+        self.tid += 1
         #msg = nexus.FrameworkMessage(-1, , "")
         #executor.sendFrameworkMessage("")
     driver.replyToOffer(oid, tasks, {})
@@ -40,7 +44,7 @@ class NestedScheduler(nexus.Scheduler):
     if status.state == nexus.TASK_FINISHED:
       self.finished += 1
     if self.finished == self.todo:
-      print "All nested tasks done, stopping scheduler and enclosing executor!"
+      print "All nested tasks done, stopping scheduler!"
       driver.stop()
       self.executor.stop()
 

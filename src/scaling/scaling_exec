@@ -1,3 +1,3 @@
 #!/bin/sh
-export PYTHONPATH="$PYTHONPATH:../swig/python"
-exec ./scaling_exec.py $@
+export PYTHONPATH="$PYTHONPATH:`dirname $0`/../swig/python"
+exec `dirname $0`/scaling_exec.py $@

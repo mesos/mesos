@@ -695,8 +695,9 @@ void Master::removeSlotOffer(SlotOffer *offer,
 // reschedule slot offers for slots that were assigned to this framework
 void Master::removeFramework(Framework *framework)
 { 
-  if (framework->id == 0)
-    exit(0);
+  // Used for testing with scaling framework.
+  // if (framework->id == 0)
+  //   exit(0);
 
   framework->active = false;
   // TODO: Notify allocator that a framework removal is beginning?
