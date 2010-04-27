@@ -376,7 +376,7 @@ void Master::operator () ()
       PID senderPid;
       istringstream ss(senderStr);
       ss >> senderPid;
-      if (!ftMsg->acceptMessageAckTo(senderPid, ftId, senderStr)) {
+      if (!ftMsg->acceptMessageAckTo(ftId, senderPid, senderStr)) {
         LOG(WARNING) << "FT: Locally ignoring duplicate message with id:" << ftId;
         break;
       } 
@@ -539,7 +539,7 @@ void Master::operator () ()
           DLOG(INFO) << "FT: relaying ftId:"<< ftId << " from: "<< senderStr;
           send(framework->pid, pack<M2F_FT_STATUS_UPDATE>(ftId, senderStr, tid, state, data));
 
-          if (!ftMsg->acceptMessage(senderStr, ftId)) {
+          if (!ftMsg->acceptMessage(ftId, senderStr)) {
             LOG(WARNING) << "FT: Locally ignoring duplicate message with id:" << ftId;
             break;
           } 
