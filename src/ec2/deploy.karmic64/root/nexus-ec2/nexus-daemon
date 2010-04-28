@@ -37,7 +37,7 @@ if [ "$PROGRAM" == "nexus-slave" ]; then
 fi
 
 # Set file descriptor limit (expecting to be root).
-ulimit -n 65536
+ulimit -n 131072
 
 cd $NEXUS_HOME/src
 nohup ./$PROGRAM $EXTRA_OPTS $@ </dev/null >/mnt/$PROGRAM.out 2>&1 &

@@ -27,7 +27,7 @@ void SimpleAllocator::frameworkRemoved(Framework* framework)
     refs.erase(framework);
   // TODO: Re-offer just the slaves that the framework had tasks on?
   //       Alternatively, comment this out and wait for a timer tick
-  makeNewOffers();
+  //makeNewOffers();
 }
 
 
@@ -36,7 +36,7 @@ void SimpleAllocator::slaveAdded(Slave* slave)
   // LOG(INFO) << "Added " << slave;
   refusers[slave] = unordered_set<Framework*>();
   totalResources += slave->resources;
-  makeNewOffers(slave);
+  //makeNewOffers(slave);
 }
 
 
@@ -59,7 +59,7 @@ void SimpleAllocator::taskRemoved(Task* task, TaskRemovalReason reason)
   // slave or a lost framework (in which case we'll get another callback)
   if (reason == TRR_TASK_ENDED || reason == TRR_EXECUTOR_LOST) {
     // TODO: Use a more efficient makeOffers() that re-offers just one slave?
-    makeNewOffers();
+    //makeNewOffers();
   }
 }
 
@@ -89,7 +89,7 @@ void SimpleAllocator::offerReturned(SlotOffer* offer,
     vector<Slave*> slaves;
     foreach (const SlaveResources& r, resLeft)
       slaves.push_back(r.slave);
-    makeNewOffers(slaves);
+    //makeNewOffers(slaves);
   }
 }
 
@@ -97,7 +97,7 @@ void SimpleAllocator::offerReturned(SlotOffer* offer,
 void SimpleAllocator::offersRevived(Framework* framework)
 {
   LOG(INFO) << "Filters removed for " << framework;
-  makeNewOffers();
+  //makeNewOffers();
 }
 
 
