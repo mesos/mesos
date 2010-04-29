@@ -6,10 +6,18 @@ AC_INIT
 
 CFLAGS="${CFLAGS} -O2 -fno-strict-aliasing -fPIC"
 CXXFLAGS="${CXXFLAGS} -O2 -fno-strict-aliasing -fPIC"
+
+# Replace (remove and then add) CFLAGS and CXXFLAGS from configure args. 
+ac_configure_args=`echo $ac_configure_args | sed -e "s/'CFLAGS=.*'//"`
+ac_configure_args=`echo $ac_configure_args | sed -e "s/'CXXFLAGS=.*'//"`
+ac_configure_args="$ac_configure_args 'CFLAGS=$CFLAGS' 'CXXFLAGS=$CXXFLAGS'"
+
+ac_configure_args="$ac_configure_args --enable-shared=no"
+
 export CFLAGS
 export CXXFLAGS
+
 PYTHON=python2.6
-ac_configure_args="$ac_configure_args --enable-shared=no"
 
 AC_CONFIG_FILES([Makefile src/Makefile src/config.hpp])
 AC_CONFIG_SUBDIRS([src/third_party/libprocess])
