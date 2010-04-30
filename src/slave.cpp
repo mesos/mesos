@@ -206,6 +206,7 @@ void Slave::operator () ()
       }
       
       case M2S_RUN_TASK: {
+	FrameworkID fid;
         string fwName, user, taskName, taskArg, fwPidStr;
         ExecutorInfo execInfo;
         unpack<M2S_RUN_TASK>(fid, tid, fwName, user, execInfo,
