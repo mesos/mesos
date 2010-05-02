@@ -18,8 +18,10 @@ class NestedExecutor(nexus.Executor):
     print "(%d:%d) Sleeping for %s seconds." % (self.fid, self.tid, duration)
     # TODO(benh): Don't sleep, this blocks the event loop!
     time.sleep(duration)
-    status = nexus.TaskStatus(self.tid, nexus.TASK_FINISHED, "")
-    driver.sendStatusUpdate(status)
+    # HACK: Stopping executor to free resources instead of doing TASK_FINISHED.
+    driver.stop()
+    #status = nexus.TaskStatus(self.tid, nexus.TASK_FINISHED, "")
+    #driver.sendStatusUpdate(status)
 
   def killTask(self, driver, tid):
     if (self.tid != tid):
