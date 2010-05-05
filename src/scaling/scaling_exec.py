@@ -41,13 +41,13 @@ class NestedScheduler(nexus.Scheduler):
     driver.replyToOffer(oid, tasks, {})
 
   def statusUpdate(self, driver, status):
-    if status.state == nexus.TASK_FINISHED # or status.state == nexus.TASK_LOST:
+    if status.state == nexus.TASK_FINISHED or status.state == nexus.TASK_LOST:
       self.finished += 1
     if self.finished == self.todo:
       print "All nested tasks done, stopping scheduler!"
-      driver.stop()
-      self.executor.stop()
-
+      # driver.stop()
+      # self.executor.stop()
+      sys.exit(0)
 
 class ScalingExecutor(nexus.Executor):
   def __init__(self):

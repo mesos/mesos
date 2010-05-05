@@ -142,15 +142,18 @@ struct DominantShareComparator
       }
     }
 
-    double share1 = max(f1_cpus / (double) total.cpus,
-                        f1_mem  / (double) total.mem);
-    double share2 = max(f2_cpus / (double) total.cpus,
-                        f2_mem  / (double) total.mem);
+    // An ordering that only takes into account running tasks.
+    // double share1 = max(f1_cpus / (double) total.cpus,
+    //                     f1_mem  / (double) total.mem);
+    // double share2 = max(f2_cpus / (double) total.cpus,
+    //                     f2_mem  / (double) total.mem);
 
-    // double share1 = max(f1->resources.cpus / (double) total.cpus,
-    //                     f1->resources.mem  / (double) total.mem);
-    // double share2 = max(f2->resources.cpus / (double) total.cpus,
-    //                     f2->resources.mem  / (double) total.mem);
+    // An ordering that only takes into account both running tasks and offers.
+    double share1 = max(f1->resources.cpus / (double) total.cpus,
+                        f1->resources.mem  / (double) total.mem);
+    double share2 = max(f2->resources.cpus / (double) total.cpus,
+                        f2->resources.mem  / (double) total.mem);
+
     if (share1 == share2)
       return f1->id < f2->id; // Make the sort deterministic for unit testing
     else
@@ -220,51 +223,49 @@ void SimpleAllocator::makeNewOffers(const vector<Slave*>& slaves)
     }
   }
 
-  // unordered_map<Framework*, vector<SlaveResources> > offerings;
+  unordered_map<Framework*, vector<SlaveResources> > offerings;
 
-  // foreachpair (Slave* slave, Resources resources, freeResources) {
-  //   foreach (Framework* framework, ordering) {
-  //     // See which resources this framework can take (given filters & refusals)
-  //     if (refusers[slave].find(framework) == refusers[slave].end() &&
-  //         !framework->filters(slave, resources)) {
-  //       VLOG(1) << "Offering " << resources << " on " << slave
-  //               << " to framework " << framework->id;
-  // 	// vector<SlaveResources> offerable;
-  // 	// offerable.push_back(SlaveResources(slave, resources));
-  // 	// master->makeOffer(framework, offerable);
-  // 	offerings[framework].push_back(SlaveResources(slave, resources));
-  //     }
-  //     if (offerings[framework].size() == 50) {
-  // 	master->makeOffer(framework, offerings[framework]);
-  // 	offerings[framework].clear();
-  //     }
-  //   }
-  //   ordering = getAllocationOrdering();
-  // }
-
-  // // Offer any remaining resources.
-  // foreachpair (Framework* fw, vector<SlaveResources>& remaining, offerings) {
-  //   master->makeOffer(fw, remaining);
-  // }
-  
-  foreach (Framework* framework, ordering) {
-    // See which resources this framework can take (given filters & refusals)
-    vector<SlaveResources> offerable;
-    foreachpair (Slave* slave, Resources resources, freeResources) {
+  foreachpair (Slave* slave, Resources resources, freeResources) {
+    foreach (Framework* framework, ordering) {
+      // See which resources this framework can take (given filters & refusals)
       if (refusers[slave].find(framework) == refusers[slave].end() &&
           !framework->filters(slave, resources)) {
         VLOG(1) << "Offering " << resources << " on " << slave
                 << " to framework " << framework->id;
-        offerable.push_back(SlaveResources(slave, resources));
+  	offerings[framework].push_back(SlaveResources(slave, resources));
       }
-      if (offerable.size() >= 100)
-  	break;
-    }
-    if (offerable.size() > 0) {
-      foreach (SlaveResources& r, offerable) {
-        freeResources.erase(r.slave);
+      // Send out a batch offers if there are at least 100.
+      if (offerings[framework].size() == 100) {
+  	master->makeOffer(framework, offerings[framework]);
+  	offerings[framework].clear();
       }
-      master->makeOffer(framework, offerable);
     }
+    ordering = getAllocationOrdering();
   }
+
+  // Offer batch of remaining resources for each framework.
+  foreachpair (Framework* fw, vector<SlaveResources>& remaining, offerings) {
+    master->makeOffer(fw, remaining);
+  }
+  
+  // foreach (Framework* framework, ordering) {
+  //   See which resources this framework can take (given filters & refusals)
+  //   vector<SlaveResources> offerable;
+  //   foreachpair (Slave* slave, Resources resources, freeResources) {
+  //     if (refusers[slave].find(framework) == refusers[slave].end() &&
+  //         !framework->filters(slave, resources)) {
+  //       VLOG(1) << "Offering " << resources << " on " << slave
+  //               << " to framework " << framework->id;
+  //       offerable.push_back(SlaveResources(slave, resources));
+  //     }
+  //     if (offerable.size() >= 100)
+  // 	break;
+  //   }
+  //   if (offerable.size() > 0) {
+  //     foreach (SlaveResources& r, offerable) {
+  //       freeResources.erase(r.slave);
+  //     }
+  //     master->makeOffer(framework, offerable);
+  //   }
+  // }
 }
