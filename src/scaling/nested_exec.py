@@ -19,9 +19,9 @@ class NestedExecutor(nexus.Executor):
     # TODO(benh): Don't sleep, this blocks the event loop!
     time.sleep(duration)
     # HACK: Stopping executor to free resources instead of doing TASK_FINISHED.
-    driver.stop()
-    #status = nexus.TaskStatus(self.tid, nexus.TASK_FINISHED, "")
-    #driver.sendStatusUpdate(status)
+    #driver.stop()
+    status = nexus.TaskStatus(self.tid, nexus.TASK_FINISHED, "")
+    driver.sendStatusUpdate(status)
 
   def killTask(self, driver, tid):
     if (self.tid != tid):

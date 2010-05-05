@@ -1,3 +1,5 @@
+#error "record-process.hpp is DEPRECATED!"
+
 #ifndef RECORD_PROCESS_HPP
 #define RECORD_PROCESS_HPP
 
@@ -10,6 +12,7 @@
 #include <boost/tuple/tuple.hpp>
 
 #include <boost/variant/variant.hpp>
+
 
 namespace process { namespace record {
 

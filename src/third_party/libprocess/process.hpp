@@ -177,7 +177,7 @@ protected:
   MSGID receive();
 
   /* Blocks for message at most specified seconds. */
-  MSGID receive(time_t);
+  MSGID receive(double);
 
   /* Sends a message to PID and then blocks for a message indefinitely. */
   MSGID call(const PID &, MSGID);
@@ -186,13 +186,13 @@ protected:
   MSGID call(const PID &, MSGID, const char *data, size_t length);
 
   /* Sends, and then blocks for a message at most specified seconds. */
-  MSGID call(const PID &, MSGID, const char *data, size_t length, time_t);
+  MSGID call(const PID &, MSGID, const char *data, size_t length, double secs);
 
   /* Returns pointer and length of body of last dequeued (current) message. */
   const char * body(size_t *length);
 
   /* Blocks at least specified seconds (may block longer). */
-  void pause(time_t);
+  void pause(double secs);
 
   /* Links with the specified PID. */
   PID link(const PID &);
@@ -253,13 +253,13 @@ inline MSGID Process::call(const PID &to, MSGID id)
 inline MSGID Process::call(const PID &to, MSGID id,
 			   const char *data, size_t length)
 {
-  return call(to, id, NULL, 0, 0);
+  return call(to, id, NULL, 0, 0.0);
 }
 
 
 inline MSGID Process::receive()
 {
-  return receive(0);
+  return receive(0.0);
 }
 
 

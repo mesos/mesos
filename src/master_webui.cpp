@@ -58,7 +58,7 @@ public:
   void operator () ()
   {
     send(::master, pack<M2M_GET_STATE>());
-    receive();
+    receive(0.0); // TODO(benh): Why do we need argument?
     int64_t *i = (int64_t *) &masterState;
     unpack<M2M_GET_STATE_REPLY>(*i);
   }

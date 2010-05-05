@@ -578,10 +578,10 @@ protected:
 
   MSGID receive()
   {
-    return receive(0);
+    return receive(0.0);
   }
 
-  MSGID receive(time_t secs)
+  MSGID receive(double secs)
   {
     return Process::receive(secs);
   }
@@ -611,7 +611,7 @@ protected:
   }
 
   template <MSGID ID>
-  MSGID call(const PID &to, const tuple<ID> &r, time_t secs)
+  MSGID call(const PID &to, const tuple<ID> &r, double secs)
   {
     send(to, r);
     return receive(secs);
@@ -738,13 +738,13 @@ protected:
   }
 
   template <MSGID ID>
-  MSGID call(const PID &to, time_t secs)
+  MSGID call(const PID &to, double secs)
   {
     return call(to, pack<ID>(), secs);
   }
 
   template <MSGID ID>
-  MSGID call(const PID &to, typename field<0, ID>::type t0, time_t secs)
+  MSGID call(const PID &to, typename field<0, ID>::type t0, double secs)
   {
     return call(to, pack<ID>(t0), secs);
   }
@@ -753,7 +753,7 @@ protected:
   MSGID call(const PID &to,
 	     typename field<0, ID>::type t0,
 	     typename field<1, ID>::type t1,
-	     time_t secs)
+	     double secs)
   {
     return call(to, pack<ID>(t0, t1), secs);
   }
@@ -763,7 +763,7 @@ protected:
 	     typename field<0, ID>::type t0,
 	     typename field<1, ID>::type t1,
 	     typename field<2, ID>::type t2,
-	     time_t secs)
+	     double secs)
   {
     return call(to, pack<ID>(t0, t1, t2), secs);
   }
@@ -774,7 +774,7 @@ protected:
 	     typename field<1, ID>::type t1,
 	     typename field<2, ID>::type t2,
 	     typename field<3, ID>::type t3,
-	     time_t secs)
+	     double secs)
   {
     return call(to, pack<ID>(t0, t1, t2, t3), secs);
   }
@@ -786,7 +786,7 @@ protected:
 	     typename field<2, ID>::type t2,
 	     typename field<3, ID>::type t3,
 	     typename field<4, ID>::type t4,
-	     time_t secs)
+	     double secs)
   {
     return call(to, pack<ID>(t0, t1, t2, t3, t4), secs);
   }
@@ -799,7 +799,7 @@ protected:
 	     typename field<3, ID>::type t3,
 	     typename field<4, ID>::type t4,
 	     typename field<5, ID>::type t5,
-	     time_t secs)
+	     double secs)
   {
     return call(to, pack<ID>(t0, t1, t2, t3, t4, t5), secs);
   }
@@ -813,7 +813,7 @@ protected:
 	     typename field<4, ID>::type t4,
 	     typename field<5, ID>::type t5,
 	     typename field<6, ID>::type t6,
-	     time_t secs)
+	     double secs)
   {
     return call(to, pack<ID>(t0, t1, t2, t3, t4, t5, t6), secs);
   }
@@ -828,7 +828,7 @@ protected:
 	     typename field<5, ID>::type t5,
 	     typename field<6, ID>::type t6,
 	     typename field<7, ID>::type t7,
-	     time_t secs)
+	     double secs)
   {
     return call(to, pack<ID>(t0, t1, t2, t3, t4, t5, t6, t7), secs);
   }
@@ -844,7 +844,7 @@ protected:
 	     typename field<6, ID>::type t6,
 	     typename field<7, ID>::type t7,
 	     typename field<8, ID>::type t8,
-	     time_t secs)
+	     double secs)
   {
     return call(to, pack<ID>(t0, t1, t2, t3, t4, t5, t6, t7, t8), secs);
   }
@@ -861,7 +861,7 @@ protected:
 	     typename field<7, ID>::type t7,
 	     typename field<8, ID>::type t8,
 	     typename field<9, ID>::type t9,
-	     time_t secs)
+	     double secs)
   {
     return call(to, pack<ID>(t0, t1, t2, t3, t4, t5, t6, t7, t8, t9), secs);
   }

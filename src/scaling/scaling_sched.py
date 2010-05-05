@@ -15,6 +15,7 @@ class ScalingScheduler(nexus.Scheduler):
     self.tid = 0
     self.master = master
     self.running = {}
+    self.timer = 0
 
   def getFrameworkName(self, driver):
     return "Scaling Framework"
@@ -32,6 +33,8 @@ class ScalingScheduler(nexus.Scheduler):
     #   print "Need at least one spare slave to do this work ... exiting!"
     #   driver.stop()
     #   return
+
+    self.timer = time.time()
 
     # Farm out the schedulers!
     tasks = []
@@ -54,6 +57,7 @@ class ScalingScheduler(nexus.Scheduler):
       print "Finished %d todo at %d secs" % (todo, duration)
       del self.running[status.taskId]
       if self.tid == len(config.config) and len(self.running) == 0:
+        print "elapsed time: %d" % (time.time() - self.timer)
         driver.stop()
     elif status.state != nexus.TASK_RUNNING:
       print "Received unexpected status update for %d:%d" % (self.fid, status.taskId)

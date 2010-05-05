@@ -59,7 +59,7 @@ public:
   void operator () ()
   {
     send(::slave, pack<S2S_GET_STATE>());
-    receive();
+    receive(0.0); // TODO(benh): Why do we need argument?
     int64_t *i = (int64_t *) &slaveState;
     unpack<S2S_GET_STATE_REPLY>(*i);
   }
