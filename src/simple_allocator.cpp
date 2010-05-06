@@ -112,9 +112,23 @@ namespace {
   
 struct DominantShareComparator
 {
+  // Total resources in the cluster.
   Resources total;
+
+  // Pending resources for a framework (in unsent offers).
+  unordered_map<Framework *, Resources> *pending;
   
-  DominantShareComparator(Resources _total) : total(_total)
+  DominantShareComparator(Resources _total) : total(_total), pending(NULL)
+  {
+    if (total.cpus == 0) // Prevent division by zero if there are no slaves
+      total.cpus = 1;
+    if (total.mem == 0)
+      total.mem = 1;
+  }
+
+  DominantShareComparator(Resources _total,
+			  unordered_map<Framework *, Resources> *_pending)
+    : total(_total), pending(_pending)
   {
     if (total.cpus == 0) // Prevent division by zero if there are no slaves
       total.cpus = 1;
@@ -126,33 +140,23 @@ struct DominantShareComparator
   {
     double f1_cpus = f1->resources.cpus;
     double f1_mem = f1->resources.mem;
-    foreach (SlotOffer* offer, f1->slotOffers) {
-      foreach (const SlaveResources& slaveResources, offer->resources) {
-	f1_cpus += slaveResources.resources.cpus;
-	f1_mem += slaveResources.resources.mem;
-      }
-    }
 
     double f2_cpus = f2->resources.cpus;
     double f2_mem = f2->resources.mem;
-    foreach (SlotOffer* offer, f2->slotOffers) {
-      foreach (const SlaveResources& slaveResources, offer->resources) {
-	f2_cpus += slaveResources.resources.cpus;
-	f2_mem += slaveResources.resources.mem;
-      }
+
+    if (pending != NULL) {
+      f1_cpus += (*pending)[f1].cpus;
+      f1_mem += (*pending)[f1].mem;
+
+      f2_cpus += (*pending)[f2].cpus;
+      f2_mem += (*pending)[f2].mem;
     }
 
-    // An ordering that only takes into account running tasks.
-    // double share1 = max(f1_cpus / (double) total.cpus,
-    //                     f1_mem  / (double) total.mem);
-    // double share2 = max(f2_cpus / (double) total.cpus,
-    //                     f2_mem  / (double) total.mem);
 
-    // An ordering that only takes into account both running tasks and offers.
-    double share1 = max(f1->resources.cpus / (double) total.cpus,
-                        f1->resources.mem  / (double) total.mem);
-    double share2 = max(f2->resources.cpus / (double) total.cpus,
-                        f2->resources.mem  / (double) total.mem);
+    double share1 = max(f1_cpus / (double) total.cpus,
+                        f1_mem  / (double) total.mem);
+    double share2 = max(f2_cpus / (double) total.cpus,
+                        f2_mem  / (double) total.mem);
 
     if (share1 == share2)
       return f1->id < f2->id; // Make the sort deterministic for unit testing
@@ -168,6 +172,15 @@ vector<Framework*> SimpleAllocator::getAllocationOrdering()
 {
   vector<Framework*> frameworks = master->getActiveFrameworks();
   DominantShareComparator comp(totalResources);
+  sort(frameworks.begin(), frameworks.end(), comp);
+  return frameworks;
+}
+
+
+vector<Framework*> SimpleAllocator::getAllocationOrdering(unordered_map<Framework *, Resources> *pending)
+{
+  vector<Framework*> frameworks = master->getActiveFrameworks();
+  DominantShareComparator comp(totalResources, pending);
   sort(frameworks.begin(), frameworks.end(), comp);
   return frameworks;
 }
@@ -224,6 +237,7 @@ void SimpleAllocator::makeNewOffers(const vector<Slave*>& slaves)
   }
 
   unordered_map<Framework*, vector<SlaveResources> > offerings;
+  unordered_map<Framework*, Resources> pending;
 
   foreachpair (Slave* slave, Resources resources, freeResources) {
     foreach (Framework* framework, ordering) {
@@ -233,18 +247,27 @@ void SimpleAllocator::makeNewOffers(const vector<Slave*>& slaves)
         VLOG(1) << "Offering " << resources << " on " << slave
                 << " to framework " << framework->id;
   	offerings[framework].push_back(SlaveResources(slave, resources));
-      }
-      // Send out a batch offers if there are at least 100.
-      if (offerings[framework].size() == 100) {
-  	master->makeOffer(framework, offerings[framework]);
-  	offerings[framework].clear();
+	pending[framework] = pending[framework] + resources;
+
+	// Send out a batch of offers if there are at least 100.
+	if (offerings[framework].size() == 100) {
+	  std::cout << "making offer of 100 to " << framework << std::endl;
+	  master->makeOffer(framework, offerings[framework]);
+	  offerings[framework].clear();
+	}
+
+	// Update ordering since allocated some resources.
+	ordering = getAllocationOrdering(&pending);
+
+	// Consume these resources, don't offer to next framework too!
+	break;
       }
     }
-    ordering = getAllocationOrdering();
   }
 
   // Offer batch of remaining resources for each framework.
   foreachpair (Framework* fw, vector<SlaveResources>& remaining, offerings) {
+    std::cout << "making remaining offer of " << remaining.size() << " to " << fw << std::endl;
     master->makeOffer(fw, remaining);
   }
   

@@ -50,6 +50,8 @@ public:
 private:
   // Get an ordering to consider frameworks in for launching tasks
   vector<Framework*> getAllocationOrdering();
+
+  vector<Framework*> getAllocationOrdering(unordered_map<Framework *, Resources> *pending);
   
   // Look at the full state of the cluster and send out offers
   void makeNewOffers();
