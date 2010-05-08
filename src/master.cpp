@@ -39,7 +39,6 @@ protected:
   {
     link(master);
     do {
-      // TODO: Make timer interval configurable, and hopefully less than 1 sec
       switch (receive(1)) {
       case PROCESS_TIMEOUT:
 	send(master, pack<M2M_TIMER_TICK>());
@@ -695,9 +694,9 @@ void Master::removeSlotOffer(SlotOffer *offer,
 // reschedule slot offers for slots that were assigned to this framework
 void Master::removeFramework(Framework *framework)
 { 
-  // Used for testing with scaling framework.
-  if (framework->id == 0)
-    exit(0);
+  // // Used for testing with scaling framework.
+  // if (framework->id == 0)
+  //   exit(0);
 
   framework->active = false;
   // TODO: Notify allocator that a framework removal is beginning?

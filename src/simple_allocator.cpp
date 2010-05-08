@@ -152,7 +152,6 @@ struct DominantShareComparator
       f2_mem += (*pending)[f2].mem;
     }
 
-
     double share1 = max(f1_cpus / (double) total.cpus,
                         f1_mem  / (double) total.mem);
     double share2 = max(f2_cpus / (double) total.cpus,
@@ -205,12 +204,12 @@ void SimpleAllocator::makeNewOffers(Slave* slave)
 void SimpleAllocator::makeNewOffers(const vector<Slave*>& slaves)
 {
   LOG(INFO) << "Running makeNewOffers...";
-  
-  // Get an ordering of frameworks to send offers to
+
+  // Get an ordering of frameworks to send offers to.
   vector<Framework*> ordering = getAllocationOrdering();
   if (ordering.size() == 0)
     return;
-  
+
   // Find all the free resources that can be allocated
   unordered_map<Slave* , Resources> freeResources;
   foreach (Slave* slave, slaves) {
@@ -236,7 +235,11 @@ void SimpleAllocator::makeNewOffers(const vector<Slave*>& slaves)
     }
   }
 
+  // Offerings for frameworks.
   unordered_map<Framework*, vector<SlaveResources> > offerings;
+
+  // Aggregate of offerings for frameworks (trading time for space by
+  // not requing looping through vector from offerings above).
   unordered_map<Framework*, Resources> pending;
 
   foreachpair (Slave* slave, Resources resources, freeResources) {
@@ -254,6 +257,8 @@ void SimpleAllocator::makeNewOffers(const vector<Slave*>& slaves)
 	  std::cout << "making offer of 100 to " << framework << std::endl;
 	  master->makeOffer(framework, offerings[framework]);
 	  offerings[framework].clear();
+	  pending[framework].cpus = 0;
+	  pending[framework].mem = 0;
 	}
 
 	// Update ordering since allocated some resources.

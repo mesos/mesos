@@ -11,9 +11,11 @@ class NestedScheduler(nexus.Scheduler):
     self.fid = -1
     self.tid = 0
     self.todo = todo
-    self.finished = 0
     self.duration = duration
     self.executor = executor
+    self.finished = 0
+    self.slaves = []
+    self.running = {}
 
   def getFrameworkName(self, driver):
     return "Nested Framework: %d todo at %d secs" % (self.todo, self.duration)
@@ -28,12 +30,19 @@ class NestedScheduler(nexus.Scheduler):
   def resourceOffer(self, driver, oid, offers):
     tasks = []
     for offer in offers:
+      # Only run one task on a machine because tasks will get
+      # serialized since NestedExecutor doesn't use threads.
+      if offer.slaveId in self.slaves:
+        continue
       if self.todo == -1 or self.todo != self.tid:
         print "Launching %d:%d on %d" % (self.fid, self.tid, offer.slaveId)
+        params = { "cpus": "%d" % 4, "mem": "%d" % (4 * 1024 * 1024 * 1024) }
         task = nexus.TaskDescription(self.tid, offer.slaveId,
                                      "nested %d:%d" % (self.fid, self.tid),
-                                     offer.params,
-                                     pickle.dumps(self.duration))
+                                     params,
+                                     "%d" % self.duration)
+        self.slaves.append(offer.slaveId)
+        self.running[task.taskId] = offer.slaveId
         tasks.append(task)
         self.tid += 1
         #msg = nexus.FrameworkMessage(-1, , "")
@@ -43,6 +52,9 @@ class NestedScheduler(nexus.Scheduler):
   def statusUpdate(self, driver, status):
     if status.state == nexus.TASK_FINISHED or status.state == nexus.TASK_LOST:
       self.finished += 1
+      slaveId = self.running[status.taskId]
+      self.slaves.remove(slaveId)
+      del self.running[status.taskId]
     if self.finished == self.todo:
       print "All nested tasks done, stopping scheduler!"
       # driver.stop()

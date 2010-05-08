@@ -1839,6 +1839,7 @@ public:
     gate->open();
   }
 
+
   Process * dequeue()
   {
     Process *process = NULL;
@@ -1854,6 +1855,23 @@ public:
 
     return process;
   }
+
+
+  Process * peek()
+  {
+    Process *process = NULL;
+
+    acquire(runq);
+    {
+      if (!runq.empty()) {
+	process = runq.front();
+      }
+    }
+    release(runq);
+
+    return process;
+  }
+
 
   void deliver(struct msg *msg)
   {
@@ -2991,6 +3009,10 @@ MSGID Process::receive(double secs)
   /* Free current message. */
   if (current)
     free(current);
+
+  /* Context switch if there is another process ready to run. */
+  // if (ProcessManager::instance()->peek() != NULL)
+  //   ProcessManager::instance()->pause(this, 0);
 
   /* Check if there is a message queued. */
   if ((current = dequeue()) != NULL)
