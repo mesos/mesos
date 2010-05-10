@@ -9,5 +9,7 @@ config = []
 
 for i in range(200):
   todo = -1
-  duration = random.normalvariate(10, 2)
+  duration = 0
+  while duration == 0:
+    duration = random.normalvariate(30, 10)
   config.append((todo, duration))

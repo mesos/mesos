@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <queue>
 
 #include <glog/logging.h>
 
@@ -6,6 +7,7 @@
 
 
 using std::max;
+using std::priority_queue;
 using std::sort;
 
 using namespace nexus;
@@ -117,8 +119,13 @@ struct DominantShareComparator
 
   // Pending resources for a framework (in unsent offers).
   unordered_map<Framework *, Resources> *pending;
+
+  // Whether this comparator is being used for priority (in which case
+  // lower numbers have higher priority).
+  bool priority;
   
-  DominantShareComparator(Resources _total) : total(_total), pending(NULL)
+  DominantShareComparator(Resources _total)
+    : total(_total), pending(NULL), priority(false)
   {
     if (total.cpus == 0) // Prevent division by zero if there are no slaves
       total.cpus = 1;
@@ -128,7 +135,18 @@ struct DominantShareComparator
 
   DominantShareComparator(Resources _total,
 			  unordered_map<Framework *, Resources> *_pending)
-    : total(_total), pending(_pending)
+    : total(_total), pending(_pending), priority(false)
+  {
+    if (total.cpus == 0) // Prevent division by zero if there are no slaves
+      total.cpus = 1;
+    if (total.mem == 0)
+      total.mem = 1;
+  }
+
+  DominantShareComparator(Resources _total,
+			  unordered_map<Framework *, Resources> *_pending,
+			  bool _priority)
+    : total(_total), pending(_pending), priority(_priority)
   {
     if (total.cpus == 0) // Prevent division by zero if there are no slaves
       total.cpus = 1;
@@ -160,7 +178,7 @@ struct DominantShareComparator
     if (share1 == share2)
       return f1->id < f2->id; // Make the sort deterministic for unit testing
     else
-      return share1 < share2;
+      return priority ? share1 > share2 : share1 < share2;
   }
 };
 
@@ -205,13 +223,25 @@ void SimpleAllocator::makeNewOffers(const vector<Slave*>& slaves)
 {
   LOG(INFO) << "Running makeNewOffers...";
 
-  // Get an ordering of frameworks to send offers to.
-  vector<Framework*> ordering = getAllocationOrdering();
-  if (ordering.size() == 0)
+  // Offerings for frameworks.
+  unordered_map<Framework*, vector<SlaveResources> > offerings;
+
+  // Aggregate of offerings for frameworks (trading time for space by
+  // not requing looping through vector from offerings above).
+  unordered_map<Framework*, Resources> pending;
+
+  // Comparator for computing dominant resource fairness.
+  DominantShareComparator comp(totalResources, &pending, true);
+
+  // Heap ordering of frameworks to send offers to.
+  priority_queue<Framework*, vector<Framework*>, DominantShareComparator>
+    frameworks(comp, master->getActiveFrameworks());
+
+  if (frameworks.size() == 0)
     return;
 
   // Find all the free resources that can be allocated
-  unordered_map<Slave* , Resources> freeResources;
+  unordered_map<Slave*, Resources> freeResources;
   foreach (Slave* slave, slaves) {
     if (slave->active) {
       Resources res = slave->resourcesFree();
@@ -228,55 +258,65 @@ void SimpleAllocator::makeNewOffers(const vector<Slave*>& slaves)
   // Clear refusers on any slave that has been refused by everyone
   foreachpair (Slave* slave, _, freeResources) {
     unordered_set<Framework*>& refs = refusers[slave];
-    if (refs.size() == ordering.size()) {
+    if (refs.size() == frameworks.size()) {
       VLOG(1) << "Clearing refusers for " << slave
               << " because everyone refused it";
       refs.clear();
     }
   }
 
-  // Offerings for frameworks.
-  unordered_map<Framework*, vector<SlaveResources> > offerings;
+  // Filtered frameworks that have been removed from the heap.
+  vector<Framework*> filtered;
 
-  // Aggregate of offerings for frameworks (trading time for space by
-  // not requing looping through vector from offerings above).
-  unordered_map<Framework*, Resources> pending;
-
+  // Allocate resources to frameworks!
   foreachpair (Slave* slave, Resources resources, freeResources) {
-    foreach (Framework* framework, ordering) {
-      // See which resources this framework can take (given filters & refusals)
+    bool offered = false;
+    while (!offered) {
+      Framework *framework = frameworks.top();
+      frameworks.pop();
+
+      // Check if resource is allocatable (given filters & refusals).
       if (refusers[slave].find(framework) == refusers[slave].end() &&
-          !framework->filters(slave, resources)) {
-        VLOG(1) << "Offering " << resources << " on " << slave
-                << " to framework " << framework->id;
-  	offerings[framework].push_back(SlaveResources(slave, resources));
+	  !framework->filters(slave, resources)) {
+	VLOG(1) << "Offering " << resources << " on " << slave
+		<< " to framework " << framework->id;
+
+	offerings[framework].push_back(SlaveResources(slave, resources));
 	pending[framework] = pending[framework] + resources;
 
 	// Send out a batch of offers if there are at least 100.
 	if (offerings[framework].size() == 100) {
-	  std::cout << "making offer of 100 to " << framework << std::endl;
 	  master->makeOffer(framework, offerings[framework]);
 	  offerings[framework].clear();
 	  pending[framework].cpus = 0;
 	  pending[framework].mem = 0;
 	}
 
-	// Update ordering since allocated some resources.
-	ordering = getAllocationOrdering(&pending);
+	// Update heap.
+	frameworks.push(framework);
 
-	// Consume these resources, don't offer to next framework too!
-	break;
+	// Put the filtered frameworks back in the heap.
+	foreach (Framework *f, filtered) {
+	  frameworks.push(f);
+	}
+
+	filtered.clear();
+
+	offered = true;
+      } else {
+	// Framework filtered, temporarily remove from heap.
+	filtered.push_back(framework);
       }
     }
   }
 
   // Offer batch of remaining resources for each framework.
   foreachpair (Framework* fw, vector<SlaveResources>& remaining, offerings) {
-    std::cout << "making remaining offer of " << remaining.size() << " to " << fw << std::endl;
+    std::cout << "sending remaining offer of " << remaining.size() << " to " << fw << std::endl;
     master->makeOffer(fw, remaining);
   }
   
-  // foreach (Framework* framework, ordering) {
+  // foreach (Framework* framework, frameworks) {
   //   See which resources this framework can take (given filters & refusals)
   //   vector<SlaveResources> offerable;
   //   foreachpair (Slave* slave, Resources resources, freeResources) {
