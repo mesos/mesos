@@ -196,7 +196,6 @@ void Slave::operator () ()
 
   while (true) {
     switch (receive()) {
-
       case S2S_GOT_MASTER: {
 	LOG(INFO) << "Connecting to Nexus master at " << master;
 	link(master);

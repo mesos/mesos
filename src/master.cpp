@@ -45,7 +45,9 @@ private:
 public:
   void process(ZooKeeper *zk, int type, int state, const string &path)
   {
-    if ((state == ZOO_CONNECTED_STATE) && (type == ZOO_SESSION_EVENT)) {
+    // Connected!
+    if ((state == ZOO_CONNECTED_STATE) &&
+	(type == ZOO_SESSION_EVENT)) {
       // Create znode for master identification.
       string znode = "/home/nexus/master";
       string dirname = "/home/nexus";
@@ -70,8 +72,25 @@ public:
       ret = zk->create(znode, master->getPID(), ZOO_CREATOR_ALL_ACL,
 		       ZOO_EPHEMERAL, &result);
 
+      // If node already exists, update its value.
+      if (ret == ZNODEEXISTS)
+	ret = zk->set(znode, master->getPID(), -1);
+
       if (ret != ZOK)
 	fatal("failed to create ZooKeeper znode! (%s)", zk->error(ret));
+    } else if ((state == ZOO_EXPIRED_SESSION_STATE) &&
+	       (type == ZOO_SESSION_EVENT)) {
+      // TODO(benh): Reconnect if session expires. Note the Zookeeper
+      // C library retries in the case of connection timeouts,
+      // connection loss, etc. Only expired sessions require
+      // explicitly reconnecting.
+	fatal("connection to ZooKeeper expired!");
+    } else if ((state == ZOO_CONNECTING_STATE) &&
+	       (type == ZOO_SESSION_EVENT)) {
+      // The client library automatically reconnects, taking into
+      // account failed servers in the connection string,
+      // appropriately handling the "herd effect", etc.
+      LOG(INFO) << "Lost Zookeeper connection. Retrying (automagically).";
     } else {
       fatal("unhandled ZooKeeper event!");
     }
