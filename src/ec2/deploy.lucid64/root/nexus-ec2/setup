@@ -6,14 +6,8 @@ BRANCH=$3
 # By exporting this git won't ask to accept a key.
 export GIT_SSH=/root/nexus-ec2/ssh-no-keychecking
 
-# Set PATH to include Scala
-export PATH=$PATH:/root/scala-2.7.7.final/bin
-
 MASTER=/root/nexus-ec2/master
 SLAVES=/root/nexus-ec2/slaves
-ZOO=/root/nexus-ec2/zoo
-
-ISFT=`cat $ZOO | wc -l`
 
 # Scripts that get used for/while running Nexus.
 SCRIPTS="copy-dir
@@ -21,12 +15,6 @@ SCRIPTS="copy-dir
          redeploy-nexus
          setup-apache
          setup-slave              
-         setup-torque
-         setup-torque-server
-         start-torque-slaves
-         stop-torque-slaves
-         prologue.setup-mpi-master
-         setup-mpi
          ssh-no-keychecking
          start-mos
          start-nexus
@@ -36,7 +24,7 @@ SCRIPTS="copy-dir
 
 HADOOP_HOME=/root/hadoop-0.20.2
 
-JAVA_HOME=/usr/lib/jvm/java-6-sun
+JAVA_HOME=/usr/lib/jvm/java-6-openjdk
 
 SSH_OPTS="-o StrictHostKeyChecking=no -o ConnectTimeout=2"
 
@@ -53,24 +41,8 @@ echo "Setting executable permissions on scripts..."
 for s in $SCRIPTS; do chmod u+x $s; done
 
 echo "SSH'ing to local machine to approve key..."
-for master in `cat $MASTER`; do
-  echo $master
-  ssh $SSH_OPTS $master echo -n &
-  sleep 0.3
-done
-
+ssh -q $SSH_OPTS `cat $MASTER` echo -n
 ssh -q $SSH_OPTS localhost echo -n
-
-if [[ $ISFT != 0 ]] ; then
-  echo "SSH'ing to Zoo server(s) to approve keys..."
-  zid=1
-  for zoo in `cat $ZOO`; do
-    echo $zoo
-    ssh $SSH_OPTS $zoo echo -n \; mkdir -p /tmp/zookeeper \; echo $zid \> /tmp/zookeeper/myid
-    zid=$(($zid+1))
-    sleep 0.3
-  done
-fi
 
 echo "SSH'ing to slaves to approve keys..."
 for slave in `cat $SLAVES`; do
@@ -81,27 +53,10 @@ done
 echo "Waiting for commands to finish..."
 wait
 
-if [[ `cat $MASTER | wc -l` > 1 ]] ; then
-  echo "RSYNC'ing /root/nexus-ec2 to other master servers..."
-  for master in `cat $MASTER | sed '1d'`; do
-      echo $master
-      rsync -e "ssh $SSH_OPTS" -az /root/nexus-ec2 $master:/root
-  done
-fi
-
-if [[ $ISFT != 0 ]] ; then
-  echo "RSYNC'ing /root/nexus-ec2 to other Zoo servers..."
-  for zoo in `cat $ZOO`; do
-      echo $zoo
-      rsync -e "ssh $SSH_OPTS" -az /root/nexus-ec2 $zoo:/root
-  done
-fi
-
 echo "RSYNC'ing /root/nexus-ec2 to slaves..."
 for slave in `cat $SLAVES`; do
   echo $slave
   rsync -e "ssh $SSH_OPTS" -az /root/nexus-ec2 $slave:/root
-  scp ~/.ssh/id_rsa $slave:.ssh
 done
 
 echo "Setting up slaves..."
@@ -201,9 +156,6 @@ $HADOOP_HOME/bin/start-dfs.sh
 
 echo "Starting MapOutputServer(s)..."
 ./start-mos
-
-echo "Setting up torque"
-./setup-torque
 
 echo "Starting Nexus cluster..."
 ./start-nexus

@@ -206,6 +206,10 @@ protected:
         return;
 
       switch(receive(FT_TIMEOUT)) {
+      // TODO(benh): We need to break the receive loop every so often
+      // to check if 'terminate' has been set .. but rather than use a
+      // timeout in receive, maybe we should send a message.
+
       case M2F_REGISTER_REPLY: {
         unpack<M2F_REGISTER_REPLY>(fid);
         invoke(bind(&Scheduler::registered, sched, driver, fid));
@@ -341,7 +345,6 @@ protected:
         break;
       }
 
-
       case PROCESS_EXIT: {
         const char* message = "Connection to master failed";
 	 if (isFT) 
@@ -388,7 +391,7 @@ protected:
 
       case PROCESS_TIMEOUT: {
         ftMsg->sendOutstanding();
-	break;
+        break;
       }
 
       default: {

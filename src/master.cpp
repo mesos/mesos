@@ -640,17 +640,33 @@ void Master::operator () ()
       unpack<S2M_LOST_EXECUTOR>(sid, fid, status);
       Slave *slave = lookupSlave(sid);
       if (slave != NULL) {
-	Framework *framework = lookupFramework(fid);
-	if (framework != NULL) {
-	  ostringstream oss;
-	  if (status == -1) {
-	    oss << "Executor on " << slave << " (" << slave->hostname
-		<< ") disconnected";
-	  } else {
-	    oss << "Executor on " << slave << " (" << slave->hostname
-		<< ") exited with status " << status;
+        Framework *framework = lookupFramework(fid);
+        if (framework != NULL) {
+	  // TODO(benh): Send the framework it's executor's exit status?
+          if (status == -1) {
+            LOG(INFO) << "Executor on " << slave << " (" << slave->hostname
+		      << ") disconnected";
+          } else {
+            LOG(INFO) << "Executor on " << slave << " (" << slave->hostname
+		      << ") exited with status " << status;
+          }
+
+	  // Collect all the lost tasks for this framework.
+	  set<Task*> tasks;
+	  foreachpair (_, Task* task, framework->tasks)
+	    if (task->slaveId == slave->id)
+	      tasks.insert(task);
+
+	  // Tell the framework they have been lost and remove them.
+	  foreach (Task* task, tasks) {
+	    send(framework->pid, pack<M2F_STATUS_UPDATE>(task->id, TASK_LOST,
+							 task->message));
+
+	    LOG(INFO) << "Removing " << task << " because of lost executor";
+	    removeTask(task, TRR_EXECUTOR_LOST);
 	  }
-	  terminateFramework(framework, status, oss.str());
+
+	  // TODO(benh): Might we still want something like M2F_EXECUTOR_LOST?
 	}
       }
       break;
@@ -874,7 +890,7 @@ void Master::rescindOffer(SlotOffer *offer)
 
 void Master::killTask(TaskInfo *task)
 {
-  LOG(FATAL) << "Killing " << task;
+  LOG(INFO) << "Killing " << task;
   Framework *framework = lookupFramework(task->frameworkId);
   Slave *slave = lookupSlave(task->slaveId);
   CHECK(framework != NULL);
