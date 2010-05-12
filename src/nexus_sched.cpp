@@ -111,7 +111,11 @@ protected:
       if (terminate)
         return;
 
-      switch(receive()) {
+      // TODO(benh): We need to break the receive loop every so often
+      // to check if 'terminate' has been set .. but rather than use a
+      // timeout in receive, maybe we should send a message.
+
+      switch(receive(1)) {
       case M2F_REGISTER_REPLY: {
         unpack<M2F_REGISTER_REPLY>(fid);
         invoke(bind(&Scheduler::registered, sched, driver, fid));
@@ -165,10 +169,13 @@ protected:
         break;
       }
 
-
       case PROCESS_EXIT: {
         const char* message = "connection to master failed";
         invoke(bind(&Scheduler::error, sched, driver, -1, message));
+        break;
+      }
+
+      case PROCESS_TIMEOUT: {
         break;
       }
 
