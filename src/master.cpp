@@ -26,7 +26,6 @@ using namespace nexus;
 using namespace nexus::internal;
 using namespace nexus::internal::master;
 
-
 namespace {
 
 // A process that periodically pings the master to check filter expiries, etc
@@ -652,13 +651,13 @@ void Master::operator () ()
           }
 
 	  // Collect all the lost tasks for this framework.
-	  set<Task*> tasks;
-	  foreachpair (_, Task* task, framework->tasks)
+	  set<TaskInfo*> tasks;
+	  foreachpair (_, TaskInfo* task, framework->tasks)
 	    if (task->slaveId == slave->id)
 	      tasks.insert(task);
 
 	  // Tell the framework they have been lost and remove them.
-	  foreach (Task* task, tasks) {
+	  foreach (TaskInfo* task, tasks) {
 	    send(framework->pid, pack<M2F_STATUS_UPDATE>(task->id, TASK_LOST,
 							 task->message));
 
