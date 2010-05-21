@@ -525,24 +525,35 @@ void Master::operator () ()
       SlaveID sid;
       unpack<SH2M_HEARTBEAT>(sid);
       Slave *slave = lookupSlave(sid);
-      if (slave != NULL)
-        //LOG(INFO) << "Received heartbeat for " << slave << " from " << from();
-        ;
-      else
+      if (slave != NULL) {
+        slave->lastHeartbeat = time(NULL);
+      } else {
         LOG(WARNING) << "Received heartbeat for UNKNOWN slave " << sid
                      << " from " << from();
+      }
       break;
     }
 
     case M2M_TIMER_TICK: {
-      LOG(INFO) << "Allocator timer tick";
+      unordered_map<SlaveID, Slave *> slavesCopy = slaves;
+      foreachpair (_, Slave *slave, slavesCopy) {
+	if (slave->lastHeartbeat + HEARTBEAT_TIMEOUT <= time(NULL)) {
+	  LOG(INFO) << slave << " missing heartbeats ... considering disconnected";
+	  removeSlave(slave);
+	}
+      }
+
+      // Check which framework filters can be expired.
       foreachpair (_, Framework *framework, frameworks)
         framework->removeExpiredFilters();
+
+      // Do allocations!
       allocator->timerTick();
       break;
     }
 
     case PROCESS_EXIT: {
+      // TODO(benh): Could we get PROCESS_EXIT from a network partition?
       LOG(INFO) << "Process exited: " << from();
       if (pidToFid.find(from()) != pidToFid.end()) {
         FrameworkID fid = pidToFid[from()];
