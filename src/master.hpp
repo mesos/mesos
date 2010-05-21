@@ -62,6 +62,8 @@ const int32_t MAX_CPUS = 1000 * 1000;
 // Maximum amount of memory / machine.
 const int64_t MAX_MEM = 1024LL * 1024LL * 1024LL * 1024LL * 1024LL;
 
+// Acceptable time since we saw the last heartbeat.
+const time_t HEARTBEAT_TIMEOUT = 4;
 
 // Some forward declarations
 class Slave;
@@ -208,6 +210,7 @@ struct Slave
   string hostname;
   string publicDns;
   time_t connectTime;
+  time_t lastHeartbeat;
   
   Resources resources;        // Total resources on slave
   Resources resourcesOffered; // Resources currently in offers
@@ -217,7 +220,7 @@ struct Slave
   unordered_set<SlotOffer *> slotOffers; // Active offers of slots on this slave
   
   Slave(const PID &_pid, SlaveID _id) : pid(_pid), id(_id), active(true) {
-    time(&connectTime);
+    connectTime = lastHeartbeat = time(NULL);
   }
 
   Task * lookupTask(FrameworkID fid, TaskID tid)
