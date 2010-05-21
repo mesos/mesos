@@ -55,6 +55,11 @@ protected:
     link(slave);
     send(slave, pack<E2S_REGISTER_EXECUTOR>(fid));
     while(true) {
+      // TODO(benh): Is there a better way to architect this code? In
+      // particular, if the executor blocks in a callback, we can't
+      // process any other messages. This is especially tricky if a
+      // slave dies since we won't handle the PROCESS_EXIT message in
+      // a timely manner (if at all).
       switch(receive()) {
         case S2E_REGISTER_REPLY: {
           string name;
@@ -105,7 +110,7 @@ protected:
 	  // ourself) hoping to clean up any processes this executor
 	  // launched itself.
 	  // TODO(benh): Maybe do a SIGTERM and then later do a SIGKILL?
-	  killpg(getpid(), SIGKILL);
+	  killpg(0, SIGKILL);
         }
 
         default: {
