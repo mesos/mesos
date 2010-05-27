@@ -57,7 +57,7 @@ void SimpleAllocator::taskRemoved(Task* task, TaskRemovalReason reason)
   refusers[slave].clear();
   // Re-offer the resources, unless this task was removed due to a lost
   // slave or a lost framework (in which case we'll get another callback)
-  if (reason == TRR_TASK_ENDED)
+  if (reason == TRR_TASK_ENDED || reason == TRR_EXECUTOR_LOST)
     makeNewOffers(slave);
 }
 
@@ -162,8 +162,6 @@ void SimpleAllocator::makeNewOffers(Slave* slave)
 
 void SimpleAllocator::makeNewOffers(const vector<Slave*>& slaves)
 {
-  LOG(INFO) << "Running makeNewOffers...";
-  
   // Get an ordering of frameworks to send offers to
   vector<Framework*> ordering = getAllocationOrdering();
   if (ordering.size() == 0)

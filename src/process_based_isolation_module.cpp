@@ -43,14 +43,14 @@ ProcessBasedIsolationModule::~ProcessBasedIsolationModule()
 
 void ProcessBasedIsolationModule::frameworkAdded(Framework* framework)
 {
-  osPid[framework->id] = -1;
+  pgids[framework->id] = -1;
   framework->executorStatus = "No executor running";
 }
 
 
 void ProcessBasedIsolationModule::frameworkRemoved(Framework* framework)
 {
-  osPid.erase(framework->id);
+  pgids.erase(framework->id);
 }
 
 
@@ -58,19 +58,23 @@ void ProcessBasedIsolationModule::startExecutor(Framework* framework)
 {
   LOG(INFO) << "Starting executor for framework " << framework->id << ": "
             << framework->executorInfo.uri;
-  CHECK(osPid[framework->id] == -1);
+  CHECK(pgids[framework->id] == -1);
 
   pid_t pid;
   if ((pid = fork()) == -1)
     PLOG(FATAL) << "Failed to fork to launch new executor";
 
   if (pid) {
-    // In parent process
+    // In parent process, record the gpid for killpg later (the pid is
+    // the gpid because the child does a setsid below).
     LOG(INFO) << "Started executor, OS pid = " << pid;
-    osPid[framework->id] = pid;
+    pgids[framework->id] = pid;
     framework->executorStatus = "PID: " + lexical_cast<string>(pid);
   } else {
-    // In child process
+    // In child process, do setsid to make cleanup easier.
+    if ((pid = setsid()) == -1)
+      perror("setsid error");
+
     createExecutorLauncher(framework)->run();
   }
 }
@@ -78,12 +82,19 @@ void ProcessBasedIsolationModule::startExecutor(Framework* framework)
 
 void ProcessBasedIsolationModule::killExecutor(Framework* fw)
 {
-  if (osPid[fw->id] != -1) {
-    LOG(INFO) << "Sending SIGTERM to pid " << osPid[fw->id];
-    kill(osPid[fw->id], SIGKILL);
-    osPid[fw->id] = -1;
+  if (pgids[fw->id] != -1) {
+    // TODO(benh): Consider sending a SIGTERM, then after so much time
+    // if it still hasn't exited do a SIGKILL (can use a libprocess
+    // process for this).
+    LOG(INFO) << "Sending SIGKILL to gpid " << pgids[fw->id];
+    killpg(pgids[fw->id], SIGKILL);
+    pgids[fw->id] = -1;
     fw->executorStatus = "No executor running";
-    // TODO: Kill all of the process's descendants?
+    // TODO(benh): Kill all of the process's descendants? Perhaps
+    // create a new libprocess process that continually tries to kill
+    // all the processes that are a descendant of the executor, trying
+    // to kill the executor last ... maybe this is just too much of a
+    // burden?
   }
 }
 
@@ -117,9 +128,14 @@ void ProcessBasedIsolationModule::Reaper::operator () ()
       pid_t pid;
       int status;
       if ((pid = waitpid((pid_t) -1, &status, WNOHANG)) > 0) {
-	foreachpair (FrameworkID fid, pid_t& fwPid, module->osPid) {
-	  if (fwPid == pid) {
-	    module->osPid[fid] = -1;
+	foreachpair (FrameworkID fid, pid_t& pgid, module->pgids) {
+	  if (pgid == pid) {
+	    // Kill the process group to clean up the tasks.
+	    LOG(INFO) << "Sending SIGKILL to gpid " << pgid;
+	    killpg(pgid, SIGKILL);
+	    module->pgids[fid] = -1;
+	    LOG(INFO) << "Telling slave of lost framework " << fid;
+	    // TODO(benh): This is broken if/when libprocess is parallel!
 	    module->slave->executorExited(fid, status);
 	    break;
 	  }

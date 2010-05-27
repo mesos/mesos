@@ -413,16 +413,32 @@ void Master::operator () ()
       if (slave != NULL) {
         Framework *framework = lookupFramework(fid);
         if (framework != NULL) {
-          ostringstream oss;
+	  // TODO(benh): Send the framework it's executor's exit status?
           if (status == -1) {
-            oss << "Executor on " << slave << " (" << slave->hostname
-                << ") disconnected";
+            LOG(INFO) << "Executor on " << slave << " (" << slave->hostname
+		      << ") disconnected";
           } else {
-            oss << "Executor on " << slave << " (" << slave->hostname
-                << ") exited with status " << status;
+            LOG(INFO) << "Executor on " << slave << " (" << slave->hostname
+		      << ") exited with status " << status;
           }
-          terminateFramework(framework, status, oss.str());
-        }
+
+	  // Collect all the lost tasks for this framework.
+	  set<Task*> tasks;
+	  foreachpair (_, Task* task, framework->tasks)
+	    if (task->slaveId == slave->id)
+	      tasks.insert(task);
+
+	  // Tell the framework they have been lost and remove them.
+	  foreach (Task* task, tasks) {
+	    send(framework->pid, pack<M2F_STATUS_UPDATE>(task->id, TASK_LOST,
+							 task->message));
+
+	    LOG(INFO) << "Removing " << task << " because of lost executor";
+	    removeTask(task, TRR_EXECUTOR_LOST);
+	  }
+
+	  // TODO(benh): Might we still want something like M2F_EXECUTOR_LOST?
+	}
       }
       break;
     }
@@ -431,24 +447,35 @@ void Master::operator () ()
       SlaveID sid;
       unpack<SH2M_HEARTBEAT>(sid);
       Slave *slave = lookupSlave(sid);
-      if (slave != NULL)
-        //LOG(INFO) << "Received heartbeat for " << slave << " from " << from();
-        ;
-      else
+      if (slave != NULL) {
+        slave->lastHeartbeat = time(NULL);
+      } else {
         LOG(WARNING) << "Received heartbeat for UNKNOWN slave " << sid
                      << " from " << from();
+      }
       break;
     }
 
     case M2M_TIMER_TICK: {
-      LOG(INFO) << "Allocator timer tick";
+      unordered_map<SlaveID, Slave *> slavesCopy = slaves;
+      foreachpair (_, Slave *slave, slavesCopy) {
+	if (slave->lastHeartbeat + HEARTBEAT_TIMEOUT <= time(NULL)) {
+	  LOG(INFO) << slave << " missing heartbeats ... considering disconnected";
+	  removeSlave(slave);
+	}
+      }
+
+      // Check which framework filters can be expired.
       foreachpair (_, Framework *framework, frameworks)
         framework->removeExpiredFilters();
+
+      // Do allocations!
       allocator->timerTick();
       break;
     }
 
     case PROCESS_EXIT: {
+      // TODO(benh): Could we get PROCESS_EXIT from a network partition?
       LOG(INFO) << "Process exited: " << from();
       if (pidToFid.find(from()) != pidToFid.end()) {
         FrameworkID fid = pidToFid[from()];

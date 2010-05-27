@@ -40,7 +40,7 @@ protected:
   {
     link(slave);
     do {
-      switch (receive(5)) {
+      switch (receive(2)) {
       case PROCESS_TIMEOUT:
 	send(master, pack<SH2M_HEARTBEAT>(sid));
 	break;
@@ -281,8 +281,11 @@ void Slave::operator () ()
           if (from() == ex->pid) {
             LOG(INFO) << "Executor for framework " << ex->frameworkId
                       << " disconnected";
-            send(master, pack<S2M_LOST_EXECUTOR>(id, ex->frameworkId, -1));
-            removeExecutor(ex->frameworkId, true);
+	    Framework *framework = getFramework(fid);
+	    if (framework != NULL) {
+	      send(master, pack<S2M_LOST_EXECUTOR>(id, ex->frameworkId, -1));
+	      killFramework(framework);
+	    }
             break;
           }
         }
