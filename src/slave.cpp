@@ -45,7 +45,7 @@ protected:
   {
     link(slave);
     do {
-      switch (receive(5)) {
+      switch (receive(2)) {
       case PROCESS_TIMEOUT:
 	send(master, pack<SH2M_HEARTBEAT>(sid));
 	break;
