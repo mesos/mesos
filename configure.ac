@@ -16,7 +16,7 @@ AC_CONFIG_FILES([Makefile src/Makefile src/config.hpp])
 AC_CONFIG_SUBDIRS([src/third_party/libprocess])
 AC_CONFIG_SUBDIRS([src/third_party/gtest-1.4.0-patched])
 AC_CONFIG_SUBDIRS([src/third_party/glog-0.3.0])
-AC_CONFIG_SUBDIRS([src/third_party/zookeeper-3.3.0/src/c])
+AC_CONFIG_SUBDIRS([src/third_party/zookeeper-3.3.1/src/c])
 
 AC_CANONICAL_SYSTEM
 
