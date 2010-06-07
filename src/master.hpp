@@ -27,7 +27,7 @@
 #include "messages.hpp"
 #include "params.hpp"
 #include "resources.hpp"
-#include "leader_detector.hpp"
+#include "master_detector.hpp"
 #include "task_info.hpp"
 #include "url_processor.hpp"
 #include "ft_messaging.hpp"
@@ -266,7 +266,7 @@ class Master : public Tuple<Process>
 protected:
   bool isFT;
   string zkServers;
-  LeaderDetector *leaderDetector;
+  MasterDetector *masterDetector;
   unordered_map<FrameworkID, Framework *> frameworks;
   unordered_map<SlaveID, Slave *> slaves;
   unordered_map<OfferID, SlotOffer *> slotOffers;

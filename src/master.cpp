@@ -6,7 +6,6 @@
 
 #include <glog/logging.h>
 
-
 using std::endl;
 using std::max;
 using std::min;
@@ -25,6 +24,7 @@ using boost::unordered_set;
 using namespace nexus;
 using namespace nexus::internal;
 using namespace nexus::internal::master;
+
 
 namespace {
 
@@ -111,7 +111,7 @@ public:
 
 
 Master::Master(const string &zk)
-  : leaderDetector(NULL), nextFrameworkId(0), nextSlaveId(0), 
+  : masterDetector(NULL), nextFrameworkId(0), nextSlaveId(0), 
     nextSlotOfferId(0), allocatorType("simple"), masterId(0)
 {
   if (zk != "") {
@@ -129,7 +129,7 @@ Master::Master(const string &zk)
 
 
 Master::Master(const string& _allocatorType, const string &zk)
-  : leaderDetector(NULL), nextFrameworkId(0), nextSlaveId(0), 
+  : masterDetector(NULL), nextFrameworkId(0), nextSlaveId(0), 
     nextSlotOfferId(0), allocatorType(_allocatorType), masterId(0)
 {
   if (zk != "") {
@@ -148,8 +148,8 @@ Master::Master(const string& _allocatorType, const string &zk)
 
 Master::~Master()
 {
-  if (isFT && leaderDetector != NULL)
-    delete leaderDetector;
+  if (isFT && masterDetector != NULL)
+    delete masterDetector;
   LOG(INFO) << "Shutting down master";
   delete allocator;
   foreachpair (_, Framework *framework, frameworks) {
@@ -281,21 +281,9 @@ void Master::operator () ()
 {
   LOG(INFO) << "Master started at nexus://" << self();
 
-  if (isFT) {
-    LOG(INFO) << "Connecting to ZooKeeper at " << zkServers;
-    ostringstream lpid;
-    lpid << self();
-    leaderDetector = new LeaderDetector(zkServers, true, lpid.str());
-    
-    string myLeaderSeq = leaderDetector->getMySeq();
-    if (myLeaderSeq == "") {
-      LOG(FATAL) << "Cannot proceed since new FT master sequence number could not be fetched from ZK.";
-      exit(1);
-    }
-    masterId = lexical_cast<long>(myLeaderSeq);
-    LOG(INFO) << "Master ID:" << masterId;
-  }
-
+  LOG(INFO) << "Connecting to ZooKeeper at " << zkServers;
+  masterDetector = new MasterDetector(zkServers, ZNODE, self(), true);
+  
   allocator = createAllocator();
   if (!allocator)
     LOG(FATAL) << "Unrecognized allocator type: " << allocatorType;
@@ -305,6 +293,15 @@ void Master::operator () ()
 
   while (true) {
     switch (receive()) {
+
+    case GOT_MASTER_SEQ: {
+      // TODO(benh|alig): NEED TO GET SEQ BEFORE ANYONE ELSE CONNECTS!
+      string mySeq;
+      unpack<GOT_MASTER_SEQ>(mySeq);
+      masterId = lexical_cast<long>(mySeq);
+      LOG(INFO) << "Master ID:" << masterId;
+      break;
+    }
 
     case F2M_REGISTER_FRAMEWORK: {
       FrameworkID fid = lexical_cast<string>(masterId) + "-" + lexical_cast<string>(nextFrameworkId++);

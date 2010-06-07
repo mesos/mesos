@@ -1,6 +1,3 @@
-
-#define FT_TIMEOUT 10
-
 #include <dlfcn.h>
 #include <errno.h>
 #include <pwd.h>
@@ -30,8 +27,9 @@
 #include "nexus_local.hpp"
 #include "nexus_sched.hpp"
 #include "url_processor.hpp"
-#include "leader_detector.hpp"
+#include "master_detector.hpp"
 #include "ft_messaging.hpp"
+
 
 using std::cerr;
 using std::cout;
@@ -75,7 +73,7 @@ private:
   ExecutorInfo execInfo;
   bool isFT;
   string zkServers;
-  LeaderDetector *leaderDetector;
+  MasterDetector *masterDetector;
   FTMessaging *ftMsg;
 
   typedef unordered_map< SlaveID, PID > SidToPidMap;
@@ -84,30 +82,6 @@ private:
 
   volatile bool terminate;
 
-  class SchedLeaderListener;
-  friend class SchedLeaderListener;
-
-  class SchedLeaderListener : public LeaderListener {
-  public:
-    // Need to be thread safe. Currently does not use any shared variables. 
-    SchedLeaderListener(SchedulerProcess *s, PID pp) : parent(s), parentPID(pp) {}
-    
-    virtual void newLeaderElected(const string &zkId, const string &pidStr) {
-      if (zkId != "") {
-	LOG(INFO) << "Leader listener detected leader at " << pidStr <<" with ephemeral id:" << zkId;
-	
-	LOG(INFO) << "Sending message to parent " << parentPID << " about new leader";
-	parent->send(parentPID, parent->pack<LE_NEWLEADER>(pidStr));
-
-      }
-    }
-
-  private:
-    SchedulerProcess *parent;
-    PID parentPID;
-  } schedLeaderListener;
-
-  
   class TimeoutListener;
   friend class TimeoutListener;
 
@@ -140,8 +114,7 @@ public:
       terminate(false),
       frameworkName(_frameworkName),
       execInfo(_execInfo),
-      leaderDetector(NULL),
-      schedLeaderListener(this, getPID())
+      masterDetector(NULL)
 {
   pair<UrlProcessor::URLType, string> urlPair = UrlProcessor::process(_master);
   if (urlPair.first == UrlProcessor::ZOO) {
@@ -170,24 +143,8 @@ protected:
       fatal("failed to get username information");
     string user(passwd->pw_name);
 
-    if (isFT) {
-      LOG(INFO) << "Connecting to ZooKeeper at " << zkServers;
-      leaderDetector = new LeaderDetector(zkServers, false, "", NULL);
-      leaderDetector->setListener(&schedLeaderListener); // use this instead of constructor to avoid race condition
-
-      string leaderPidStr = leaderDetector->getCurrentLeaderPID();
-      string leaderSeq = leaderDetector->getCurrentLeaderSeq();
-      LOG(INFO) << "Detected leader at " << leaderPidStr << " with ephemeral id:" << leaderSeq;
-      
-      istringstream iss(leaderPidStr);
-      if (!(iss >> master)) {
-        cerr << "Failed to resolve master PID " << leaderPidStr << endl;
-      }    
-    }
-
-    link(master);
-    ftMsg->setMasterPid(master);
-    send(master, pack<F2M_REGISTER_FRAMEWORK>(frameworkName, user, execInfo));
+    LOG(INFO) << "Connecting to ZooKeeper at " << zkServers;
+    masterDetector = new MasterDetector(zkServers, ZNODE, self(), false);
 
     while(true) {
       // Rather than send a message to this process when it is time to
@@ -210,6 +167,34 @@ protected:
       // to check if 'terminate' has been set .. but rather than use a
       // timeout in receive, maybe we should send a message.
 
+      case NEW_MASTER_DETECTED: {
+	string masterSeq;
+	PID masterPid;
+	unpack<NEW_MASTER_DETECTED>(masterSeq, masterPid);
+
+	LOG(INFO) << "New master at " << masterPid
+		  << " with ephemeral id:" << masterSeq;
+
+	// TODO(alig|benh): Use new API -> redirect(master, masterPid);
+	master = masterPid;
+	ftMsg->setMasterPid(master);
+	link(master);
+
+	if (fid.empty()) {
+	  // Touched for the very first time.
+	  send(master, pack<F2M_REGISTER_FRAMEWORK>(frameworkName, user, execInfo));	  
+	} else {
+	  // Not the first time.
+	  send(master, pack<F2M_REREGISTER_FRAMEWORK>(fid, frameworkName, user, execInfo));
+	}
+	break;
+      }
+
+      case NO_MASTER_DETECTED: {
+	// TODO(alig): Do we want to do anything here?
+	break;
+      }
+
       case M2F_REGISTER_REPLY: {
         unpack<M2F_REGISTER_REPLY>(fid);
         invoke(bind(&Scheduler::registered, sched, driver, fid));
@@ -221,7 +206,6 @@ protected:
         vector<SlaveOffer> offs;
         unpack<M2F_SLOT_OFFER>(oid, offs);
         
-        savedOffers[ oid ] = SidToPidMap();
         SidToPidMap &tmpMap = savedOffers[ oid ];
         foreach(const SlaveOffer &offer, offs) {
           tmpMap[ offer.slaveId ] = offer.slavePid;
@@ -235,15 +219,18 @@ protected:
         OfferID oid;
         vector<TaskDescription> tasks;
         Params params;
-        vector<SlaveOffer> offs;
         unpack<F2F_SLOT_OFFER_REPLY>(oid, tasks, params);
 
+	// Save only the PIDs we need for sending framework messages.
         foreach(const TaskDescription &task, tasks) {
           sidToPidMap[ task.slaveId ] = savedOffers[ oid ][ task.slaveId ];
 
         }
         savedOffers.erase( oid );
 
+	// TODO(alig|benh): Use new API -> rsend(master, pack<F2M_SLOT_OFFER_REPLY>(fid, oid, tasks, params));
+	// TODO(alig): Improve the following comment.
+	// Do a reliable send here because ...
         if (isFT) {
           TimeoutListener *tListener = 
             new TimeoutListener(this, tasks);
@@ -255,7 +242,7 @@ protected:
                                tListener);
         } else
           send(master, pack<F2M_SLOT_OFFER_REPLY>(fid, oid, tasks, params));
-
+	
         break;
       }
 
@@ -355,28 +342,6 @@ protected:
 	      invoke(bind(&Scheduler::error, sched, driver, -1, message));
 	   }
         break;
-      }
-
-      case LE_NEWLEADER: {
-        LOG(INFO) << "Slave got notified of new leader " << from();
-	string newLeader;
-        unpack<LE_NEWLEADER>(newLeader);
-	istringstream iss(newLeader);
-	if (!(iss >> master)) {
-	  cerr << "Failed to resolve master PID " << newLeader << endl;
-	  break;
-	}    
-	
-	LOG(INFO) << "Connecting to Nexus master at " << master;
-	link(master);
-        ftMsg->setMasterPid(master);
-
-        if (fid != "")  // actual re-register to a new master leader
-          send(master, pack<F2M_REREGISTER_FRAMEWORK>(fid, frameworkName, user, execInfo));
-        else            // not really a re-register, scheduler started before master
-          send(master, pack<F2M_REGISTER_FRAMEWORK>(frameworkName, user, execInfo));
-
-	break;
       }
 
       case FT_RELAY_ACK: {

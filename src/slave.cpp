@@ -64,9 +64,8 @@ public:
 
 
 Slave::Slave(const string &_master, Resources _resources, bool _local)
-  : leaderDetector(NULL), 
-    resources(_resources), local(_local), id(""),
-    isolationType("process"), isolationModule(NULL), slaveLeaderListener(this, getPID())
+  : masterDetector(NULL), resources(_resources), local(_local), id(""),
+    isolationType("process"), isolationModule(NULL)
 {
   ftMsg = FTMessaging::getInstance();
   pair<UrlProcessor::URLType, string> urlPair = UrlProcessor::process(_master);
@@ -87,9 +86,8 @@ Slave::Slave(const string &_master, Resources _resources, bool _local)
 
 Slave::Slave(const string &_master, Resources _resources, bool _local,
 	     const string &_isolationType)
-  : leaderDetector(NULL), 
-    resources(_resources), local(_local), id(""),
-    isolationType(_isolationType), isolationModule(NULL), slaveLeaderListener(this, getPID())
+  : masterDetector(NULL), resources(_resources), local(_local), id(""),
+    isolationType(_isolationType), isolationModule(NULL)
 {
   ftMsg = FTMessaging::getInstance();
   pair<UrlProcessor::URLType, string> urlPair = UrlProcessor::process(_master);
@@ -107,7 +105,10 @@ Slave::Slave(const string &_master, Resources _resources, bool _local,
   }
 }
 
-Slave::~Slave() {}
+Slave::~Slave()
+{
+  delete masterDetector;
+}
 
 
 state::SlaveState *Slave::getState()
@@ -140,20 +141,8 @@ void Slave::operator () ()
 {
   LOG(INFO) << "Slave started at " << self();
 
-  if (isFT) {
-    LOG(INFO) << "Connecting to ZooKeeper at " << zkServers;
-    leaderDetector = new LeaderDetector(zkServers, false, "", NULL);
-    leaderDetector->setListener(&slaveLeaderListener); // use this instead of constructor to avoid race condition
-
-    string leaderPidStr = leaderDetector->getCurrentLeaderPID();
-    string leaderSeq = leaderDetector->getCurrentLeaderSeq();
-    LOG(INFO) << "Detected leader at " << leaderPidStr << " with ephemeral id:" << leaderSeq;
-
-    istringstream iss(leaderPidStr);
-    if (!(iss >> master)) {
-      cerr << "Failed to resolve master PID " << leaderPidStr << endl;
-    }    
-  }
+  LOG(INFO) << "Connecting to ZooKeeper at " << zkServers;
+  masterDetector = new MasterDetector(zkServers, ZNODE, self(), false);
 
   // Get our hostname
   char buf[256];
@@ -168,13 +157,6 @@ void Slave::operator () ()
   if (!publicDns) {
     publicDns = hostname;
   }
-
-  LOG(INFO) << "Connecting to Nexus master at " << master;
-  link(master);
-
-  ftMsg->setMasterPid(master);
-
-  send(master, pack<S2M_REGISTER_SLAVE>(hostname, publicDns, resources));
   
   FrameworkID fid;
   TaskID tid;
@@ -185,6 +167,44 @@ void Slave::operator () ()
 
   while (true) {
     switch (receive(FT_TIMEOUT)) {
+      case NEW_MASTER_DETECTED: {
+	string masterSeq;
+	PID masterPid;
+	LOG(INFO) << "New master at " << masterPid
+		  << " with ephemeral id:" << masterSeq;
+
+	// TODO(alig|benh): Use new API -> redirect(master, masterPid);
+	master = masterPid;
+	ftMsg->setMasterPid(master);
+	link(master);
+
+	if (id.empty()) {
+	  // Slave started before master.
+	  send(master, pack<S2M_REGISTER_SLAVE>(hostname, publicDns, resources));
+	} else {
+	  // Reconnecting, so reconstruct resourcesInUse for the master.
+	  Resources resourcesInUse; 
+	  vector<TaskInfo> taskVec;
+
+	  foreachpair(_, Framework *framework, frameworks) {
+	    foreachpair(_, TaskInfo *task, framework->tasks) {
+	      resourcesInUse += task->resources;
+	      TaskInfo ti = *task;
+	      ti.slaveId = id;
+	      taskVec.push_back(ti);
+	    }
+	  }
+
+	  send(master, pack<S2M_REREGISTER_SLAVE>(id, hostname, publicDns, resources, taskVec));
+	}
+	break;
+      }
+	
+      case NO_MASTER_DETECTED: {
+	// TODO(alig): Do anything here?
+	break;
+      }
+
       case M2S_REGISTER_REPLY: {
         unpack<M2S_REGISTER_REPLY>(this->id);
         LOG(INFO) << "Registered with master; given slave ID " << this->id;
@@ -268,7 +288,7 @@ void Slave::operator () ()
         if (Executor *ex = getExecutor(fid)) {
           send(ex->pid, pack<S2E_FRAMEWORK_MESSAGE>(message));
         }
-        // TODO(matei): If executor is not started, queue framework message?
+        // TODO(*): If executor is not started, queue framework message?
         // (It's probably okay to just drop it since frameworks can have
         // the executor send a message to the master to say when it's ready.)
         break;
@@ -279,7 +299,7 @@ void Slave::operator () ()
         if (Executor *ex = getExecutor(fid)) {
           send(ex->pid, pack<S2E_FRAMEWORK_MESSAGE>(message));
         }
-        // TODO(matei): If executor is not started, queue framework message?
+        // TODO(*): If executor is not started, queue framework message?
         // (It's probably okay to just drop it since frameworks can have
         // the executor send a message to the master to say when it's ready.)
         break;
@@ -413,43 +433,6 @@ void Slave::operator () ()
         return;
       }
 
-      case LE_NEWLEADER: {
-        LOG(INFO) << "Slave got notified of new leader " << from();
-	string newLeader;
-        unpack<LE_NEWLEADER>(newLeader);
-	istringstream iss(newLeader);
-	if (!(iss >> master)) {
-	  cerr << "Failed to resolve master PID " << newLeader << endl;
-	  break;
-	}    
-	
-	LOG(INFO) << "Connecting to Nexus master at " << master;
-	link(master);
-
-        ftMsg->setMasterPid(master);
-
-	// reconstruct resourcesInUse for the master
-	// alig: do I need to include queuedTasks in this number? Don't think so.
-	Resources resourcesInUse; 
-	vector<TaskInfo> taskVec;
-
-	foreachpair(_, Framework *framework, frameworks) {
-	  foreachpair(_, TaskInfo *task, framework->tasks) {
-	    resourcesInUse += task->resources;
-	    TaskInfo ti = *task;
-	    ti.slaveId = id;
-	    taskVec.push_back(ti);
-	  }
-	}
-
-        if (id != "") // actual re-register
-          send(master, pack<S2M_REREGISTER_SLAVE>(id, hostname, publicDns, resources, taskVec));
-        else          // slave started before master
-          send(master, pack<S2M_REGISTER_SLAVE>(hostname, publicDns, resources));
-	
-	break;
-      }
-    
       case FT_RELAY_ACK: {
         string ftId, senderStr;
         unpack<FT_RELAY_ACK>(ftId, senderStr);
