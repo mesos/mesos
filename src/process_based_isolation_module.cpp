@@ -71,10 +71,10 @@ void ProcessBasedIsolationModule::startExecutor(Framework* framework)
     framework->executorStatus = "PID: " + lexical_cast<string>(pid);
   } else {
     // In child process, make cleanup easier.
-    if (setpgid(0, 0) < 0)
-      PLOG(FATAL) << "Failed to put executor in own process group";
-//     if ((pid = setsid()) == -1)
-//       PLOG(FATAL) << "Failed to put executor in own session";
+//     if (setpgid(0, 0) < 0)
+//       PLOG(FATAL) << "Failed to put executor in own process group";
+    if ((pid = setsid()) == -1)
+      PLOG(FATAL) << "Failed to put executor in own session";
 
     createExecutorLauncher(framework)->run();
   }
