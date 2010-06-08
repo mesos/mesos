@@ -276,7 +276,7 @@ void trampoline(int process0, int process1);
 
 PID make_pid(const char *str)
 {
-  PID pid;
+  PID pid = { 0 };
   std::istringstream iss(str);
   iss >> pid;
   return pid;
@@ -1234,7 +1234,7 @@ public:
   }
 
 
-  void receive(Process *process, time_t secs)
+  void receive(Process *process, double secs)
   {
     assert(process != NULL);
     if (secs > 0) {
@@ -1270,7 +1270,7 @@ public:
     }
   }
 #else
-  void receive(Process *process, time_t secs)
+  void receive(Process *process, double secs)
   {
     //cout << "ProcessManager::receive" << endl;
     assert(process != NULL);
@@ -1338,7 +1338,7 @@ public:
   }
 
 
-  void pause(Process *process, time_t secs)
+  void pause(Process *process, double secs)
   {
     assert(process != NULL);
 
@@ -1351,7 +1351,7 @@ public:
     }
   }
 #else
-  void pause(Process *process, time_t secs)
+  void pause(Process *process, double secs)
   {
     assert(process != NULL);
 
@@ -1600,7 +1600,7 @@ public:
     return !interrupted;
   }
 #else
-  bool await(Process *process, int fd, int op)
+  bool await(Process *process, int fd, int op, double secs, bool ignore)
   {
     assert(process != NULL);
 
@@ -1609,21 +1609,37 @@ public:
     if (fd < 0)
       return false;
 
-    /* Allocate/Initialize the watcher. */
-    ev_io *io_watcher = (ev_io *) malloc (sizeof (ev_io));
-
-    if ((op & Process::RDWR) == Process::RDWR)
-      ev_io_init(io_watcher, handle_await, fd, EV_READ | EV_WRITE);
-    else if ((op & Process::RDONLY) == Process::RDONLY)
-      ev_io_init(io_watcher, handle_await, fd, EV_READ);
-    else if ((op & Process::WRONLY) == Process::WRONLY)
-      ev_io_init(io_watcher, handle_await, fd, EV_WRITE);
-
-    /* Create tuple describing state (on heap in case we get interrupted). */
-    io_watcher->data = new tuple<Process *, int>(process, process->generation);
-
     process->lock();
     {
+      /* Consider a non-empty message queue as an immediate interrupt. */
+      if (!ignore && !process->msgs.empty()) {
+	process->unlock();
+	return false;
+      }
+
+      /* Allocate/Initialize the watcher. */
+      ev_io *io_watcher = (ev_io *) malloc(sizeof(ev_io));
+
+      if ((op & Process::RDWR) == Process::RDWR)
+	ev_io_init(io_watcher, handle_await, fd, EV_READ | EV_WRITE);
+      else if ((op & Process::RDONLY) == Process::RDONLY)
+	ev_io_init(io_watcher, handle_await, fd, EV_READ);
+      else if ((op & Process::WRONLY) == Process::WRONLY)
+	ev_io_init(io_watcher, handle_await, fd, EV_WRITE);
+
+      /* Tuple describing state (on heap in case we get interrupted). */
+      io_watcher->data =
+	new tuple<Process *, int>(process, process->generation);
+
+      timeout_t timeout;
+
+      if (secs > 0) {
+	/* Create timeout. */
+	timeout = create_timeout(process, secs);
+	/* Start the timeout. */
+	start_timeout(timeout);
+      }
+
       /* Enqueue the watcher. */
       acquire(io_watchersq);
       {
@@ -1638,7 +1654,12 @@ public:
       process->state = Process::AWAITING;
       swapcontext(&process->uctx, &proc_uctx_running);
       assert(process->state == Process::READY ||
+	     process->state == Process::TIMEDOUT ||
 	     process->state == Process::INTERRUPTED);
+
+      /* Attempt to cancel the timer if necessary. */
+      if (secs > 0 && process->state != Process::TIMEDOUT)
+	  cancel_timeout(timeout);
 
       if (process->state == Process::INTERRUPTED)
 	interrupted = true;
@@ -1697,10 +1718,13 @@ public:
 	/* N.B. Process may be RUNNING due to "outside" thread 'receive'. */
 	assert(process->state == Process::RUNNING ||
 	       process->state == Process::RECEIVING ||
+	       process->state == Process::AWAITING ||
+	       process->state == Process::INTERRUPTED ||
 	       process->state == Process::PAUSED);
-	process->state = Process::TIMEDOUT;
-	if (process->state != Process::RUNNING)
+	if (process->state != Process::RUNNING ||
+	    process->state != Process::INTERRUPTED)
 	  ProcessManager::instance()->enqueue(process);
+	process->state = Process::TIMEDOUT;
       }
     }
     process->unlock();
@@ -1720,7 +1744,7 @@ public:
   }
 
 
-  timeout_t create_timeout(Process *process, time_t secs)
+  timeout_t create_timeout(Process *process, double secs)
   {
     assert(process != NULL);
     ev_tstamp tstamp = ev_time() + secs;
@@ -1859,8 +1883,10 @@ static void handle_async(struct ev_loop *loop, ev_async *w, int revents)
   {
     if (update_timer) {
       if (!timers->empty()) {
-	timer_watcher.repeat = timers->begin()->first - ev_now(loop) > 0 ? : 0;
-	if (timer_watcher.repeat == 0) {
+	timer_watcher.repeat = timers->begin()->first - ev_now(loop);
+	/* If timer has elapsed feed the event immediately. */
+	if (timer_watcher.repeat <= 0) {
+	  timer_watcher.repeat = 0;
 	  ev_feed_event(loop, &timer_watcher, EV_TIMEOUT);
 	} else {
 	  ev_timer_again(loop, &timer_watcher);
@@ -2937,12 +2963,14 @@ void Process::send(const PID &to, MSGID id, const char *data, size_t length)
 }
 
 
-MSGID Process::receive(time_t secs)
+MSGID Process::receive(double secs)
 {
   //cout << "Process::receive(" << secs << ")" << endl;
   /* Free current message. */
-  if (current)
+  if (current != NULL) {
     free(current);
+    current = NULL;
+  }
 
   /* Check if there is a message queued. */
   if ((current = dequeue()) != NULL)
@@ -3010,7 +3038,7 @@ MSGID Process::receive(time_t secs)
 
 
 MSGID Process::call(const PID &to, MSGID id,
-		    const char *data, size_t length, time_t secs)
+		    const char *data, size_t length, double secs)
 {
   send(to, id, data, length);
   return receive(secs);
@@ -3019,7 +3047,7 @@ MSGID Process::call(const PID &to, MSGID id,
 
 const char * Process::body(size_t *length)
 {
-  if (current && current->len > 0) {
+  if (current != NULL && current->len > 0) {
     if (length != NULL)
       *length = current->len;
     return (char *) current + sizeof(struct msg);
@@ -3031,7 +3059,7 @@ const char * Process::body(size_t *length)
 }
 
 
-void Process::pause(time_t secs)
+void Process::pause(double secs)
 {
 #ifdef USE_LITHE
   /* TODO(benh): Handle non-libprocess task/ctx (i.e., proc_thread below). */
@@ -3056,9 +3084,16 @@ PID Process::link(const PID &to)
 }
 
 
-bool Process::await(int fd, int op)
+bool Process::await(int fd, int op, const timeval& tv)
 {
-  return ProcessManager::instance()->await(this, fd, op);
+  return await(fd, op, tv, true);
+}
+
+
+bool Process::await(int fd, int op, const timeval& tv, bool ignore)
+{
+  double secs = tv.tv_sec + (tv.tv_usec * 1e-6);
+  return ProcessManager::instance()->await(this, fd, op, secs, ignore);
 }
 
 

@@ -175,7 +175,7 @@ protected:
   MSGID receive();
 
   /* Blocks for message at most specified seconds. */
-  MSGID receive(time_t);
+  MSGID receive(double);
 
   /* Sends a message to PID and then blocks for a message indefinitely. */
   MSGID call(const PID &, MSGID);
@@ -184,13 +184,13 @@ protected:
   MSGID call(const PID &, MSGID, const char *data, size_t length);
 
   /* Sends, and then blocks for a message at most specified seconds. */
-  MSGID call(const PID &, MSGID, const char *data, size_t length, time_t);
+  MSGID call(const PID &, MSGID, const char *data, size_t length, double);
 
   /* Returns pointer and length of body of last dequeued (current) message. */
   const char * body(size_t *length);
 
   /* Blocks at least specified seconds (may block longer). */
-  void pause(time_t);
+  void pause(double);
 
   /* Links with the specified PID. */
   PID link(const PID &);
@@ -199,7 +199,10 @@ protected:
   enum { RDONLY = 01, WRONLY = 02, RDWR = 03 };
 
   /* Wait until operation is ready for file descriptor (or message received). */
-  bool await(int fd, int op);
+  bool await(int fd, int op, const timeval& tv);
+
+  /* Wait until operation is ready for file descriptor (or message received if not ignored). */
+  bool await(int fd, int op, const timeval& tv, bool ignore);
 
   /* Returns true if operation on file descriptor is ready. */
   bool ready(int fd, int op);
@@ -251,7 +254,7 @@ inline MSGID Process::call(const PID &to, MSGID id)
 inline MSGID Process::call(const PID &to, MSGID id,
 			   const char *data, size_t length)
 {
-  return call(to, id, NULL, 0, 0);
+  return call(to, id, data, length, 0);
 }
 
 
