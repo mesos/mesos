@@ -211,7 +211,7 @@ void Slave::operator () ()
       }
 	
       case NO_MASTER_DETECTED: {
-	// TODO(alig): Do anything here?
+	LOG(INFO) << "Lost master(s) ... waiting";
 	break;
       }
 
