@@ -37,7 +37,7 @@ public:
   
   virtual void slaveRemoved(Slave* slave);
   
-  virtual void taskRemoved(Task* task, TaskRemovalReason reason);
+  virtual void taskRemoved(TaskInfo* task, TaskRemovalReason reason);
 
   virtual void offerReturned(SlotOffer* offer,
                              OfferReturnReason reason,

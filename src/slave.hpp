@@ -34,6 +34,9 @@
 #include "params.hpp"
 #include "resources.hpp"
 #include "slave_state.hpp"
+#include "master_detector.hpp"
+#include "task_info.hpp"
+#include "ft_messaging.hpp"
 
 namespace nexus { namespace internal { namespace slave {
 
@@ -70,21 +73,6 @@ struct TaskDescription
 };
 
 
-// Information about a running or pending task.
-struct Task
-{ 
-  TaskID id;
-  FrameworkID frameworkId; // Which framework we belong to
-  Resources resources;
-  TaskState state;
-  string name;
-  string message;
-  
-  Task(TaskID _id, Resources _resources)
-    : id(_id), resources(_resources) {}
-};
-
-
 // Information about a framework
 struct Framework
 {
@@ -93,42 +81,43 @@ struct Framework
   string user;
   ExecutorInfo executorInfo;
   list<TaskDescription *> queuedTasks; // Holds tasks until executor starts
-  unordered_map<TaskID, Task *> tasks;
+  unordered_map<TaskID, TaskInfo *> tasks;
   Resources resources;
+  PID fwPid;
 
   // Information about the status of the executor for this framework, set by
   // the isolation module. For example, this might include a PID, a VM ID, etc.
   string executorStatus;
   
   Framework(FrameworkID _id, const string& _name, const string& _user,
-      const ExecutorInfo& _executorInfo)
-    : id(_id), name(_name), user(_user), executorInfo(_executorInfo) {}
+            const ExecutorInfo& _executorInfo, const PID& _fwPid)
+    : id(_id), name(_name), user(_user), executorInfo(_executorInfo), fwPid(_fwPid) {}
 
   ~Framework()
   {
     foreach(TaskDescription *desc, queuedTasks)
       delete desc;
-    foreachpair (_, Task *task, tasks)
+    foreachpair (_, TaskInfo *task, tasks)
       delete task;
   }
 
-  Task * lookupTask(TaskID tid)
+  TaskInfo * lookupTask(TaskID tid)
   {
-    unordered_map<TaskID, Task *>::iterator it = tasks.find(tid);
+    unordered_map<TaskID, TaskInfo *>::iterator it = tasks.find(tid);
     if (it != tasks.end())
       return it->second;
     else
       return NULL;
   }
 
-  Task * addTask(TaskID tid, const std::string& name, Resources res)
+  TaskInfo * addTask(TaskID tid, const std::string& name, Resources res)
   {
     if (tasks.find(tid) != tasks.end()) {
       // This should never happen - the master will make sure that it never
       // lets a framework launch two tasks with the same ID.
       LOG(FATAL) << "Task ID " << tid << "already exists in framework " << id;
     }
-    Task *task = new Task(tid, res);
+    TaskInfo *task = new TaskInfo(tid, res);
     task->frameworkId = id;
     task->state = TASK_STARTING;
     task->name = name;
@@ -150,7 +139,7 @@ struct Framework
     }
 
     // Remove it from tasks as well
-    unordered_map<TaskID, Task *>::iterator it = tasks.find(tid);
+    unordered_map<TaskID, TaskInfo *>::iterator it = tasks.find(tid);
     if (it != tasks.end()) {
       resources -= it->second->resources;
       delete it->second;
@@ -176,6 +165,9 @@ public:
   typedef unordered_map<FrameworkID, Framework*> FrameworkMap;
   typedef unordered_map<FrameworkID, Executor*> ExecutorMap;
   
+  bool isFT;
+  string zkServers;
+  MasterDetector *masterDetector;
   PID master;
   SlaveID id;
   Resources resources;
@@ -184,11 +176,12 @@ public:
   ExecutorMap executors;  // Invariant: framework will exist if executor exists
   string isolationType;
   IsolationModule *isolationModule;
-  
-public:
-  Slave(const PID &_master, Resources resources, bool _local);
+  FTMessaging *ftMsg;
 
-  Slave(const PID &_master, Resources resources, bool _local,
+public:
+  Slave(const string &_master, Resources resources, bool _local);
+
+  Slave(const string &_master, Resources resources, bool _local,
         const string& isolationType);
 
   virtual ~Slave();
@@ -224,6 +217,7 @@ protected:
   // Create the slave's isolation module; this method is virtual so that
   // it is easy to override in tests
   virtual IsolationModule * createIsolationModule();
+
 };
 
 }}}

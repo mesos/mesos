@@ -632,7 +632,7 @@ PYTHON_HEADERS
 RUBY_HEADERS
 WITH_WEBUI
 WEBUI_FLAGS
-WITH_ZOOKEEPER
+LOCAL_ZOOKEEPER
 CXX
 CXXFLAGS
 LDFLAGS
@@ -659,7 +659,8 @@ CC
 CFLAGS'
 ac_subdirs_all='src/third_party/libprocess
 src/third_party/gtest-1.4.0-patched
-src/third_party/glog-0.3.0'
+src/third_party/glog-0.3.0
+src/third_party/zookeeper-3.3.1/src/c'
 
 # Initialize some variables set by options.
 ac_init_help=
@@ -1237,7 +1238,7 @@ Optional Packages:
                           find Python headers in DIR
   --with-ruby-headers=DIR find Ruby headers in DIR
   --with-webui            enable web UI (requires Python)
-  --with-zookeeper        enable ZooKeeper support
+  --with-local-zookeeper  Use local ZooKeeper for building
 
 Some influential environment variables:
   CXX         C++ compiler command
@@ -1729,6 +1730,8 @@ subdirs="$subdirs src/third_party/gtest-1.4.0-patched"
 
 subdirs="$subdirs src/third_party/glog-0.3.0"
 
+subdirs="$subdirs src/third_party/zookeeper-3.3.1/src/c"
+
 
 # Make sure we can run config.sub.
 $SHELL "$ac_aux_dir/config.sub" sun4 >/dev/null 2>&1 ||
@@ -1976,21 +1979,20 @@ fi
 
 
 
-WITH_ZOOKEEPER="0"
+LOCAL_ZOOKEEPER="yes"
 
-# Check whether --with-zookeeper was given.
-if test "${with_zookeeper+set}" = set; then
-  withval=$with_zookeeper; case "$with_zookeeper" in
-		    yes) WITH_ZOOKEEPER="1" ;;
-                    no) WITH_ZOOKEEPER="0" ;;
+# Check whether --with-local-zookeeper was given.
+if test "${with_local_zookeeper+set}" = set; then
+  withval=$with_local_zookeeper; case "$with_local_zookeeper" in
+		    yes) WITH_LOCAL_ZOOKEEPER="yes" ;;
+                    no) WITH_LOCAL_ZOOKEEPER="no" ;;
 		    *) { { echo "$as_me:$LINENO: error:
-*** --with-zookeeper does not take arguments" >&5
+*** --with-local-zookeeper does not take arguments" >&5
 echo "$as_me: error:
-*** --with-zookeeper does not take arguments" >&2;}
+*** --with-local-zookeeper does not take arguments" >&2;}
    { (exit 1); exit 1; }; } ;;
 	          esac
 fi
-
 
 
 
@@ -3769,7 +3771,7 @@ PYTHON_HEADERS!$PYTHON_HEADERS$ac_delim
 RUBY_HEADERS!$RUBY_HEADERS$ac_delim
 WITH_WEBUI!$WITH_WEBUI$ac_delim
 WEBUI_FLAGS!$WEBUI_FLAGS$ac_delim
-WITH_ZOOKEEPER!$WITH_ZOOKEEPER$ac_delim
+LOCAL_ZOOKEEPER!$LOCAL_ZOOKEEPER$ac_delim
 CXX!$CXX$ac_delim
 CXXFLAGS!$CXXFLAGS$ac_delim
 LDFLAGS!$LDFLAGS$ac_delim

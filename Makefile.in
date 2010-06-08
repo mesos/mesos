@@ -32,6 +32,12 @@ dist:
 
 all: src
 
+doxygen:
+	doxygen
+
+etags:
+	find src -name "*.cpp" -o -name "*.hpp" | grep -v "\~$$" | xargs etags -o src/TAGS
+
 clean:
 	$(MAKE) -C src clean
 

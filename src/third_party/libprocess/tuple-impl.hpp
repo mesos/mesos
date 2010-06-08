@@ -51,117 +51,119 @@ at(const tuple<ID> &r)
 template <typename P>
 class Tuple : public P
 {
-protected:
+public:
   template <MSGID ID>
-  tuple<ID> pack()
+  static tuple<ID> pack()
   {
     return tuple<ID>(::boost::make_tuple());
   }
 
   template <MSGID ID>
-  tuple<ID> pack(typename field<0, ID>::type t0)
+  static tuple<ID> pack(typename field<0, ID>::type t0)
   {
     return tuple<ID>(::boost::make_tuple(t0));
   }
 
   template <MSGID ID>
-  tuple<ID> pack(typename field<0, ID>::type t0,
-		 typename field<1, ID>::type t1)
+  static tuple<ID> pack(typename field<0, ID>::type t0,
+			typename field<1, ID>::type t1)
   {
     return tuple<ID>(::boost::make_tuple(t0, t1));
   }
 
   template <MSGID ID>
-  tuple<ID> pack(typename field<0, ID>::type t0,
-		 typename field<1, ID>::type t1,
-		 typename field<2, ID>::type t2)
+  static tuple<ID> pack(typename field<0, ID>::type t0,
+			typename field<1, ID>::type t1,
+			typename field<2, ID>::type t2)
   {
     return tuple<ID>(::boost::make_tuple(t0, t1, t2));
   }
 
   template <MSGID ID>
-  tuple<ID> pack(typename field<0, ID>::type t0,
-		 typename field<1, ID>::type t1,
-		 typename field<2, ID>::type t2,
-		 typename field<3, ID>::type t3)
+  static tuple<ID> pack(typename field<0, ID>::type t0,
+			typename field<1, ID>::type t1,
+			typename field<2, ID>::type t2,
+			typename field<3, ID>::type t3)
   {
     return tuple<ID>(::boost::make_tuple(t0, t1, t2, t3));
   }
 
   template <MSGID ID>
-  tuple<ID> pack(typename field<0, ID>::type t0,
-		 typename field<1, ID>::type t1,
-		 typename field<2, ID>::type t2,
-		 typename field<3, ID>::type t3,
-		 typename field<4, ID>::type t4)
+  static tuple<ID> pack(typename field<0, ID>::type t0,
+			typename field<1, ID>::type t1,
+			typename field<2, ID>::type t2,
+			typename field<3, ID>::type t3,
+			typename field<4, ID>::type t4)
   {
     return tuple<ID>(::boost::make_tuple(t0, t1, t2, t3, t4));
   }
 
   template <MSGID ID>
-  tuple<ID> pack(typename field<0, ID>::type t0,
-		 typename field<1, ID>::type t1,
-		 typename field<2, ID>::type t2,
-		 typename field<3, ID>::type t3,
-		 typename field<4, ID>::type t4,
-		 typename field<5, ID>::type t5)
+  static tuple<ID> pack(typename field<0, ID>::type t0,
+			typename field<1, ID>::type t1,
+			typename field<2, ID>::type t2,
+			typename field<3, ID>::type t3,
+			typename field<4, ID>::type t4,
+			typename field<5, ID>::type t5)
   {
     return tuple<ID>(::boost::make_tuple(t0, t1, t2, t3, t4, t5));
   }
 
   template <MSGID ID>
-  tuple<ID> pack(typename field<0, ID>::type t0,
-		 typename field<1, ID>::type t1,
-		 typename field<2, ID>::type t2,
-		 typename field<3, ID>::type t3,
-		 typename field<4, ID>::type t4,
-		 typename field<5, ID>::type t5,
-		 typename field<6, ID>::type t6)
+  static tuple<ID> pack(typename field<0, ID>::type t0,
+			typename field<1, ID>::type t1,
+			typename field<2, ID>::type t2,
+			typename field<3, ID>::type t3,
+			typename field<4, ID>::type t4,
+			typename field<5, ID>::type t5,
+			typename field<6, ID>::type t6)
   {
     return tuple<ID>(::boost::make_tuple(t0, t1, t2, t3, t4, t5, t6));
   }
 
   template <MSGID ID>
-  tuple<ID> pack(typename field<0, ID>::type t0,
-		 typename field<1, ID>::type t1,
-		 typename field<2, ID>::type t2,
-		 typename field<3, ID>::type t3,
-		 typename field<4, ID>::type t4,
-		 typename field<5, ID>::type t5,
-		 typename field<6, ID>::type t6,
-		 typename field<7, ID>::type t7)
+  static tuple<ID> pack(typename field<0, ID>::type t0,
+			typename field<1, ID>::type t1,
+			typename field<2, ID>::type t2,
+			typename field<3, ID>::type t3,
+			typename field<4, ID>::type t4,
+			typename field<5, ID>::type t5,
+			typename field<6, ID>::type t6,
+			typename field<7, ID>::type t7)
   {
     return tuple<ID>(::boost::make_tuple(t0, t1, t2, t3, t4, t5, t6, t7));
   }
 
   template <MSGID ID>
-  tuple<ID> pack(typename field<0, ID>::type t0,
-		 typename field<1, ID>::type t1,
-		 typename field<2, ID>::type t2,
-		 typename field<3, ID>::type t3,
-		 typename field<4, ID>::type t4,
-		 typename field<5, ID>::type t5,
-		 typename field<6, ID>::type t6,
-		 typename field<7, ID>::type t7,
-		 typename field<8, ID>::type t8)
+  static tuple<ID> pack(typename field<0, ID>::type t0,
+			typename field<1, ID>::type t1,
+			typename field<2, ID>::type t2,
+			typename field<3, ID>::type t3,
+			typename field<4, ID>::type t4,
+			typename field<5, ID>::type t5,
+			typename field<6, ID>::type t6,
+			typename field<7, ID>::type t7,
+			typename field<8, ID>::type t8)
   {
     return tuple<ID>(::boost::make_tuple(t0, t1, t2, t3, t4, t5, t6, t7, t8));
   }
 
   template <MSGID ID>
-  tuple<ID> pack(typename field<0, ID>::type t0,
-		 typename field<1, ID>::type t1,
-		 typename field<2, ID>::type t2,
-		 typename field<3, ID>::type t3,
-		 typename field<4, ID>::type t4,
-		 typename field<5, ID>::type t5,
-		 typename field<6, ID>::type t6,
-		 typename field<7, ID>::type t7,
-		 typename field<8, ID>::type t8,
-		 typename field<9, ID>::type t9)
+  static tuple<ID> pack(typename field<0, ID>::type t0,
+			typename field<1, ID>::type t1,
+			typename field<2, ID>::type t2,
+			typename field<3, ID>::type t3,
+			typename field<4, ID>::type t4,
+			typename field<5, ID>::type t5,
+			typename field<6, ID>::type t6,
+			typename field<7, ID>::type t7,
+			typename field<8, ID>::type t8,
+			typename field<9, ID>::type t9)
   {
     return tuple<ID>(::boost::make_tuple(t0, t1, t2, t3, t4, t5, t6, t7, t8, t9));
   }
+
+protected:
 
   template <MSGID ID>
   void unpack(typename field<0, ID>::type &t0)
@@ -864,5 +866,128 @@ protected:
 	     double secs)
   {
     return call(to, pack<ID>(t0, t1, t2, t3, t4, t5, t6, t7, t8, t9), secs);
+  }
+
+public:
+  template <MSGID ID>
+  static void post(const PID &to, const tuple<ID> &r)
+  {
+    std::ostringstream os;
+
+    process::serialization::serializer s(os);
+
+    if (size<ID>::value >= 1) {
+      const typename field<0, ID>::type &temp = at<0>(r);
+      s & temp;
+    }
+
+    if (size<ID>::value >= 2) {
+      const typename field<1, ID>::type &temp = at<1>(r);
+      s & temp;
+    }
+ 
+    if (size<ID>::value >= 3) {
+      const typename field<2, ID>::type &temp = at<2>(r);
+      s & temp;
+    }
+
+    if (size<ID>::value >= 4) {
+      const typename field<3, ID>::type &temp = at<3>(r);
+      s & temp;
+    }
+
+    if (size<ID>::value >= 5) {
+      const typename field<4, ID>::type &temp = at<4>(r);
+      s & temp;
+    }
+
+    if (size<ID>::value >= 6) {
+      const typename field<5, ID>::type &temp = at<5>(r);
+      s & temp;
+    }
+
+    if (size<ID>::value >= 7) {
+      const typename field<6, ID>::type &temp = at<6>(r);
+      s & temp;
+    }
+
+    if (size<ID>::value >= 8) {
+      const typename field<7, ID>::type &temp = at<7>(r);
+      s & temp;
+    }
+
+    if (size<ID>::value >= 9) {
+      const typename field<8, ID>::type &temp = at<8>(r);
+      s & temp;
+    }
+
+    if (size<ID>::value >= 10) {
+      const typename field<9, ID>::type &temp = at<9>(r);
+      s & temp;
+    }
+
+    std::string data = os.str();
+
+    Process::post(to, ID, data.data(), data.size());    
+  }
+
+  template <MSGID ID>
+  static string tupleToString(const tuple<ID> &r)
+  {
+    std::ostringstream os;
+
+    process::serialization::serializer s(os);
+
+    if (size<ID>::value >= 1) {
+      const typename field<0, ID>::type &temp = at<0>(r);
+      s & temp;
+    }
+
+    if (size<ID>::value >= 2) {
+      const typename field<1, ID>::type &temp = at<1>(r);
+      s & temp;
+    }
+ 
+    if (size<ID>::value >= 3) {
+      const typename field<2, ID>::type &temp = at<2>(r);
+      s & temp;
+    }
+
+    if (size<ID>::value >= 4) {
+      const typename field<3, ID>::type &temp = at<3>(r);
+      s & temp;
+    }
+
+    if (size<ID>::value >= 5) {
+      const typename field<4, ID>::type &temp = at<4>(r);
+      s & temp;
+    }
+
+    if (size<ID>::value >= 6) {
+      const typename field<5, ID>::type &temp = at<5>(r);
+      s & temp;
+    }
+
+    if (size<ID>::value >= 7) {
+      const typename field<6, ID>::type &temp = at<6>(r);
+      s & temp;
+    }
+
+    if (size<ID>::value >= 8) {
+      const typename field<7, ID>::type &temp = at<7>(r);
+      s & temp;
+    }
+
+    if (size<ID>::value >= 9) {
+      const typename field<8, ID>::type &temp = at<8>(r);
+      s & temp;
+    }
+
+    if (size<ID>::value >= 10) {
+      const typename field<9, ID>::type &temp = at<9>(r);
+      s & temp;
+    }
+
+    return os.str();
   }
 };

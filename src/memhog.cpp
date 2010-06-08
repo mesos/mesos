@@ -61,6 +61,7 @@ public:
       int64_t mem = lexical_cast<int64_t>(offer.params.find("mem")->second);
       if ((tasksLaunched < totalTasks) && (cpus >= 1 && mem >= memToRequest)) {
         TaskID tid = tasksLaunched++;
+
         cout << endl << "accepting it to start task " << tid << endl;
         map<string, string> taskParams;
         taskParams["cpus"] = "1";
@@ -76,6 +77,10 @@ public:
 
   virtual void statusUpdate(SchedulerDriver* d, const TaskStatus& status) {
     cout << endl << "Task " << status.taskId << " is in state " << status.state << endl;
+    if (status.state == TASK_LOST) 
+       {
+	  cout << endl << "Task " << status.taskId << " lost. Not doing anything about it." << endl;
+       }
     if (status.state == TASK_FINISHED)
       tasksFinished++;
     if (tasksFinished == totalTasks)

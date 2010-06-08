@@ -30,13 +30,13 @@ public class TestFramework {
     }
 
     @Override
-    public void registered(SchedulerDriver d, int fid) {
+    public void registered(SchedulerDriver d, String fid) {
       System.out.println("Registered! FID = " + fid);
     }
 
     @Override
     public void resourceOffer(SchedulerDriver d,
-                              long oid,
+                              String oid,
                               SlaveOfferVector offers) {
       System.out.println("Got offer offer " + oid);
       TaskDescriptionVector tasks = new TaskDescriptionVector();
@@ -47,11 +47,12 @@ public class TestFramework {
         taskParams.set("cpus", "1");
         taskParams.set("mem", "134217728");
         System.out.println("Launching task " + taskId);
-        tasks.add(new TaskDescription(taskId,
+        tasks.add(new TaskDescription(launchedTasks,
                                       offer.getSlaveId(),
                                       "task " + taskId,
                                       taskParams,
                                       new byte[0]));
+	launchedTasks++;
       }
       StringMap params = new StringMap();
       params.set("timeout", "1");

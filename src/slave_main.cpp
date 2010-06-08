@@ -8,19 +8,19 @@ using namespace std;
 using namespace nexus::internal::slave;
 
 
-/* List of ZooKeeper host:port pairs. */
-string zookeeper = "";
-
-
 void usage(const char *programName)
 {
   cerr << "Usage: " << programName
        << " [--cpus NUM]"
        << " [--mem NUM]"
        << " [--isolation TYPE]"
-       << " [--zookeeper host:port]"
+       << " [--zookeeper ZOO_SERVERS]"
        << " [--quiet]"
        << " <master_pid>"
+       << endl
+       << "ZOO_SERVERS is a url of the form:"
+       << "  zoo://host1:port1,host2:port2,..., or"
+       << "  zoofile://file where file contains a host:port pair per line"
        << endl;
 }
 
@@ -42,13 +42,14 @@ int main(int argc, char **argv)
 
   Resources resources(1, 1 * Gigabyte);
   string isolation = "process";
+  string zookeeper = "";
   bool quiet = false;
 
   int opt;
   int index;
   while ((opt = getopt_long(argc, argv, "c:m:i:z:q", options, &index)) != -1) {
     switch (opt) {
-      case 'c':
+      case 'c': 
 	resources.cpus = atoi(optarg);
         break;
       case 'm':
@@ -58,13 +59,7 @@ int main(int argc, char **argv)
 	isolation = optarg;
         break;
       case 'z':
-#ifndef USING_ZOOKEEPER
-	cerr << "--zookeeper not supported in this build" << endl;
-	usage(argv[0]);
-	exit(1);
-#else
 	zookeeper = optarg;
-#endif
         break;
       case 'q':
         quiet = true;
@@ -80,6 +75,8 @@ int main(int argc, char **argv)
 
   if (!quiet)
     google::SetStderrLogging(google::INFO);
+  else
+    MasterDetector::setQuiet(true);
 
   FLAGS_log_dir = "/tmp";
   FLAGS_logbufsecs = 1;
@@ -92,21 +89,15 @@ int main(int argc, char **argv)
     exit(1);
   }
 
-  // Resolve the master PID.
-  PID master;
-
+  // Read the optional argument if necessary.
   if (zookeeper.empty()) {
-    istringstream iss(argv[optind]);
-    if (!(iss >> master)) {
-      cerr << "Failed to resolve master PID " << argv[optind] << endl;
-      exit(1);
-    }
+    zookeeper = argv[optind];
   }
 
   LOG(INFO) << "Build: " << BUILD_DATE << " by " << BUILD_USER;
   LOG(INFO) << "Starting Nexus slave";
 
-  Slave* slave = new Slave(master, resources, false, isolation);
+  Slave* slave = new Slave(zookeeper, resources, false, isolation);
   PID pid = Process::spawn(slave);
 
 #ifdef NEXUS_WEBUI

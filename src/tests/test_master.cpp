@@ -127,9 +127,9 @@ TEST(MasterTest, DuplicateTaskIdsInResponse)
   map<string, string> params;
   params["cpus"] = "1";
   params["mem"] = lexical_cast<string>(1 * Gigabyte);
-  tasks.push_back(TaskDescription(1, 0, "", params, ""));
-  tasks.push_back(TaskDescription(2, 0, "", params, ""));
-  tasks.push_back(TaskDescription(1, 0, "", params, ""));
+  tasks.push_back(TaskDescription(1, "0-0", "", params, ""));
+  tasks.push_back(TaskDescription(2, "0-0", "", params, ""));
+  tasks.push_back(TaskDescription(1, "0-0", "", params, ""));
   FixedResponseScheduler sched(tasks);
   NexusSchedulerDriver driver(&sched, master);
   driver.run();
@@ -146,7 +146,7 @@ TEST(MasterTest, TooMuchMemoryInTask)
   map<string, string> params;
   params["cpus"] = "1";
   params["mem"] = lexical_cast<string>(4 * Gigabyte);
-  tasks.push_back(TaskDescription(1, 0, "", params, ""));
+  tasks.push_back(TaskDescription(1, "0-0", "", params, ""));
   FixedResponseScheduler sched(tasks);
   NexusSchedulerDriver driver(&sched, master);
   driver.run();
@@ -163,7 +163,7 @@ TEST(MasterTest, TooMuchCpuInTask)
   map<string, string> params;
   params["cpus"] = "4";
   params["mem"] = lexical_cast<string>(1 * Gigabyte);
-  tasks.push_back(TaskDescription(1, 0, "", params, ""));
+  tasks.push_back(TaskDescription(1, "0-0", "", params, ""));
   FixedResponseScheduler sched(tasks);
   NexusSchedulerDriver driver(&sched, master);
   driver.run();
@@ -180,7 +180,7 @@ TEST(MasterTest, TooLittleCpuInTask)
   map<string, string> params;
   params["cpus"] = "0";
   params["mem"] = lexical_cast<string>(1 * Gigabyte);
-  tasks.push_back(TaskDescription(1, 0, "", params, ""));
+  tasks.push_back(TaskDescription(1, "0-0", "", params, ""));
   FixedResponseScheduler sched(tasks);
   NexusSchedulerDriver driver(&sched, master);
   driver.run();
@@ -197,7 +197,7 @@ TEST(MasterTest, TooLittleMemoryInTask)
   map<string, string> params;
   params["cpus"] = "1";
   params["mem"] = "1";
-  tasks.push_back(TaskDescription(1, 0, "", params, ""));
+  tasks.push_back(TaskDescription(1, "0-0", "", params, ""));
   FixedResponseScheduler sched(tasks);
   NexusSchedulerDriver driver(&sched, master);
   driver.run();
@@ -214,8 +214,8 @@ TEST(MasterTest, TooMuchMemoryAcrossTasks)
   map<string, string> params;
   params["cpus"] = "1";
   params["mem"] = lexical_cast<string>(2 * Gigabyte);
-  tasks.push_back(TaskDescription(1, 0, "", params, ""));
-  tasks.push_back(TaskDescription(2, 0, "", params, ""));
+  tasks.push_back(TaskDescription(1, "0-0", "", params, ""));
+  tasks.push_back(TaskDescription(2, "0-0", "", params, ""));
   FixedResponseScheduler sched(tasks);
   NexusSchedulerDriver driver(&sched, master);
   driver.run();
@@ -232,8 +232,8 @@ TEST(MasterTest, TooMuchCpuAcrossTasks)
   map<string, string> params;
   params["cpus"] = "2";
   params["mem"] = lexical_cast<string>(1 * Gigabyte);
-  tasks.push_back(TaskDescription(1, 0, "", params, ""));
-  tasks.push_back(TaskDescription(2, 0, "", params, ""));
+  tasks.push_back(TaskDescription(1, "0-0", "", params, ""));
+  tasks.push_back(TaskDescription(2, "0-0", "", params, ""));
   FixedResponseScheduler sched(tasks);
   NexusSchedulerDriver driver(&sched, master);
   driver.run();
@@ -272,7 +272,7 @@ TEST(MasterTest, ResourcesReofferedAfterBadResponse)
   map<string, string> params;
   params["cpus"] = "0";
   params["mem"] = lexical_cast<string>(1 * Gigabyte);
-  tasks.push_back(TaskDescription(1, 0, "", params, ""));
+  tasks.push_back(TaskDescription(1, "0-0", "", params, ""));
   FixedResponseScheduler sched1(tasks);
   NexusSchedulerDriver driver1(&sched1, master);
   driver1.run();
@@ -291,9 +291,11 @@ TEST(MasterTest, ResourcesReofferedAfterBadResponse)
 class SlaveLostScheduler : public Scheduler
 {
 public:
+  PID slave;
   bool slaveLostCalled;
   
-  SlaveLostScheduler() : slaveLostCalled(false) {}
+  SlaveLostScheduler(const PID &_slave)
+    : slave(_slave), slaveLostCalled(false) {}
 
   virtual ~SlaveLostScheduler() {}
 
@@ -305,8 +307,7 @@ public:
                              OfferID id,
                              const vector<SlaveOffer>& offers) {
     LOG(INFO) << "SlaveLostScheduler got a slot offer";
-    vector<TaskDescription> tasks;
-    d->replyToOffer(id, tasks, string_map());
+    Process::post(slave, S2S_SHUTDOWN);
   }
   
   void slaveLost(SchedulerDriver* d, SlaveID slaveId) {
@@ -326,19 +327,18 @@ TEST(MasterTest, SlaveLost)
   Slave s(master, Resources(2, 1 * Gigabyte), true);
   PID slave = Process::spawn(&s);
 
-  SlaveLostScheduler sched;
+  SlaveLostScheduler sched(slave);
+
   NexusSchedulerDriver driver(&sched, master);
-  driver.start();
-
-  Process::post(slave, S2S_SHUTDOWN);
-  Process::wait(slave);
-
-  driver.join();
-
-  // TODO(benh): Test lost slave due to missing heartbeats.
+  driver.run();
 
   EXPECT_TRUE(sched.slaveLostCalled);
+
+  Process::wait(slave);
 
   Process::post(master, M2M_SHUTDOWN);
   Process::wait(master);
 }
+
+
+/* TODO(benh): Test lost slave due to missing heartbeats. */
