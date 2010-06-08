@@ -24,7 +24,8 @@ LIBEV = third_party/libprocess/third_party/libev-3.8
 GLOG = third_party/glog-0.3.0
 GTEST = third_party/gtest-1.4.0-patched
 
-ZOOKEEPER = third_party/zookeeper-3.3.1/src/c
+ZOOKEEPER = @ZOOKEEPER@
+ZOOCOMPILE = @ZOOCOMPILE@
 
 # Ensure that we get better debugging info.
 CFLAGS += -g
@@ -252,7 +253,9 @@ third_party:
 	$(MAKE) -C third_party/libprocess
 	$(MAKE) -C $(GLOG)
 	$(MAKE) -C $(GTEST)
+ifeq ($(ZOOCOMPILE),yes)
 	$(MAKE) -C $(ZOOKEEPER)
+endif
 
 all: third_party $(NEXUS_LIBS) $(NEXUS_EXES) java python ruby
 
@@ -260,7 +263,9 @@ clean:
 	$(MAKE) -C third_party/libprocess clean
 	$(MAKE) -C $(GLOG) clean
 	$(MAKE) -C $(GTEST) clean
+ifeq ($(ZOOCOMPILE),yes)
 	$(MAKE) -C $(ZOOKEEPER) clean
+endif
 	rm -f $(patsubst %.o, %.d, $(ALL_OBJ))
 	rm -f $(ALL_OBJ)
 	rm -f $(NEXUS_LIBS)
