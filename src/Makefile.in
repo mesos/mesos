@@ -133,7 +133,7 @@ $(NEXUS_LIBS): $(COMMON_OBJ) third_party/libprocess/libprocess.a
 $(NEXUS_EXES): $(COMMON_OBJ) third_party/libprocess/libprocess.a
 
 $(SCHED_LIB): $(SCHED_LIB_OBJ) $(MASTER_OBJ) $(SLAVE_OBJ) $(COMMON_OBJ)
-	$(AR) rcs $@ $^ third_party/libprocess/libprocess.a $(GLOG)/.libs/libglog.a $(LIBEV)/.libs/libev.a $(ZOOKEEPER)/.libs/libzookeeper_st.a
+	$(AR) rcs $@ $^ third_party/libprocess/libprocess.a $(GLOG)/.libs/libglog.a $(LIBEV)/.libs/libev.a
 
 $(EXEC_LIB): $(EXEC_LIB_OBJ) $(COMMON_OBJ)
 	$(AR) rcs $@ $^
@@ -276,11 +276,22 @@ clean:
 	rm -f swig/java/*.class
 	rm -f swig/python/nexus.py
 	rm -f swig/python/nexus.pyc
+	rm -f master_webui.o
+	rm -f master_webui.d
 	rm -f webui/master/swig/master_wrap.h
 	rm -f webui/master/swig/master_wrap.cpp
 	rm -f webui/master/swig/master_wrap.o
+	rm -f webui/master/swig/master_wrap.d
 	rm -f webui/master/swig/master.py
 	rm -f webui/master/swig/master.pyc
+	rm -f slave_webui.o
+	rm -f slave_webui.d
+	rm -f webui/slave/swig/slave_wrap.h
+	rm -f webui/slave/swig/slave_wrap.cpp
+	rm -f webui/slave/swig/slave_wrap.o
+	rm -f webui/slave/swig/slave_wrap.d
+	rm -f webui/slave/swig/slave.py
+	rm -f webui/slave/swig/slave.pyc
 	rm -f TAGS
 
 .PHONY: default third_party all clean java python ruby test

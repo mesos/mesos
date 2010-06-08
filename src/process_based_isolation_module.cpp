@@ -72,8 +72,9 @@ void ProcessBasedIsolationModule::startExecutor(Framework* framework)
     framework->executorStatus = "PID: " + lexical_cast<string>(pid);
   } else {
     // In child process, do setsid to make cleanup easier.
+    // if (setpgid(getpid(), 0) == -1)
     if ((pid = setsid()) == -1)
-      perror("setsid error");
+      fatalerror("setsid error");
 
     createExecutorLauncher(framework)->run();
   }
