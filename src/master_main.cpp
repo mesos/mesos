@@ -82,17 +82,9 @@ int main (int argc, char **argv)
 
   LOG(INFO) << "Build: " << BUILD_DATE << " by " << BUILD_USER;
   LOG(INFO) << "Starting Nexus master";
-
-  Master *master;
-
-  if (!isFT) {
-    LOG(INFO) << "Nexus NOT in fault-tolerant mode";
-    master = new Master(allocator);
-  } else {
+  if (isFT)
     LOG(INFO) << "Nexus in fault-tolerant mode";
-    master = new Master(allocator, servers);
-  }
-
+  Master *master = new Master(allocator, zookeeper);
   PID pid = Process::spawn(master);
 
 #ifdef NEXUS_WEBUI

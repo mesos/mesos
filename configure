@@ -1685,6 +1685,7 @@ export CFLAGS
 export CXXFLAGS
 
 # Update CFLAGS and CXXFLAGS in configure args.
+# TODO(benh): Don't send args just for us (e.g., --with-webui).
 ac_configure_args=`echo $ac_configure_args | \
                    sed -e "s/CFLAGS=/CFLAGS=-O2 -fno-strict-aliasing -fPIC /"`
 ac_configure_args=`echo $ac_configure_args | \
@@ -1979,13 +1980,13 @@ fi
 
 
 
-LOCAL_ZOOKEEPER="yes"
+LOCAL_ZOOKEEPER="no"
 
 # Check whether --with-local-zookeeper was given.
 if test "${with_local_zookeeper+set}" = set; then
   withval=$with_local_zookeeper; case "$with_local_zookeeper" in
-		    yes) WITH_LOCAL_ZOOKEEPER="yes" ;;
-                    no) WITH_LOCAL_ZOOKEEPER="no" ;;
+		    yes) LOCAL_ZOOKEEPER="yes" ;;
+                    no) LOCAL_ZOOKEEPER="no" ;;
 		    *) { { echo "$as_me:$LINENO: error:
 *** --with-local-zookeeper does not take arguments" >&5
 echo "$as_me: error:

@@ -474,16 +474,10 @@ int NexusSchedulerDriver::start()
 
   if (master == string("localquiet")) {
     // TODO(benh): Look up resources in environment variables.
-    pid = run_nexus(1, 1, 1073741824, true, true);
-    ostringstream ss;
-    ss << pid;
-    master = ss.str();
+    master = run_nexus(1, 1, 1073741824, true, true);
   } else if (master == string("local")) {
     // TODO(benh): Look up resources in environment variables.
-    pid = run_nexus(1, 1, 1073741824, true, false);
-    ostringstream ss;
-    ss << pid;
-    master = ss.str();
+    master = run_nexus(1, 1, 1073741824, true, false);
   } 
 
   const string& frameworkName = sched->getFrameworkName(this);

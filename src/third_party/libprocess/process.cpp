@@ -1748,7 +1748,7 @@ public:
   timeout_t create_timeout(Process *process, double secs)
   {
     assert(process != NULL);
-    ev_tstamp tstamp = ev_now(loop) + interval;
+    ev_tstamp tstamp = ev_now(loop) + secs;
     return make_tuple(tstamp, process, process->generation);
   }
 

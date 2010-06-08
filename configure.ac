@@ -15,6 +15,7 @@ export CFLAGS
 export CXXFLAGS
 
 # Update CFLAGS and CXXFLAGS in configure args.
+# TODO(benh): Don't send args just for us (e.g., --with-webui).
 ac_configure_args=`echo $ac_configure_args | \
                    sed -e "s/CFLAGS=/CFLAGS=-O2 -fno-strict-aliasing -fPIC /"`
 ac_configure_args=`echo $ac_configure_args | \
@@ -126,13 +127,13 @@ AC_ARG_WITH([webui],
 AC_SUBST(WITH_WEBUI)
 AC_SUBST(WEBUI_FLAGS)
 
-LOCAL_ZOOKEEPER="yes"
+LOCAL_ZOOKEEPER="no"
 AC_ARG_WITH([local-zookeeper],
   AC_HELP_STRING([--with-local-zookeeper],
                  [Use local ZooKeeper for building]),
 	         [case "$with_local_zookeeper" in
-		    yes) WITH_LOCAL_ZOOKEEPER="yes" ;;
-                    no) WITH_LOCAL_ZOOKEEPER="no" ;;
+		    yes) LOCAL_ZOOKEEPER="yes" ;;
+                    no) LOCAL_ZOOKEEPER="no" ;;
 		    *) AC_MSG_ERROR([
 *** --with-local-zookeeper does not take arguments]) ;;
 	          esac],
