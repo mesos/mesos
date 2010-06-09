@@ -91,8 +91,8 @@ private:
    virtual void timeout() {
       foreach (const TaskDescription &t, tasks) {
         DLOG(INFO) << "FT: faking M2F_STATUS_UPDATE due to timeout to server during ReplyToOffer";
-        parent->send( parent->self(), 
-                      pack<M2F_STATUS_UPDATE>(t.taskId, TASK_LOST, ""));
+        parent->send(parent->self(), 
+                     pack<M2F_STATUS_UPDATE>(t.taskId, TASK_LOST, ""));
       }
     }
 
@@ -269,7 +269,7 @@ protected:
         unpack<F2F_FRAMEWORK_MESSAGE>(msg);
 //         if (isFT) {
 //           string ftId = ftMsg->getNextId();
-//           ftMsg->reliableSend( ftId, pack<F2M_FT_FRAMEWORK_MESSAGE>(ftId, self(), fid, msg));
+//           ftMsg->reliableSend(ftId, pack<F2M_FT_FRAMEWORK_MESSAGE>(ftId, self(), fid, msg));
 //         } else
 //           send(master, pack<F2M_FRAMEWORK_MESSAGE>(fid, msg));
         send(savedSlavePids[msg.slaveId], pack<M2S_FRAMEWORK_MESSAGE>(fid, msg));
@@ -572,7 +572,7 @@ void NexusSchedulerDriver::replyToOffer(OfferID offerId,
 
   // TODO(benh): Do a Process::post instead?
   
-  process->send( process->self(), process->pack<F2F_SLOT_OFFER_REPLY>(offerId, tasks, Params(params)));
+  process->send(process->self(), process->pack<F2F_SLOT_OFFER_REPLY>(offerId, tasks, Params(params)));
 }
 
 
@@ -601,7 +601,7 @@ void NexusSchedulerDriver::sendFrameworkMessage(const FrameworkMessage &message)
     return;
   }
 
-  process->send( process->self(), process->pack<F2F_FRAMEWORK_MESSAGE>(message) );
+  process->send(process->self(), process->pack<F2F_FRAMEWORK_MESSAGE>(message));
 }
 
 
