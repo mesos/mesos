@@ -50,7 +50,7 @@ void MasterDetector::process(ZooKeeper *zk, int type, int state,
     while (index < string::npos) {
       index = znode.find(delimiter, index+1);
       string prefix = znode.substr(0, index);
-      ret = zk->create(prefix, "", ZOO_CREATOR_ALL_ACL,
+      ret = zk->create(prefix, "", ZOO_OPEN_ACL_UNSAFE, // ZOO_CREATOR_ALL_ACL, // needs authentication
 		       0, &result);
       if (ret != ZOK && ret != ZNODEEXISTS)
 	fatal("failed to create ZooKeeper znode! (%s)", zk->error(ret));
