@@ -208,8 +208,8 @@ ruby: $(RUBY_LIB)
 
 swig/java/nexus.jar: $(JAVA_LIB)
 ifdef JAVA_HOME
-	javac -sourcepath swig/java -d swig/java swig/java/nexus/*.java
-	jar cf $@ -C swig/java nexus
+	$(JAVA_HOME)/bin/javac -sourcepath swig/java -d swig/java swig/java/nexus/*.java
+	$(JAVA_HOME)/bin/jar cf $@ -C swig/java nexus
 endif
 
 $(JAVA_LIB): swig/nexus.i $(NEXUS_LIB)
@@ -222,12 +222,12 @@ endif
 
 swig/java/TestFramework.class: $(JAVA_LIB) swig/java/nexus.jar swig/java/TestFramework.java
 ifdef JAVA_HOME
-	javac -cp swig/java/nexus.jar -sourcepath swig/java -d swig/java swig/java/TestFramework.java
+	$(JAVA_HOME)/bin/javac -cp swig/java/nexus.jar -sourcepath swig/java -d swig/java swig/java/TestFramework.java
 endif
 
 swig/java/TestExecutor.class: $(JAVA_LIB) swig/java/nexus.jar swig/java/TestExecutor.java
 ifdef JAVA_HOME
-	javac -cp swig/java/nexus.jar -sourcepath swig/java -d swig/java swig/java/TestExecutor.java
+	$(JAVA_HOME)/bin/javac -cp swig/java/nexus.jar -sourcepath swig/java -d swig/java swig/java/TestExecutor.java
 endif
 
 $(PYTHON_LIB): swig/nexus.i $(NEXUS_LIB)
