@@ -792,7 +792,7 @@ int ZooKeeper::getChildren(const string &path,
     void operator () ()
     {
       if (call(zooKeeperProcess->getPID(),
-	       GET,
+	       GET_CHILDREN,
 	       reinterpret_cast<char *>(&getChildrenCall),
 	       sizeof(GetCall *)) != COMPLETED)
 	getChildrenCall->ret = ZSYSTEMERROR;
