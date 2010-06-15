@@ -115,6 +115,18 @@ AC_ARG_WITH([webui],
 AC_SUBST(WITH_WEBUI)
 AC_SUBST(WEBUI_FLAGS)
 
+SWIG="swig"
+AC_ARG_WITH([swig],
+  AC_HELP_STRING([--with-swig=PATH],
+                 [use the SWIG binary at PATH]),
+	         [case "$with_swig" in
+		    yes) AC_MSG_ERROR([
+*** --with-swig requires an argument]) ;;
+		    *) SWIG="$withval" ;;
+	          esac],
+	         [])
+AC_SUBST(SWIG)
+
 # Checks for programs.
 AC_PROG_CXX([g++])
 AC_PROG_CC([gcc])
