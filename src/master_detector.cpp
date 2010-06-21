@@ -23,7 +23,8 @@ using boost::lexical_cast;
 
 MasterDetector::MasterDetector(const string &_servers, const string &_znode,
 			       const PID &_pid, bool _contend)
-  : servers(_servers), znode(_znode), pid(_pid), contend(_contend)
+  : servers(_servers), znode(_znode), pid(_pid),
+    contend(_contend), reconnect(false)
 {
   zk = new ZooKeeper(servers, 10000, this);
 }
@@ -45,57 +46,84 @@ void MasterDetector::process(ZooKeeper *zk, int type, int state,
   static const string delimiter = "/";
 
   if ((state == ZOO_CONNECTED_STATE) && (type == ZOO_SESSION_EVENT)) {
-    // Assume the znode that was created does not end with a "/".
-    CHECK(znode.at(znode.length() - 1) != '/');
+    // Check if this is a reconnect.
+    if (!reconnect) {
+      // Assume the znode that was created does not end with a "/".
+      CHECK(znode.at(znode.length() - 1) != '/');
 
-    // Create directory path znodes as necessary.
-    size_t index = znode.find(delimiter, 0);
+      // Create directory path znodes as necessary.
+      size_t index = znode.find(delimiter, 0);
 
-    while (index < string::npos) {
-      // Get out the prefix to create.
-      index = znode.find(delimiter, index + 1);
-      string prefix = znode.substr(0, index);
+      while (index < string::npos) {
+	// Get out the prefix to create.
+	index = znode.find(delimiter, index + 1);
+	string prefix = znode.substr(0, index);
 
-      // Create the node (even if it already exists).
-      ret = zk->create(prefix, "", ZOO_CREATOR_ALL_ACL,
-		       0, &result);
+	// Create the node (even if it already exists).
+	ret = zk->create(prefix, "", ZOO_CREATOR_ALL_ACL,
+			 0, &result);
 
-      if (ret != ZOK && ret != ZNODEEXISTS)
-	fatal("failed to create ZooKeeper znode! (%s)", zk->error(ret));
-    }
+	if (ret != ZOK && ret != ZNODEEXISTS)
+	  fatal("failed to create ZooKeeper znode! (%s)", zk->error(ret));
+      }
 
-    // Wierdness in ZooKeeper timing, let's check that everything is created.
-    ret = zk->get(znode, false, &result, NULL);
-
-    if (ret != ZOK)
-      fatal("ZooKeeper not responding correctly (%s). "
-	    "Make sure ZooKeeper is running on: %s",
-	    zk->error(ret), servers.c_str());
-
-    if (contend) {
-      // We use the contend with the pid given in constructor.
-      ret = zk->create(znode + "/", pid, ZOO_CREATOR_ALL_ACL,
-		       ZOO_SEQUENCE | ZOO_EPHEMERAL, &result);
+      // Wierdness in ZooKeeper timing, let's check that everything is created.
+      ret = zk->get(znode, false, &result, NULL);
 
       if (ret != ZOK)
 	fatal("ZooKeeper not responding correctly (%s). "
 	      "Make sure ZooKeeper is running on: %s",
 	      zk->error(ret), servers.c_str());
 
-      setMySeq(result);
-      LOG(INFO) << "Created ephemeral/sequence:" << getMySeq();
+      if (contend) {
+	// We use the contend with the pid given in constructor.
+	ret = zk->create(znode + "/", pid, ZOO_CREATOR_ALL_ACL,
+			 ZOO_SEQUENCE | ZOO_EPHEMERAL, &result);
 
-      const string &s =
-	Tuple<Process>::tupleToString(Tuple<Process>::pack<GOT_MASTER_SEQ>(getMySeq()));
-      Process::post(pid, GOT_MASTER_SEQ, s.data(), s.size());
+	if (ret != ZOK)
+	  fatal("ZooKeeper not responding correctly (%s). "
+		"Make sure ZooKeeper is running on: %s",
+		zk->error(ret), servers.c_str());
+
+	setMySeq(result);
+	LOG(INFO) << "Created ephemeral/sequence:" << getMySeq();
+
+	const string &s =
+	  Tuple<Process>::tupleToString(Tuple<Process>::pack<GOT_MASTER_SEQ>(getMySeq()));
+	Process::post(pid, GOT_MASTER_SEQ, s.data(), s.size());
+      }
+
+      // Now determine who the master is (it may be us).
+      detectMaster();
+    } else {
+      // Reconnected. Make sure our ephemeral sequence znode is still there.
+      ret = zk->get(znode + "/" + mySeq, false, &result, NULL);
+
+      // We might no longer be the master! Commit suicide for now
+      // (hoping another master is on standbye), but in the future
+      // it would be nice if we could go back on standbye.
+      if (ret == ZNONODE)
+	fatal("failed to reconnect to ZooKeeper quickly enough "
+	      "(our ephemeral sequence znode is gone), commiting suicide!");
+
+      if (ret != ZOK)
+	fatal("ZooKeeper not responding correctly (%s). "
+	      "Make sure ZooKeeper is running on: %s",
+	      zk->error(ret), servers.c_str());
+
+      // We are still the master!
+      reconnect = false;
     }
-
-    // Now determine who the master is (it may be us).
-    detectMaster();
   } else if ((state == ZOO_CONNECTED_STATE) && (type == ZOO_CHILD_EVENT)) {
     // A new master might have showed up and created a sequence
     // identifier or a master may have died, determine who the master is now!
     detectMaster();
+  } else if ((state == ZOO_CONNECTING_STATE) && (type == ZOO_SESSION_EVENT)) {
+    // The client library automatically reconnects, taking into
+    // account failed servers in the connection string,
+    // appropriately handling the "herd effect", etc.
+    LOG(INFO) << "Lost Zookeeper connection. Retrying (automagically).";
+    reconnect = true;
   } else {
     LOG(INFO) << "Unimplemented watch event: (state is "
 	      << state << " and type is " << type << ")";
