@@ -2,16 +2,21 @@
 
 #include <fstream>
 #include <algorithm>
+
+#include "isolation_module_factory.hpp"
 #include "slave.hpp"
 #include "slave_webui.hpp"
-#include "isolation_module_factory.hpp"
 #include "url_processor.hpp"
 
-#define FT_TIMEOUT 10
+// There's no gethostbyname2 on Solaris, so fake it by calling gethostbyname
+#ifdef __sun__
+#define gethostbyname2(name, _) gethostbyname(name)
+#endif
 
 using std::list;
 using std::make_pair;
 using std::ostringstream;
+using std::istringstream;
 using std::pair;
 using std::queue;
 using std::string;
@@ -25,10 +30,6 @@ using namespace nexus;
 using namespace nexus::internal;
 using namespace nexus::internal::slave;
 
-// There's no gethostbyname2 on Solaris, so fake it by calling gethostbyname
-#ifdef __sun__
-#define gethostbyname2(name, _) gethostbyname(name)
-#endif
 
 namespace {
 
@@ -173,7 +174,7 @@ void Slave::operator () ()
   if (!publicDns) {
     publicDns = hostname;
   }
-  
+
   FrameworkID fid;
   TaskID tid;
   TaskState taskState;
@@ -219,7 +220,7 @@ void Slave::operator () ()
       }
 	
       case NO_MASTER_DETECTED: {
-	// TODO(alig): Do anything here?
+	LOG(INFO) << "Lost master(s) ... waiting";
 	break;
       }
 

@@ -5,6 +5,8 @@
 #include <stdlib.h>
 #include <ucontext.h>
 
+#include <sys/time.h>
+
 #ifdef USE_LITHE
 #include <lithe.hh>
 
@@ -199,7 +201,7 @@ protected:
   /* Links with the specified PID. */
   virtual PID link(const PID &pid);
 
-  /* IO operations for awaiting. */
+  /* IO events for awaiting. */
   enum { RDONLY = 01, WRONLY = 02, RDWR = 03 };
 
   /* Wait until operation is ready for file descriptor (or message received). */

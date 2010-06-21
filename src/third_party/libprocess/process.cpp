@@ -53,6 +53,7 @@
 #include <deque>
 #include <fstream>
 #include <iostream>
+#include <iomanip>
 #include <list>
 #include <map>
 #include <queue>
@@ -1636,6 +1637,7 @@ public:
       if (secs > 0) {
 	/* Create timeout. */
 	timeout = create_timeout(process, secs);
+
 	/* Start the timeout. */
 	start_timeout(timeout);
       }
@@ -1659,7 +1661,7 @@ public:
 
       /* Attempt to cancel the timer if necessary. */
       if (secs > 0 && process->state != Process::TIMEDOUT)
-	  cancel_timeout(timeout);
+	cancel_timeout(timeout);
 
       if (process->state == Process::INTERRUPTED)
 	interrupted = true;
@@ -1747,7 +1749,9 @@ public:
   timeout_t create_timeout(Process *process, double secs)
   {
     assert(process != NULL);
-    ev_tstamp tstamp = ev_time() + secs;
+//     ev_tstamp now = ev_now(loop);
+    ev_tstamp now = ev_time();
+    ev_tstamp tstamp = now + secs;
     return make_tuple(tstamp, process, process->generation);
   }
 
@@ -1759,13 +1763,17 @@ public:
     /* Add the timer. */
     acquire(timers);
     {
-      (*timers)[tstamp].push_back(timeout);
-
-      /* Interrupt the loop if there isn't an adequate timer running. */
-      if (timers->size() == 1 || tstamp < timers->begin()->first) {
-	update_timer = true;
-	ev_async_send(loop, &async_watcher);
+      if (timers->size() == 0 || tstamp < timers->begin()->first) {
+        // Need to interrupt the loop to update/set timer repeat.
+        (*timers)[tstamp].push_back(timeout);
+        update_timer = true;
+        ev_async_send(loop, &async_watcher);
+      } else {
+        // Timer repeat is adequate, just add the timeout.
+        assert(timers->size() >= 1);
+        (*timers)[tstamp].push_back(timeout);
       }
+
     }
     release(timers);
   }
@@ -1883,7 +1891,8 @@ static void handle_async(struct ev_loop *loop, ev_async *w, int revents)
   {
     if (update_timer) {
       if (!timers->empty()) {
-	timer_watcher.repeat = timers->begin()->first - ev_now(loop);
+// 	timer_watcher.repeat = timers->begin()->first - ev_now(loop);
+	timer_watcher.repeat = timers->begin()->first - ev_time();
 	/* If timer has elapsed feed the event immediately. */
 	if (timer_watcher.repeat <= 0) {
 	  timer_watcher.repeat = 0;
@@ -2255,7 +2264,8 @@ void handle_timeout(struct ev_loop *loop, ev_timer *w, int revents)
 
   acquire(timers);
   {
-    ev_tstamp now = ev_now(loop);
+//     ev_tstamp now = ev_now(loop);
+    ev_tstamp now = ev_time();
 
     map<ev_tstamp, list<timeout_t> >::iterator it = timers->begin();
     map<ev_tstamp, list<timeout_t> >::iterator last = timers->begin();
@@ -3125,12 +3135,19 @@ bool Process::await(int fd, int op, const timeval& tv)
 bool Process::await(int fd, int op, const timeval& tv, bool ignore)
 {
   double secs = tv.tv_sec + (tv.tv_usec * 1e-6);
+
+  if (secs <= 0)
+    return true;
+
   return ProcessManager::instance()->await(this, fd, op, secs, ignore);
 }
 
 
 bool Process::ready(int fd, int op)
 {
+  if (fd < 0)
+    return false;
+
   fd_set rdset;
   fd_set wrset;
 

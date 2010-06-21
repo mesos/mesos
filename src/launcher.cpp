@@ -113,8 +113,9 @@ string ExecutorLauncher::fetchExecutor()
 
     const char *hadoop = getenv("HADOOP");
     if (!hadoop) {
-      fatal("Cannot download executor from HDFS because the "
-            "HADOOP environment variable is not set");
+      hadoop = "hadoop";
+//       fatal("Cannot download executor from HDFS because the "
+//             "HADOOP environment variable is not set");
     }
     
     string localFile = string("./") + basename((char *) executor.c_str());
@@ -128,6 +129,9 @@ string ExecutorLauncher::fetchExecutor()
     if (ret != 0)
       fatal("HDFS copyToLocal failed: return code %d", ret);
     executor = localFile;
+    if (chmod(executor.c_str(), S_IRWXU | S_IRGRP | S_IXGRP |
+	      S_IROTH | S_IXOTH) != 0)
+      fatalerror("chmod failed");
   }
 
   // If the executor was a .tgz, untar it in the work directory. The .tgz

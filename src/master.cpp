@@ -1,10 +1,10 @@
+#include <glog/logging.h>
+
 #include "allocator.hpp"
+#include "allocator_factory.hpp"
 #include "master.hpp"
 #include "master_webui.hpp"
-#include "allocator_factory.hpp"
 #include "ft_messaging.hpp"
-
-#include <glog/logging.h>
 
 using std::endl;
 using std::max;
@@ -319,6 +319,16 @@ void Master::operator () ()
 
   while (true) {
     switch (receive()) {
+
+    case NEW_MASTER_DETECTED: {
+      LOG(INFO) << "new master detected ... maybe it's us!";
+      break;
+    }
+
+    case NO_MASTER_DETECTED: {
+      LOG(INFO) << "no master detected ... maybe we're next!";
+      break;
+    }
 
     case F2M_REGISTER_FRAMEWORK: {
       FrameworkID fid = lexical_cast<string>(masterId) + "-" + lexical_cast<string>(nextFrameworkId++);
