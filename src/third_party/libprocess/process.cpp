@@ -53,6 +53,7 @@
 #include <deque>
 #include <fstream>
 #include <iostream>
+#include <iomanip>
 #include <list>
 #include <map>
 #include <queue>
@@ -1085,7 +1086,7 @@ public:
 	/* Free any pending messages. */
 	while (!process->msgs.empty()) {
 	  struct msg *msg = process->msgs.front();
-	  process->msgs.pop();
+	  process->msgs.pop_front();
 	  free(msg);
 	}
 
@@ -1636,6 +1637,7 @@ public:
       if (secs > 0) {
 	/* Create timeout. */
 	timeout = create_timeout(process, secs);
+
 	/* Start the timeout. */
 	start_timeout(timeout);
       }
@@ -1659,7 +1661,7 @@ public:
 
       /* Attempt to cancel the timer if necessary. */
       if (secs > 0 && process->state != Process::TIMEDOUT)
-	  cancel_timeout(timeout);
+	cancel_timeout(timeout);
 
       if (process->state == Process::INTERRUPTED)
 	interrupted = true;
@@ -1747,7 +1749,9 @@ public:
   timeout_t create_timeout(Process *process, double secs)
   {
     assert(process != NULL);
-    ev_tstamp tstamp = ev_time() + secs;
+//     ev_tstamp now = ev_now(loop);
+    ev_tstamp now = ev_time();
+    ev_tstamp tstamp = now + secs;
     return make_tuple(tstamp, process, process->generation);
   }
 
@@ -1759,13 +1763,17 @@ public:
     /* Add the timer. */
     acquire(timers);
     {
-      (*timers)[tstamp].push_back(timeout);
-
-      /* Interrupt the loop if there isn't an adequate timer running. */
-      if (timers->size() == 1 || tstamp < timers->begin()->first) {
-	update_timer = true;
-	ev_async_send(loop, &async_watcher);
+      if (timers->size() == 0 || tstamp < timers->begin()->first) {
+        // Need to interrupt the loop to update/set timer repeat.
+        (*timers)[tstamp].push_back(timeout);
+        update_timer = true;
+        ev_async_send(loop, &async_watcher);
+      } else {
+        // Timer repeat is adequate, just add the timeout.
+        assert(timers->size() >= 1);
+        (*timers)[tstamp].push_back(timeout);
       }
+
     }
     release(timers);
   }
@@ -1883,7 +1891,8 @@ static void handle_async(struct ev_loop *loop, ev_async *w, int revents)
   {
     if (update_timer) {
       if (!timers->empty()) {
-	timer_watcher.repeat = timers->begin()->first - ev_now(loop);
+// 	timer_watcher.repeat = timers->begin()->first - ev_now(loop);
+	timer_watcher.repeat = timers->begin()->first - ev_time();
 	/* If timer has elapsed feed the event immediately. */
 	if (timer_watcher.repeat <= 0) {
 	  timer_watcher.repeat = 0;
@@ -2255,7 +2264,8 @@ void handle_timeout(struct ev_loop *loop, ev_timer *w, int revents)
 
   acquire(timers);
   {
-    ev_tstamp now = ev_now(loop);
+//     ev_tstamp now = ev_now(loop);
+    ev_tstamp now = ev_time();
 
     map<ev_tstamp, list<timeout_t> >::iterator it = timers->begin();
     map<ev_tstamp, list<timeout_t> >::iterator last = timers->begin();
@@ -2863,7 +2873,7 @@ void Process::enqueue(struct msg *msg)
   {
     if (state != EXITED) {
       //cout << "enqueing pending message: " << msg << endl;
-      msgs.push(msg);
+      msgs.push_back(msg);
 
       if (state == RECEIVING) {
 	state = READY;
@@ -2895,7 +2905,7 @@ struct msg * Process::dequeue()
     assert (state == RUNNING);
     if (!msgs.empty()) {
       msg = msgs.front();
-      msgs.pop();
+      msgs.pop_front();
       //cout << "dequeueing pending message: " << msg << endl;
     }
   }
@@ -2905,16 +2915,48 @@ struct msg * Process::dequeue()
 }
 
 
-PID Process::self()
+PID Process::self() const
 {
   return pid;
 }
 
 
-PID Process::from()
+PID Process::from() const
 {
   PID pid = { 0, 0, 0 };
   return current != NULL ? current->from : pid;
+}
+
+
+void Process::inject(const PID &from, MSGID id, const char *data, size_t length)
+{
+  if (replaying)
+    return;
+
+  /* Disallow sending messages using an internal id. */
+  if (id < PROCESS_MSGID)
+    return;
+
+  /* Allocate/Initialize outgoing message. */
+  struct msg *msg = (struct msg *) malloc(sizeof(struct msg) + length);
+
+  msg->from.pipe = from.pipe;
+  msg->from.ip = from.ip;
+  msg->from.port = from.port;
+  msg->to.pipe = pid.pipe;
+  msg->to.ip = pid.ip;
+  msg->to.port = pid.port;
+  msg->id = id;
+  msg->len = length;
+
+  if (length > 0)
+    memcpy((char *) msg + sizeof(struct msg), data, length);
+
+  lock();
+  {
+    msgs.push_front(msg);
+  }
+  unlock();
 }
 
 
@@ -3045,7 +3087,7 @@ MSGID Process::call(const PID &to, MSGID id,
 }
 
 
-const char * Process::body(size_t *length)
+const char * Process::body(size_t *length) const
 {
   if (current != NULL && current->len > 0) {
     if (length != NULL)
@@ -3093,12 +3135,19 @@ bool Process::await(int fd, int op, const timeval& tv)
 bool Process::await(int fd, int op, const timeval& tv, bool ignore)
 {
   double secs = tv.tv_sec + (tv.tv_usec * 1e-6);
+
+  if (secs <= 0)
+    return true;
+
   return ProcessManager::instance()->await(this, fd, op, secs, ignore);
 }
 
 
 bool Process::ready(int fd, int op)
 {
+  if (fd < 0)
+    return false;
+
   fd_set rdset;
   fd_set wrset;
 

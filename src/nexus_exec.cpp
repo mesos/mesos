@@ -160,7 +160,7 @@ NexusExecutorDriver::~NexusExecutorDriver()
 }
 
 
-void NexusExecutorDriver::run()
+int NexusExecutorDriver::run()
 {
   // Set stream buffering mode to flush on newlines so that we capture logs
   // from user processes even when output is redirected to a file.
@@ -201,17 +201,21 @@ void NexusExecutorDriver::run()
   Process::wait(Process::spawn(process));
 
   process = NULL;
+
+  return 0;
 }
 
 
-void NexusExecutorDriver::sendStatusUpdate(const TaskStatus &status)
+int NexusExecutorDriver::sendStatusUpdate(const TaskStatus &status)
 {
   Lock lock(&mutex);
 
   /* TODO(benh): Increment ref count on process. */
   
-  if (!process)
-    executor->error(this, EINVAL, "Executor has exited");
+  if (!process) {
+    //executor->error(this, EINVAL, "Executor has exited");
+    return -1;
+  }
 
   process->send(process->slave,
                 process->pack<E2S_STATUS_UPDATE>(process->fid,
@@ -220,23 +224,29 @@ void NexusExecutorDriver::sendStatusUpdate(const TaskStatus &status)
                                                  status.data));
 
   /* TODO(benh): Decrement ref count on process. */
+
+  return 0;
 }
 
 
-void NexusExecutorDriver::sendFrameworkMessage(const FrameworkMessage &message)
+int NexusExecutorDriver::sendFrameworkMessage(const FrameworkMessage &message)
 {
   Lock lock(&mutex);
 
   /* TODO(benh): Increment ref count on process. */
   
-  if (!process)
-    executor->error(this, EINVAL, "Executor has exited");
+  if (!process) {
+    //executor->error(this, EINVAL, "Executor has exited");
+    return -1;
+  }
 
   process->send(process->slave,
                 process->pack<E2S_FRAMEWORK_MESSAGE>(process->fid,
                                                      message));
 
   /* TODO(benh): Decrement ref count on process. */
+
+  return 0;
 }
 
 
@@ -263,8 +273,8 @@ public:
   virtual void init(ExecutorDriver*, const ExecutorArgs& args)
   {
     exec->init(exec,
-               args.slaveId,
-               args.frameworkId,
+               args.slaveId.c_str(),
+               args.frameworkId.c_str(),
                args.frameworkName.c_str(),
                args.data.data(),
                args.data.size());
@@ -276,7 +286,7 @@ public:
     Params paramsObj(task.params);
     string paramsStr = paramsObj.str();
     nexus_task_desc td = { task.taskId,
-                           task.slaveId,
+                           task.slaveId.c_str(),
                            task.name.c_str(),
                            paramsStr.c_str(),
                            task.arg.data(),
@@ -292,7 +302,7 @@ public:
   virtual void frameworkMessage(ExecutorDriver*,
                                 const FrameworkMessage& message)
   {
-    nexus_framework_message msg = { message.slaveId,
+    nexus_framework_message msg = { message.slaveId.c_str(),
                                     message.taskId,
                                     message.data.data(),
                                     message.data.size() };
@@ -354,7 +364,7 @@ int nexus_exec_send_message(struct nexus_exec* exec,
   }
 
   string data((char*) msg->data, msg->data_len);
-  FrameworkMessage message(msg->sid, msg->tid, data);
+  FrameworkMessage message(string(msg->sid), msg->tid, data);
 
   c_executor->driver->sendFrameworkMessage(message);
 

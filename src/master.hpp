@@ -21,12 +21,17 @@
 #include <boost/unordered_map.hpp>
 #include <boost/unordered_set.hpp>
 
+#include "fatal.hpp"
 #include "foreach.hpp"
 #include "hash_pid.hpp"
 #include "master_state.hpp"
 #include "messages.hpp"
 #include "params.hpp"
 #include "resources.hpp"
+#include "master_detector.hpp"
+#include "task_info.hpp"
+#include "url_processor.hpp"
+#include "ft_messaging.hpp"
 
 namespace nexus { namespace internal { namespace master {
 
@@ -93,22 +98,6 @@ struct SlotOffer
     : id(i), frameworkId(f), resources(r) {}
 };
 
-
-// An active task. The master only keeps track of tasks that are active.
-struct Task
-{ 
-  TaskID id;
-  FrameworkID frameworkId; // Which framework we belong to
-  SlaveID slaveId;        // Which slave we're on
-  Resources resources;
-  TaskState state;
-  string name;
-  string message;
-  
-  Task(TaskID _id, Resources _res) : id(_id), resources(_res) {}
-};
-
-
 // An connected framework.
 struct Framework
 {  
@@ -120,7 +109,7 @@ struct Framework
   ExecutorInfo executorInfo;
   time_t connectTime;
 
-  unordered_map<TaskID, Task *> tasks;
+  unordered_map<TaskID, TaskInfo *> tasks;
   unordered_set<SlotOffer *> slotOffers; // Active offers given to this framework
 
   Resources resources; // Total resources owned by framework (tasks + offers)
@@ -129,26 +118,26 @@ struct Framework
   // or 0 for slaves that we want to keep filtered forever
   unordered_map<Slave *, time_t> slaveFilter;
 
-  Framework(const PID &_pid, FrameworkID _id)
+  Framework(const PID &_pid, FrameworkID _id = "")
     : pid(_pid), id(_id), active(true)
   {
     time(&connectTime);
   }
   
-  Task * lookupTask(TaskID tid)
+  TaskInfo * lookupTask(TaskID tid)
   {
-    unordered_map<TaskID, Task *>::iterator it = tasks.find(tid);
+    unordered_map<TaskID, TaskInfo *>::iterator it = tasks.find(tid);
     if (it != tasks.end())
       return it->second;
     else
       return NULL;
   }
   
-  Task * addTask(TaskID tid, const std::string& name,
+  TaskInfo * addTask(TaskID tid, const std::string& name,
                  SlaveID location, Resources resources)
   {
     CHECK(tasks.find(tid) == tasks.end());
-    Task *task = new Task(tid, resources);
+    TaskInfo *task = new TaskInfo(tid, resources);
     task->frameworkId = id;
     task->state = TASK_STARTING;
     task->name = name;
@@ -161,7 +150,7 @@ struct Framework
   void removeTask(TaskID tid)
   {
     CHECK(tasks.find(tid) != tasks.end());
-    unordered_map<TaskID, Task *>::iterator it = tasks.find(tid);
+    unordered_map<TaskID, TaskInfo *>::iterator it = tasks.find(tid);
     this->resources -= it->second->resources;
     tasks.erase(it);
   }
@@ -216,30 +205,30 @@ struct Slave
   Resources resourcesOffered; // Resources currently in offers
   Resources resourcesInUse;   // Resources currently used by tasks
 
-  unordered_map<pair<FrameworkID, TaskID>, Task *> tasks;
+  unordered_map<pair<FrameworkID, TaskID>, TaskInfo *> tasks;
   unordered_set<SlotOffer *> slotOffers; // Active offers of slots on this slave
   
-  Slave(const PID &_pid, SlaveID _id) : pid(_pid), id(_id), active(true) {
+  Slave(const PID &_pid, SlaveID _id = "") : pid(_pid), id(_id), active(true) {
     connectTime = lastHeartbeat = time(NULL);
   }
 
-  Task * lookupTask(FrameworkID fid, TaskID tid)
+  TaskInfo * lookupTask(FrameworkID fid, TaskID tid)
   {
-    foreachpair (_, Task *task, tasks)
+    foreachpair (_, TaskInfo *task, tasks)
       if (task->frameworkId == fid && task->id == tid)
         return task;
 
     return NULL;
   }
 
-  void addTask(Task *task)
+  void addTask(TaskInfo *task)
   {
     CHECK(tasks.find(make_pair(task->frameworkId, task->id)) == tasks.end());
     tasks[make_pair(task->frameworkId, task->id)] = task;
     resourcesInUse += task->resources;
   }
   
-  void removeTask(Task *task)
+  void removeTask(TaskInfo *task)
   {
     CHECK(tasks.find(make_pair(task->frameworkId, task->id)) != tasks.end());
     tasks.erase(make_pair(task->frameworkId, task->id));
@@ -276,6 +265,9 @@ enum TaskRemovalReason
 class Master : public Tuple<Process>
 {
 protected:
+  bool isFT;
+  string zkServers;
+  MasterDetector *masterDetector;
   unordered_map<FrameworkID, Framework *> frameworks;
   unordered_map<SlaveID, Slave *> slaves;
   unordered_map<OfferID, SlotOffer *> slotOffers;
@@ -283,17 +275,21 @@ protected:
   unordered_map<PID, FrameworkID> pidToFid;
   unordered_map<PID, SlaveID> pidToSid;
 
-  FrameworkID nextFrameworkId; // Used to give each framework a unique ID.
-  SlaveID nextSlaveId;         // Used to give each slave a unique ID.
-  OfferID nextSlotOfferId; // Used to give each slot offer a unique ID.
+  long nextFrameworkId; // Used to give each framework a unique ID.
+  long nextSlaveId;         // Used to give each slave a unique ID.
+  long nextSlotOfferId; // Used to give each slot offer a unique ID.
+
 
   string allocatorType;
   Allocator *allocator;
 
-public:
-  Master();
+  long masterId; // Used to differentiate different master in FT mode, will be ephemeral id
+  FTMessaging *ftMsg;
 
-  Master(const string& _allocatorType);
+public:
+  Master(const string &zk = "");
+
+  Master(const string& _allocatorType, const string &zk = "");
   
   ~Master();
 
@@ -304,13 +300,20 @@ public:
   
   void rescindOffer(SlotOffer *offer);
   
-  void killTask(Task *task);
+  void killTask(TaskInfo *task);
   
   Framework * lookupFramework(FrameworkID fid);
 
   Slave * lookupSlave(SlaveID sid);
 
   SlotOffer * lookupSlotOffer(OfferID soid);
+
+  // Used in FT mode. Ensures that task is also registered in frameworks->tasks
+  void updateFrameworkTasks(TaskInfo *task);
+  
+  // Used in FT mode. Traverses all slaves' tasks t and calls updateFrameworkTasks(t)
+  void updateFrameworkTasks();
+
 
   // Return connected frameworks that are not in the process of being removed
   vector<Framework *> getActiveFrameworks();
@@ -346,7 +349,7 @@ protected:
                        OfferReturnReason reason,
                        const vector<SlaveResources>& resourcesLeft);
 
-  void removeTask(Task *task, TaskRemovalReason reason);
+  void removeTask(TaskInfo *task, TaskRemovalReason reason);
 
   // Kill all of a framework's tasks, delete the framework object, and
   // reschedule slot offers for slots that were assigned to this framework
@@ -382,7 +385,7 @@ inline std::ostream& operator << (std::ostream& stream, const Framework *f)
 }
 
 
-inline std::ostream& operator << (std::ostream& stream, const Task *t)
+inline std::ostream& operator << (std::ostream& stream, const TaskInfo *t)
 {
   stream << "task " << t->frameworkId << ":" << t->id;
   return stream;

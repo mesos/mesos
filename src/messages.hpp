@@ -13,43 +13,67 @@
 #include "params.hpp"
 #include "resources.hpp"
 #include "foreach.hpp"
+#include "task_info.hpp"
+
 
 namespace nexus { namespace internal {
 
 enum MessageType {
   /* From framework to master. */
   F2M_REGISTER_FRAMEWORK = PROCESS_MSGID,
+  F2M_REREGISTER_FRAMEWORK,
   F2M_UNREGISTER_FRAMEWORK,
   F2M_SLOT_OFFER_REPLY,
+  F2M_FT_SLOT_OFFER_REPLY,
   F2M_REVIVE_OFFERS,
   F2M_KILL_TASK,
   F2M_FRAMEWORK_MESSAGE,
+  F2M_FT_FRAMEWORK_MESSAGE,
+
+  F2F_SLOT_OFFER_REPLY,
+  F2F_FRAMEWORK_MESSAGE,
   
   /* From master to framework. */
   M2F_REGISTER_REPLY,
   M2F_SLOT_OFFER,
   M2F_RESCIND_OFFER,
   M2F_STATUS_UPDATE,
+  M2F_FT_STATUS_UPDATE,
   M2F_LOST_SLAVE,
   M2F_FRAMEWORK_MESSAGE,
+  M2F_FT_FRAMEWORK_MESSAGE,
   M2F_ERROR,
   
+  /* Used for FT. */
+  FT_RELAY_ACK,
+  FT_ACK,
+
   /* From slave to master. */
   S2M_REGISTER_SLAVE,
+  S2M_REREGISTER_SLAVE,
   S2M_UNREGISTER_SLAVE,
   S2M_STATUS_UPDATE,
+  S2M_FT_STATUS_UPDATE,
   S2M_FRAMEWORK_MESSAGE,
+  S2M_FT_FRAMEWORK_MESSAGE,
   S2M_LOST_EXECUTOR,
 
   /* From slave heart to master. */
   SH2M_HEARTBEAT,
+
+  /* From master detector to processes */
+  NEW_MASTER_DETECTED,
+  NO_MASTER_DETECTED,
+  GOT_MASTER_SEQ,
   
   /* From master to slave. */
   M2S_REGISTER_REPLY,
+  M2S_REREGISTER_REPLY,
   M2S_RUN_TASK,
   M2S_KILL_TASK,
   M2S_KILL_FRAMEWORK,
   M2S_FRAMEWORK_MESSAGE,
+  M2S_FT_FRAMEWORK_MESSAGE,
   M2S_SHUTDOWN, // Used in unit tests to shut down cluster
 
   /* From executor to slave. */
@@ -81,9 +105,10 @@ enum MessageType {
   M2M_SHUTDOWN,         // Used in tests to shut down master
 
   /* Internal to slave */
+  S2S_GOT_MASTER,       // Used when looking up master with ZooKeeper
   S2S_GET_STATE,        // Used by web UI
   S2S_GET_STATE_REPLY,
-  S2S_CHILD_EXIT,       // Sent by nanny process
+  S2S_CHILD_EXIT,       // Sent by reaper process
   S2S_SHUTDOWN,         // Used in tests to shut down slave
 
   NEXUS_MESSAGES,
@@ -104,11 +129,25 @@ TUPLE(F2M_REGISTER_FRAMEWORK,
        std::string /*user*/,
        ExecutorInfo));
 
+TUPLE(F2M_REREGISTER_FRAMEWORK,
+      (std::string /*fid*/,
+       std::string /*name*/,
+       std::string /*user*/,
+       ExecutorInfo));
+
 TUPLE(F2M_UNREGISTER_FRAMEWORK,
       (FrameworkID));
 
 TUPLE(F2M_SLOT_OFFER_REPLY,
       (FrameworkID,
+       OfferID,
+       std::vector<TaskDescription>,
+       Params));
+
+TUPLE(F2M_FT_SLOT_OFFER_REPLY,
+      (std::string, /* FT ID */
+       std::string, /* original sender */
+       FrameworkID,
        OfferID,
        std::vector<TaskDescription>,
        Params));
@@ -123,6 +162,23 @@ TUPLE(F2M_KILL_TASK,
 TUPLE(F2M_FRAMEWORK_MESSAGE,
       (FrameworkID,
        FrameworkMessage));
+
+TUPLE(F2M_FT_FRAMEWORK_MESSAGE,
+      (std::string, /* FT ID */
+       std::string, /* original sender */
+       FrameworkID,
+       FrameworkMessage));
+
+
+TUPLE(F2F_SLOT_OFFER_REPLY,
+      (OfferID,
+       std::vector<TaskDescription>,
+       Params));
+
+TUPLE(F2F_FRAMEWORK_MESSAGE,
+      (FrameworkMessage));
+
+
 
 TUPLE(M2F_REGISTER_REPLY,
       (FrameworkID));
@@ -139,20 +195,45 @@ TUPLE(M2F_STATUS_UPDATE,
        TaskState,
        std::string));
 
+TUPLE(M2F_FT_STATUS_UPDATE,
+      (std::string, /* FT ID */
+       std::string, /* original sender */
+       TaskID,
+       TaskState,
+       std::string));
+
 TUPLE(M2F_LOST_SLAVE,
       (SlaveID));
 
 TUPLE(M2F_FRAMEWORK_MESSAGE,
       (FrameworkMessage));
 
+TUPLE(M2F_FT_FRAMEWORK_MESSAGE,
+      (std::string, /* FT ID */
+       std::string, /* original sender */
+       FrameworkMessage));
+
 TUPLE(M2F_ERROR,
       (int32_t /*code*/,
        std::string /*msg*/));
+
+
+TUPLE(FT_RELAY_ACK,
+      (std::string, /* FT ID */
+       std::string /* PID of orig */
+       ));
 
 TUPLE(S2M_REGISTER_SLAVE,
       (std::string /*name*/,
        std::string /*publicDns*/,
        Resources));
+
+TUPLE(S2M_REREGISTER_SLAVE,
+      (std::string /*slave id*/,
+       std::string /*name*/,
+       std::string /*publicDns*/,
+       Resources,
+       std::vector<TaskInfo> ));
 
 TUPLE(S2M_UNREGISTER_SLAVE,
       (SlaveID));
@@ -164,8 +245,24 @@ TUPLE(S2M_STATUS_UPDATE,
        TaskState,
        std::string));
 
+TUPLE(S2M_FT_STATUS_UPDATE,
+      (std::string, /* unique msgId */
+       std::string, /* senders PID */
+       SlaveID,
+       FrameworkID,
+       TaskID,
+       TaskState,
+       std::string));
+
 TUPLE(S2M_FRAMEWORK_MESSAGE,
       (SlaveID,
+       FrameworkID,
+       FrameworkMessage));
+
+TUPLE(S2M_FT_FRAMEWORK_MESSAGE,
+      (std::string, /* ftId */
+       std::string, /* sender PID */
+       SlaveID,
        FrameworkID,
        FrameworkMessage));
 
@@ -176,8 +273,21 @@ TUPLE(S2M_LOST_EXECUTOR,
 
 TUPLE(SH2M_HEARTBEAT,
       (SlaveID));
+    
+TUPLE(NEW_MASTER_DETECTED,
+      (std::string, /* master seq */
+       PID /* master PID */));
+
+TUPLE(NO_MASTER_DETECTED,
+      ());
+
+TUPLE(GOT_MASTER_SEQ,
+      (std::string /* seq */));
   
 TUPLE(M2S_REGISTER_REPLY,
+      (SlaveID));
+
+TUPLE(M2S_REREGISTER_REPLY,
       (SlaveID));
 
 TUPLE(M2S_RUN_TASK,
@@ -188,7 +298,8 @@ TUPLE(M2S_RUN_TASK,
        ExecutorInfo,
        std::string /*taskName*/,
        std::string /*taskArgs*/,
-       Params));
+       Params,
+       std::string /*framework PID*/));
 
 TUPLE(M2S_KILL_TASK,
       (FrameworkID,
@@ -201,6 +312,12 @@ TUPLE(M2S_FRAMEWORK_MESSAGE,
       (FrameworkID,
        FrameworkMessage));
         
+TUPLE(M2S_FT_FRAMEWORK_MESSAGE,
+      (std::string, /* FT ID */
+       std::string, /* original sender */
+       FrameworkID,
+       FrameworkMessage));
+
 TUPLE(M2S_SHUTDOWN,
       ());
 
@@ -263,6 +380,9 @@ TUPLE(M2M_TIMER_TICK,
 TUPLE(M2M_SHUTDOWN,
       ());
 
+TUPLE(S2S_GOT_MASTER,
+      ());
+
 TUPLE(S2S_GET_STATE,
       ());
 
@@ -299,6 +419,9 @@ void operator & (process::serialization::deserializer&, Params&);
 
 void operator & (process::serialization::serializer&, const Resources&);
 void operator & (process::serialization::deserializer&, Resources&);
+
+void operator & (process::serialization::serializer&, const TaskInfo&);
+void operator & (process::serialization::deserializer&, TaskInfo&);
 
 
 /* Serialization functions for STL vectors (TODO(benh): move to libprocess). */
