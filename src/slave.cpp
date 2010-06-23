@@ -181,7 +181,7 @@ void Slave::operator () ()
   string data;
 
   while (true) {
-    switch (receive()) {
+    switch (receive(2)) {
       case NEW_MASTER_DETECTED: {
 	string masterSeq;
 	PID masterPid;
