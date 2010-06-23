@@ -4,7 +4,6 @@
 #include "allocator_factory.hpp"
 #include "master.hpp"
 #include "master_webui.hpp"
-#include "ft_messaging.hpp"
 
 using std::endl;
 using std::max;
@@ -124,7 +123,6 @@ Master::Master(const string &zk)
       exit(1);
     }
   }
-  ftMsg = FTMessaging::getInstance();
 }
 
 
@@ -142,7 +140,6 @@ Master::Master(const string& _allocatorType, const string &zk)
       exit(1);
     }
   }
-  ftMsg = FTMessaging::getInstance();
 }
                    
 
@@ -441,24 +438,6 @@ void Master::operator () ()
       break;
     }
 
-    case F2M_FT_FRAMEWORK_MESSAGE: {
-      FrameworkID fid;
-      FrameworkMessage message;
-      string ftId, senderStr;
-      unpack<F2M_FT_FRAMEWORK_MESSAGE>(ftId, senderStr, fid, message);
-      Framework *framework = lookupFramework(fid);
-      if (framework != NULL) {
-	Slave *slave = lookupSlave(message.slaveId);
-	if (slave != NULL) {
-	  LOG(INFO) << "Sending framework message to " << slave;
-	  send(slave->pid, pack<M2S_FT_FRAMEWORK_MESSAGE>(ftId, senderStr, fid, message));
-        } else
-          DLOG(INFO) << "S2M_FT_FRAMEWORK_MESSAGE error: couldn't lookup framework id" << fid;
-      } else
-        DLOG(INFO) << "S2M_FT_FRAMEWORK_MESSAGE error: couldn't lookup slave id" << message.slaveId;
-      break;
-    }
-
     case S2M_REGISTER_SLAVE: {
       string slaveId = lexical_cast<string>(masterId) + "-" + lexical_cast<string>(nextSlaveId++);
 
@@ -524,19 +503,17 @@ void Master::operator () ()
       TaskID tid;
       TaskState state;
       string data;
-      string ftId, senderStr;
 
-      unpack<S2M_FT_STATUS_UPDATE>(ftId, senderStr, sid, fid, tid, state, data);
-      DLOG(INFO) << "FT: prepare relay ftId:"<< ftId << " from: "<< senderStr;
+      unpack<S2M_FT_STATUS_UPDATE>(sid, fid, tid, state, data);
+      DLOG(INFO) << "FT: prepare relay seq:"<< seq() << " from: "<< from();
       if (Slave *slave = lookupSlave(sid)) {
 	if (Framework *framework = lookupFramework(fid)) {
 	  // Pass on the status update to the framework
 
-          DLOG(INFO) << "FT: relaying ftId:"<< ftId << " from: "<< senderStr;
-          send(framework->pid, pack<M2F_FT_STATUS_UPDATE>(ftId, senderStr, tid, state, data));
+          forward(framework->pid);
 
-          if (!ftMsg->acceptMessage(ftId, senderStr)) {
-            LOG(WARNING) << "FT: Locally ignoring duplicate message with id:" << ftId;
+          if (duplicate()) {
+            LOG(WARNING) << "FT: Locally ignoring duplicate message with id:" << seq();
             break;
           } 
           // Update the task state locally
@@ -589,27 +566,6 @@ void Master::operator () ()
       break;
     }
       
-    case S2M_FT_FRAMEWORK_MESSAGE: {
-      SlaveID sid;
-      FrameworkID fid;
-      FrameworkMessage message; 
-      string ftId, senderStr;
-      unpack<S2M_FT_FRAMEWORK_MESSAGE>(ftId, senderStr, sid, fid, message);
-      Slave *slave = lookupSlave(sid);
-      if (slave != NULL) {
-	Framework *framework = lookupFramework(fid);
-	if (framework != NULL) {
-
-	  send(framework->pid, pack<M2F_FT_FRAMEWORK_MESSAGE>(ftId, senderStr, message));
-
-        } else
-          DLOG(INFO) << "S2M_FT_FRAMEWORK_MESSAGE error: couldn't lookup framework id" << fid;
-      } else
-        DLOG(INFO) << "S2M_FT_FRAMEWORK_MESSAGE error: couldn't lookup slave id" << sid;
-
-      break;
-    }
-
     case S2M_FRAMEWORK_MESSAGE: {
       SlaveID sid;
       FrameworkID fid;
@@ -696,24 +652,6 @@ void Master::operator () ()
       // foreachpair(_, Framework *framework, frameworks) {
       // 	DLOG(INFO) << (cnts++) << " resourceInUse:" << framework->resources;
       // }
-      break;
-    }
-
-    case FT_RELAY_ACK: {
-      string ftId;
-      string origPidStr;
-      unpack<FT_RELAY_ACK>(ftId, origPidStr);
-      
-      DLOG(INFO) << "FT_RELAY_ACK for " << ftId << " forwarding it to " << origPidStr;
-            
-      PID origPid = make_pid(origPidStr.c_str());
-      if (!origPid) {
-        cerr << "FT: Failed to resolve PID for originator: " << origPidStr << endl;
-        break;
-      }
-
-      send(origPid, pack<FT_RELAY_ACK>(ftId, origPidStr));
-
       break;
     }
 
