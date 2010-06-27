@@ -13,7 +13,7 @@
 #include <string>
 #include <sstream>
 
-#include <process.hpp>
+#include <reliable.hpp>
 
 #include <boost/bind.hpp>
 #include <boost/unordered_map.hpp>
@@ -28,8 +28,8 @@
 #include "nexus_sched.hpp"
 #include "url_processor.hpp"
 #include "master_detector.hpp"
-#include "ft_messaging.hpp"
 
+#define REPLY_TIMEOUT 20
 
 using std::cerr;
 using std::cout;
@@ -57,9 +57,44 @@ namespace nexus { namespace internal {
  * any synchronization necessary is performed.
  */
 
-    
+class RbReply : public Tuple<Process>
+{    
+public:
+  RbReply(const PID &_p, const TaskID &_tid) : 
+    parent(_p), tid(_tid), terminate(false) {}
+  
+protected:
+  void operator () ()
+  {
+    link(parent);
+    while(!terminate) {
 
-class SchedulerProcess : public Tuple<Process>
+      switch(receive(REPLY_TIMEOUT)) {
+      case F2F_TASK_RUNNING_STATUS: {
+        terminate = true;
+        break;
+      }
+
+      case PROCESS_TIMEOUT: {
+        terminate = true;
+        DLOG(INFO) << "FT: faking M2F_STATUS_UPDATE due to ReplyToOffer timeout for tid:" << tid;
+        send(parent, 
+             pack<M2F_STATUS_UPDATE>(tid, TASK_LOST, ""));
+        break;
+      }
+
+      }
+    }
+    DLOG(INFO) << "FT: Exiting reliable reply for tid:" << tid;
+  }
+
+private:
+  bool terminate;
+  const PID parent;
+  const TaskID tid;
+};
+
+class SchedulerProcess : public Tuple<ReliableProcess>
 {
 public:
   friend class nexus::NexusSchedulerDriver;
@@ -74,32 +109,13 @@ private:
   bool isFT;
   string zkServers;
   MasterDetector *masterDetector;
-  FTMessaging *ftMsg;
 
   unordered_map<OfferID, unordered_map<SlaveID, PID> > savedOffers;
   unordered_map<SlaveID, PID> savedSlavePids;
 
   volatile bool terminate;
 
-  class TimeoutListener;
-  friend class TimeoutListener;
-
-  class TimeoutListener : public FTCallback {
-  public:
-    TimeoutListener(SchedulerProcess *s, const vector<TaskDescription> t) : parent(s), tasks(t) {}
- 
-   virtual void timeout() {
-      foreach (const TaskDescription &t, tasks) {
-        DLOG(INFO) << "FT: faking M2F_STATUS_UPDATE due to timeout to server during ReplyToOffer";
-        parent->send( parent->self(), 
-                      pack<M2F_STATUS_UPDATE>(t.taskId, TASK_LOST, ""));
-      }
-    }
-
-  private:
-    SchedulerProcess *parent;
-    vector<TaskDescription> tasks;
-  };
+  unordered_map<TaskID, RbReply *> rbReplies;
 
 public:
   SchedulerProcess(const string &_master,
@@ -122,14 +138,17 @@ public:
     //  } else if (urlPair.first == UrlProcessor::NEXUS) {
   } else {
     isFT = false; 
-    istringstream ss(urlPair.second); // the case nexus://
-    istringstream ss2(_master);       // in case nexus:// is missing
-    if (!((ss >> master) || (ss2 >> master))) { 
-      cerr << "Failed to parse URL for master: " << _master <<endl;
+    if (urlPair.first == UrlProcessor::NEXUS)
+      master = make_pid(urlPair.second.c_str());
+    else
+      master = make_pid(_master.c_str());
+    
+    if (!master)
+    {
+      cerr << "Scheduler failed to resolve master PID " << urlPair.second << endl;
       exit(1);
     }
   }
-  ftMsg = FTMessaging::getInstance();
 }
 
 ~SchedulerProcess()
@@ -172,7 +191,7 @@ protected:
       if (terminate)
         return;
 
-      switch(receive(FT_TIMEOUT)) {
+      switch(receive(2)) {
       // TODO(benh): We need to break the receive loop every so often
       // to check if 'terminate' has been set .. but rather than use a
       // timeout in receive, it would be nice to send a message, but
@@ -186,9 +205,8 @@ protected:
 	LOG(INFO) << "New master at " << masterPid
 		  << " with ephemeral id:" << masterSeq;
 
-	// TODO(alig|benh): Use new API -> redirect(master, masterPid);
+        redirect(master, masterPid);
 	master = masterPid;
-	ftMsg->setMasterPid(master);
 	link(master);
 
 	if (fid.empty()) {
@@ -242,20 +260,16 @@ protected:
 	// Remove the offer since we saved all the PIDs we might use.
         savedOffers.erase(oid);
 
-	// TODO(alig|benh): Walk through scenario if the master dies
-	// after it sends out M2S_RUN_TASK messages?
-
         if (isFT) {
-          TimeoutListener *tListener = new TimeoutListener(this, tasks);
+          foreach(const TaskDescription &task, tasks) {
+            RbReply *rr = new RbReply(self(), task.taskId);
+            rbReplies[task.taskId] = rr;
+            link(spawn(rr));
+          }
+        }
+        
+        send(master, pack<F2M_SLOT_OFFER_REPLY>(fid, oid, tasks, params));
 
-          string ftId = ftMsg->getNextId();
-          DLOG(INFO) << "Sending reliably reply to slot offer for msg " << ftId;
-          ftMsg->reliableSend(ftId,
-			      pack<F2M_FT_SLOT_OFFER_REPLY>(ftId, self(), fid, oid, tasks, params),
-			      tListener);
-        } else {
-          send(master, pack<F2M_SLOT_OFFER_REPLY>(fid, oid, tasks, params));
-	}
 	
         break;
       }
@@ -263,11 +277,6 @@ protected:
       case F2F_FRAMEWORK_MESSAGE: {
         FrameworkMessage msg;
         unpack<F2F_FRAMEWORK_MESSAGE>(msg);
-//         if (isFT) {
-//           string ftId = ftMsg->getNextId();
-//           ftMsg->reliableSend( ftId, pack<F2M_FT_FRAMEWORK_MESSAGE>(ftId, self(), fid, msg));
-//         } else
-//           send(master, pack<F2M_FRAMEWORK_MESSAGE>(fid, msg));
         send(savedSlavePids[msg.slaveId], pack<M2S_FRAMEWORK_MESSAGE>(fid, msg));
         break;
       }
@@ -284,11 +293,19 @@ protected:
         TaskID tid;
         TaskState state;
         string data;
-        string ftId, origPid;
-        unpack<M2F_FT_STATUS_UPDATE>(ftId, origPid, tid, state, data);
-        if (!ftMsg->acceptMessageAck(ftId, origPid))
+        unpack<M2F_FT_STATUS_UPDATE>(tid, state, data);
+        if (duplicate())
           break;
-        DLOG(INFO) << "FT: Received message with id: " << ftId;
+        ack();
+        DLOG(INFO) << "FT: Received message with id: " << seq();
+
+        if (state == TASK_RUNNING) {
+          unordered_map <TaskID, RbReply *>::iterator it = rbReplies.find(tid);
+          if (it != rbReplies.end()) {
+            send(it->second->getPID(), pack<F2F_TASK_RUNNING_STATUS>());
+            rbReplies.erase(tid);
+          }
+        }
 
         TaskStatus status(tid, state, data);
         invoke(bind(&Scheduler::statusUpdate, sched, driver, ref(status)));
@@ -301,21 +318,13 @@ protected:
         string data;
         unpack<M2F_STATUS_UPDATE>(tid, state, data);
         TaskStatus status(tid, state, data);
+
+        unordered_map <TaskID, RbReply *>::iterator it = rbReplies.find(tid);
+        if (it != rbReplies.end() && it->second->getPID() == from()) { // clean rbReplies
+          rbReplies.erase(tid);
+        }
+
         invoke(bind(&Scheduler::statusUpdate, sched, driver, ref(status)));
-        break;
-      }
-
-      case M2F_FT_FRAMEWORK_MESSAGE: {
-        FrameworkMessage msg;
-        string ftId, origPid;
-        unpack<M2F_FT_FRAMEWORK_MESSAGE>(ftId, origPid, msg);
-
-        if (!ftMsg->acceptMessageAck(ftId, origPid))
-          break;
-
-        DLOG(INFO) << "FT: Received message with id: " << ftId;
-
-        invoke(bind(&Scheduler::frameworkMessage, sched, driver, ref(msg)));
         break;
       }
 
@@ -352,18 +361,7 @@ protected:
         break;
       }
 
-      case FT_RELAY_ACK: {
-        string ftId, senderStr;
-        unpack<FT_RELAY_ACK>(ftId, senderStr);
-
-        DLOG(INFO) << "FT: got final ack for " << ftId;
-
-        ftMsg->gotAck(ftId);
-        break;
-      }
-
       case PROCESS_TIMEOUT: {
-        ftMsg->sendOutstanding();
         break;
       }
 
@@ -564,7 +562,8 @@ int NexusSchedulerDriver::replyToOffer(OfferID offerId,
   }
 
   // TODO(benh): Do a Process::post instead?
-  process->send( process->self(), process->pack<F2F_SLOT_OFFER_REPLY>(offerId, tasks, Params(params)));
+  
+  process->send(process->self(), process->pack<F2F_SLOT_OFFER_REPLY>(offerId, tasks, Params(params)));
 
   return 0;
 }
@@ -599,7 +598,7 @@ int NexusSchedulerDriver::sendFrameworkMessage(const FrameworkMessage &message)
 
   // TODO(benh): Do a Process::post instead?
 
-  process->send( process->self(), process->pack<F2F_FRAMEWORK_MESSAGE>(message) );
+  process->send(process->self(), process->pack<F2F_FRAMEWORK_MESSAGE>(message));
 
   return 0;
 }

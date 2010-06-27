@@ -60,7 +60,7 @@ void MasterDetector::process(ZooKeeper *zk, int type, int state,
 	string prefix = znode.substr(0, index);
 
 	// Create the node (even if it already exists).
-	ret = zk->create(prefix, "", ZOO_CREATOR_ALL_ACL,
+	ret = zk->create(prefix, "", ZOO_OPEN_ACL_UNSAFE, // ZOO_CREATOR_ALL_ACL, // needs authentication
 			 0, &result);
 
 	if (ret != ZOK && ret != ZNODEEXISTS)
@@ -77,7 +77,7 @@ void MasterDetector::process(ZooKeeper *zk, int type, int state,
 
       if (contend) {
 	// We contend with the pid given in constructor.
-	ret = zk->create(znode + "/", pid, ZOO_CREATOR_ALL_ACL,
+	ret = zk->create(znode + "/", pid, ZOO_OPEN_ACL_UNSAFE, // ZOO_CREATOR_ALL_ACL, // needs authentication
 			 ZOO_SEQUENCE | ZOO_EPHEMERAL, &result);
 
 	if (ret != ZOK)
