@@ -336,6 +336,7 @@ TUPLE(E2S_FRAMEWORK_MESSAGE,
 
 TUPLE(S2E_REGISTER_REPLY,
       (SlaveID,
+       std::string /*hostname*/,
        std::string /*frameworkName*/,
        std::string /*initArg*/));
 
