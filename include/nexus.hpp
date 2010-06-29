@@ -99,9 +99,14 @@ struct ExecutorInfo
   
   ExecutorInfo(const std::string& _uri, const data_string& _initArg)
     : uri(_uri), initArg(_initArg) {}
+  
+  ExecutorInfo(const std::string& _uri, const data_string& _initArg,
+      const string_map& _params)
+    : uri(_uri), initArg(_initArg), params(_params) {}
 
   std::string uri;
   data_string initArg;
+  string_map params;
 };
 
 
