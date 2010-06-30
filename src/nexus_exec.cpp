@@ -62,10 +62,11 @@ protected:
       // a timely manner (if at all).
       switch(receive()) {
         case S2E_REGISTER_REPLY: {
-          string name;
+          string host;
+          string fwName;
           string args;
-          unpack<S2E_REGISTER_REPLY>(sid, name, args);
-          ExecutorArgs execArg(sid, fid, name, args);
+          unpack<S2E_REGISTER_REPLY>(sid, host, fwName, args);
+          ExecutorArgs execArg(sid, host, fid, fwName, args);
           invoke(bind(&Executor::init, executor, driver, ref(execArg)));
           break;
         }
@@ -179,9 +180,9 @@ int NexusExecutorDriver::run()
   if (value == NULL)
     fatal("expecting NEXUS_SLAVE_PID in environment");
 
-  iss.str(value);
+  slave = make_pid(value);
 
-  if (!(iss >> slave))
+  if (!slave)
     fatal("cannot parse NEXUS_SLAVE_PID");
 
   /* Get framework ID from environment. */
@@ -190,7 +191,6 @@ int NexusExecutorDriver::run()
   if (value == NULL)
     fatal("expecting NEXUS_FRAMEWORK_ID in environment");
 
-  iss.clear();
   iss.str(value);
 
   if (!(iss >> fid))
@@ -274,6 +274,7 @@ public:
   {
     exec->init(exec,
                args.slaveId.c_str(),
+               args.host.c_str(),
                args.frameworkId.c_str(),
                args.frameworkName.c_str(),
                args.data.data(),

@@ -13,7 +13,7 @@
 #include <string>
 #include <vector>
 
-#include <process.hpp>
+#include <reliable.hpp>
 
 #include <glog/logging.h>
 
@@ -29,9 +29,8 @@
 #include "params.hpp"
 #include "resources.hpp"
 #include "master_detector.hpp"
-#include "task_info.hpp"
-#include "url_processor.hpp"
-#include "ft_messaging.hpp"
+#include "task.hpp"
+
 
 namespace nexus { namespace internal { namespace master {
 
@@ -109,7 +108,7 @@ struct Framework
   ExecutorInfo executorInfo;
   time_t connectTime;
 
-  unordered_map<TaskID, TaskInfo *> tasks;
+  unordered_map<TaskID, Task *> tasks;
   unordered_set<SlotOffer *> slotOffers; // Active offers given to this framework
 
   Resources resources; // Total resources owned by framework (tasks + offers)
@@ -124,20 +123,20 @@ struct Framework
     time(&connectTime);
   }
   
-  TaskInfo * lookupTask(TaskID tid)
+  Task * lookupTask(TaskID tid)
   {
-    unordered_map<TaskID, TaskInfo *>::iterator it = tasks.find(tid);
+    unordered_map<TaskID, Task *>::iterator it = tasks.find(tid);
     if (it != tasks.end())
       return it->second;
     else
       return NULL;
   }
   
-  TaskInfo * addTask(TaskID tid, const std::string& name,
+  Task * addTask(TaskID tid, const std::string& name,
                  SlaveID location, Resources resources)
   {
     CHECK(tasks.find(tid) == tasks.end());
-    TaskInfo *task = new TaskInfo(tid, resources);
+    Task *task = new Task(tid, resources);
     task->frameworkId = id;
     task->state = TASK_STARTING;
     task->name = name;
@@ -150,7 +149,7 @@ struct Framework
   void removeTask(TaskID tid)
   {
     CHECK(tasks.find(tid) != tasks.end());
-    unordered_map<TaskID, TaskInfo *>::iterator it = tasks.find(tid);
+    unordered_map<TaskID, Task *>::iterator it = tasks.find(tid);
     this->resources -= it->second->resources;
     tasks.erase(it);
   }
@@ -205,30 +204,30 @@ struct Slave
   Resources resourcesOffered; // Resources currently in offers
   Resources resourcesInUse;   // Resources currently used by tasks
 
-  unordered_map<pair<FrameworkID, TaskID>, TaskInfo *> tasks;
+  unordered_map<pair<FrameworkID, TaskID>, Task *> tasks;
   unordered_set<SlotOffer *> slotOffers; // Active offers of slots on this slave
   
   Slave(const PID &_pid, SlaveID _id = "") : pid(_pid), id(_id), active(true) {
     connectTime = lastHeartbeat = time(NULL);
   }
 
-  TaskInfo * lookupTask(FrameworkID fid, TaskID tid)
+  Task * lookupTask(FrameworkID fid, TaskID tid)
   {
-    foreachpair (_, TaskInfo *task, tasks)
+    foreachpair (_, Task *task, tasks)
       if (task->frameworkId == fid && task->id == tid)
         return task;
 
     return NULL;
   }
 
-  void addTask(TaskInfo *task)
+  void addTask(Task *task)
   {
     CHECK(tasks.find(make_pair(task->frameworkId, task->id)) == tasks.end());
     tasks[make_pair(task->frameworkId, task->id)] = task;
     resourcesInUse += task->resources;
   }
   
-  void removeTask(TaskInfo *task)
+  void removeTask(Task *task)
   {
     CHECK(tasks.find(make_pair(task->frameworkId, task->id)) != tasks.end());
     tasks.erase(make_pair(task->frameworkId, task->id));
@@ -262,12 +261,9 @@ enum TaskRemovalReason
 };
 
 
-class Master : public Tuple<Process>
+class Master : public Tuple<ReliableProcess>
 {
 protected:
-  bool isFT;
-  string zkServers;
-  MasterDetector *masterDetector;
   unordered_map<FrameworkID, Framework *> frameworks;
   unordered_map<SlaveID, Slave *> slaves;
   unordered_map<OfferID, SlotOffer *> slotOffers;
@@ -279,17 +275,13 @@ protected:
   long nextSlaveId;         // Used to give each slave a unique ID.
   long nextSlotOfferId; // Used to give each slot offer a unique ID.
 
-
   string allocatorType;
   Allocator *allocator;
 
   long masterId; // Used to differentiate different master in FT mode, will be ephemeral id
-  FTMessaging *ftMsg;
 
 public:
-  Master(const string &zk = "");
-
-  Master(const string& _allocatorType, const string &zk = "");
+  Master(const string& _allocatorType = "simple");
   
   ~Master();
 
@@ -300,7 +292,7 @@ public:
   
   void rescindOffer(SlotOffer *offer);
   
-  void killTask(TaskInfo *task);
+  void killTask(Task *task);
   
   Framework * lookupFramework(FrameworkID fid);
 
@@ -309,7 +301,7 @@ public:
   SlotOffer * lookupSlotOffer(OfferID soid);
 
   // Used in FT mode. Ensures that task is also registered in frameworks->tasks
-  void updateFrameworkTasks(TaskInfo *task);
+  void updateFrameworkTasks(Task *task);
   
   // Used in FT mode. Traverses all slaves' tasks t and calls updateFrameworkTasks(t)
   void updateFrameworkTasks();
@@ -323,7 +315,7 @@ public:
 
   // TODO(benh): Can this be cleaner?
   // Make self() public so that isolation modules and tests can access it
-  using Tuple<Process>::self;
+  using Tuple<ReliableProcess>::self;
 
 protected:
   void operator () ();
@@ -349,7 +341,7 @@ protected:
                        OfferReturnReason reason,
                        const vector<SlaveResources>& resourcesLeft);
 
-  void removeTask(TaskInfo *task, TaskRemovalReason reason);
+  void removeTask(Task *task, TaskRemovalReason reason);
 
   // Kill all of a framework's tasks, delete the framework object, and
   // reschedule slot offers for slots that were assigned to this framework
@@ -385,7 +377,7 @@ inline std::ostream& operator << (std::ostream& stream, const Framework *f)
 }
 
 
-inline std::ostream& operator << (std::ostream& stream, const TaskInfo *t)
+inline std::ostream& operator << (std::ostream& stream, const Task *t)
 {
   stream << "task " << t->frameworkId << ":" << t->id;
   return stream;

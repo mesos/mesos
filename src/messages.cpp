@@ -79,6 +79,7 @@ void operator & (serializer& s, const ExecutorInfo& info)
 {
   s & info.uri;
   s & info.initArg;
+  s & info.params;
 }
 
 
@@ -86,6 +87,7 @@ void operator & (deserializer& s, ExecutorInfo& info)
 {
   s & info.uri;
   s & info.initArg;
+  s & info.params;
 }
 
 
@@ -129,7 +131,7 @@ void operator & (deserializer& s, Resources& resources)
   s & resources.mem;
 }
 
-void operator & (serializer& s, const TaskInfo& taskInfo)
+void operator & (serializer& s, const Task& taskInfo)
 {
   s & taskInfo.id;
   s & taskInfo.frameworkId;
@@ -140,7 +142,7 @@ void operator & (serializer& s, const TaskInfo& taskInfo)
   s & taskInfo.slaveId;
 }
 
-void operator & (deserializer& s, TaskInfo& taskInfo)
+void operator & (deserializer& s, Task& taskInfo)
 {
   s & taskInfo.id;
   s & taskInfo.frameworkId;

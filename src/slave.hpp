@@ -26,7 +26,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 
-#include <process.hpp>
+#include <reliable.hpp>
 
 #include "fatal.hpp"
 #include "foreach.hpp"
@@ -35,8 +35,7 @@
 #include "resources.hpp"
 #include "slave_state.hpp"
 #include "master_detector.hpp"
-#include "task_info.hpp"
-#include "ft_messaging.hpp"
+#include "task.hpp"
 
 namespace nexus { namespace internal { namespace slave {
 
@@ -81,7 +80,7 @@ struct Framework
   string user;
   ExecutorInfo executorInfo;
   list<TaskDescription *> queuedTasks; // Holds tasks until executor starts
-  unordered_map<TaskID, TaskInfo *> tasks;
+  unordered_map<TaskID, Task *> tasks;
   Resources resources;
   PID fwPid;
 
@@ -97,27 +96,27 @@ struct Framework
   {
     foreach(TaskDescription *desc, queuedTasks)
       delete desc;
-    foreachpair (_, TaskInfo *task, tasks)
+    foreachpair (_, Task *task, tasks)
       delete task;
   }
 
-  TaskInfo * lookupTask(TaskID tid)
+  Task * lookupTask(TaskID tid)
   {
-    unordered_map<TaskID, TaskInfo *>::iterator it = tasks.find(tid);
+    unordered_map<TaskID, Task *>::iterator it = tasks.find(tid);
     if (it != tasks.end())
       return it->second;
     else
       return NULL;
   }
 
-  TaskInfo * addTask(TaskID tid, const std::string& name, Resources res)
+  Task * addTask(TaskID tid, const std::string& name, Resources res)
   {
     if (tasks.find(tid) != tasks.end()) {
       // This should never happen - the master will make sure that it never
       // lets a framework launch two tasks with the same ID.
       LOG(FATAL) << "Task ID " << tid << "already exists in framework " << id;
     }
-    TaskInfo *task = new TaskInfo(tid, res);
+    Task *task = new Task(tid, res);
     task->frameworkId = id;
     task->state = TASK_STARTING;
     task->name = name;
@@ -139,7 +138,7 @@ struct Framework
     }
 
     // Remove it from tasks as well
-    unordered_map<TaskID, TaskInfo *>::iterator it = tasks.find(tid);
+    unordered_map<TaskID, Task *>::iterator it = tasks.find(tid);
     if (it != tasks.end()) {
       resources -= it->second->resources;
       delete it->second;
@@ -159,15 +158,13 @@ struct Executor
 };
 
 
-class Slave : public Tuple<Process>
+class Slave : public Tuple<ReliableProcess>
 {
 public:
   typedef unordered_map<FrameworkID, Framework*> FrameworkMap;
   typedef unordered_map<FrameworkID, Executor*> ExecutorMap;
   
   bool isFT;
-  string zkServers;
-  MasterDetector *masterDetector;
   PID master;
   SlaveID id;
   Resources resources;
@@ -176,13 +173,10 @@ public:
   ExecutorMap executors;  // Invariant: framework will exist if executor exists
   string isolationType;
   IsolationModule *isolationModule;
-  FTMessaging *ftMsg;
 
 public:
-  Slave(const string &_master, Resources resources, bool _local);
-
-  Slave(const string &_master, Resources resources, bool _local,
-        const string& isolationType);
+  Slave(Resources resources, bool local,
+	const string& isolationType = "process");
 
   virtual ~Slave();
 
@@ -195,7 +189,7 @@ public:
 
   // TODO(benh): Can this be cleaner?
   // Make self() public so that isolation modules and tests can access it
-  using Tuple<Process>::self;
+  using Tuple<ReliableProcess>::self;
 
 protected:
   void operator () ();

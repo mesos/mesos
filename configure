@@ -659,8 +659,8 @@ CCC
 CC
 CFLAGS'
 ac_subdirs_all='src/third_party/libprocess
-src/third_party/gtest-1.4.0-patched
-src/third_party/glog-0.3.0
+src/third_party/gtest-1.5.0
+src/third_party/glog-0.3.1
 src/third_party/zookeeper-3.3.1/src/c'
 
 # Initialize some variables set by options.
@@ -1729,9 +1729,9 @@ ac_configure="$SHELL $ac_aux_dir/configure"  # Please don't use this var.
 
 subdirs="$subdirs src/third_party/libprocess"
 
-subdirs="$subdirs src/third_party/gtest-1.4.0-patched"
+subdirs="$subdirs src/third_party/gtest-1.5.0"
 
-subdirs="$subdirs src/third_party/glog-0.3.0"
+subdirs="$subdirs src/third_party/glog-0.3.1"
 
 subdirs="$subdirs src/third_party/zookeeper-3.3.1/src/c"
 
