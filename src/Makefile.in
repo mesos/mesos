@@ -93,7 +93,7 @@ LIBS += -lglog -lgtest -lprocess -lev -lpthread -ldl -lzookeeper_st
 
 NEXUS_EXES = nexus-master nexus-slave nexus-local nexus-launcher \
 	     test-framework test-executor cpp-test-framework cpp-test-executor \
-	     memhog memhog-executor
+	     memhog memhog-executor scheduled-memhog
 
 ifeq ($(OS_NAME),solaris)
   NEXUS_EXES += nexus-projd
@@ -222,6 +222,9 @@ memhog: memhog.cpp $(NEXUS_LIB) third_party/libprocess/libprocess.a
 	$(CXX) $(CXXFLAGS) -o $@ $< -L. $(LDFLAGS) -lnexus++ $(LIBS) 
 
 memhog-executor: memhog_executor.cpp $(NEXUS_LIB) third_party/libprocess/libprocess.a
+	$(CXX) $(CXXFLAGS) -o $@ $< -L. $(LDFLAGS) -lnexus++ $(LIBS) 
+
+scheduled-memhog: scheduled_memhog.cpp $(NEXUS_LIB) third_party/libprocess/libprocess.a
 	$(CXX) $(CXXFLAGS) -o $@ $< -L. $(LDFLAGS) -lnexus++ $(LIBS) 
 
 java: $(JAVA_LIB) swig/java/nexus.jar swig/java/TestFramework.class swig/java/TestExecutor.class
