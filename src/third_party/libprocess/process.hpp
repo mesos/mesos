@@ -55,6 +55,17 @@ struct msg
   uint32_t len;
 };
 
+class ProcessClock {
+public:
+  static void pause();
+  static void resume();
+  static void advance(double secs);
+};
+
+class MessageFilter {
+public:
+  virtual bool filter(struct msg *) = 0;
+};
 
 #ifdef USE_LITHE
 
@@ -213,6 +224,9 @@ protected:
   /* Returns true if operation on file descriptor is ready. */
   virtual bool ready(int fd, int op);
 
+  /* Returns sub-second elapsed time (according to this process). */
+  double elapsed();
+
 public:
   virtual ~Process();
 
@@ -228,14 +242,17 @@ public:
   /* Spawn a new process. */
   static PID spawn(Process *process);
 
-  /* Wait for PID to exit (returns true if actually waited). */
+  /* Wait for PID to exit (returns true if actually waited on a process). */
   static bool wait(PID pid);
 
-  /* Wait for PID to exit (returns true if actually waited). */
+  /* Wait for PID to exit (returns true if actually waited on a process). */
   static bool wait(Process *process);
 
   /* Invoke the thunk in a legacy safe way. */
   static void invoke(const std::tr1::function<void (void)> &thunk);
+
+  /* Filter messages to be enqueued (except for timeout messages). */
+  static void filter(MessageFilter *);
 };
 
 
