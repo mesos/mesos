@@ -36,23 +36,8 @@ const int64_t MIN_RSS = 128 * Megabyte;
 }
 
 
-LxcIsolationModule::LxcIsolationModule(Slave* slave)
-{
-  this->slave = slave;
-  reaper = new Reaper(this);
-  Process::spawn(reaper);
-
-  // Run a basic check to see whether Linux Container tools are available
-  if (system("lxc-version > /dev/null") != 0) {
-    LOG(FATAL) << "Could not run lxc-version; make sure Linux Container "
-                << "tools are installed";
-  }
-  // Check that we are root (it might also be possible to create Linux
-  // containers without being root, but we can support that later)
-  if (getuid() != 0) {
-    LOG(FATAL) << "LXC isolation module requires slave to run as root";
-  }
-}
+LxcIsolationModule::LxcIsolationModule()
+  : initialized(false) {}
 
 
 LxcIsolationModule::~LxcIsolationModule()
@@ -60,10 +45,36 @@ LxcIsolationModule::~LxcIsolationModule()
   // We want to wait until the reaper has completed because it
   // accesses 'this' in order to make callbacks ... deleting 'this'
   // could thus lead to a seg fault!
-  Process::post(reaper->getPID(), SHUTDOWN_REAPER);
-  Process::wait(reaper);
-  delete reaper;
+  if (initialized) {
+    CHECK(reaper != NULL);
+    Process::post(reaper->getPID(), SHUTDOWN_REAPER);
+    Process::wait(reaper);
+    delete reaper;
+  }
 }
+
+
+void LxcIsolationModule::initialize(Slave *slave)
+{
+  this->slave = slave;
+  
+  // Run a basic check to see whether Linux Container tools are available
+  if (system("lxc-version > /dev/null") != 0) {
+    LOG(FATAL) << "Could not run lxc-version; make sure Linux Container "
+                << "tools are installed";
+  }
+
+  // Check that we are root (it might also be possible to create Linux
+  // containers without being root, but we can support that later)
+  if (getuid() != 0) {
+    LOG(FATAL) << "LXC isolation module requires slave to run as root";
+  }
+
+  reaper = new Reaper(this);
+  Process::spawn(reaper);
+  initialized = true;
+}
+
 
 
 void LxcIsolationModule::frameworkAdded(Framework* fw)
@@ -86,6 +97,9 @@ void LxcIsolationModule::frameworkRemoved(Framework* fw)
 
 void LxcIsolationModule::startExecutor(Framework *fw)
 {
+  if (!initialized)
+    LOG(FATAL) << "Cannot launch executors before initialization!";
+
   LOG(INFO) << "Starting executor for framework " << fw->id << ": "
             << fw->executorInfo.uri;
   CHECK(infos[fw->id]->lxcExecutePid == -1 && infos[fw->id]->container == "");
