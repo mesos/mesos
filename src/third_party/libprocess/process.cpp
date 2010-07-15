@@ -138,11 +138,31 @@ using std::stack;
 
 
 #ifdef USE_LITHE
-#define acquire(s) spinlock_lock(&s ## _lock)
-#define release(s) spinlock_unlock(&s ## _lock)
+#define acquire(l) spinlock_lock(&l ## _lock)
+#define release(l) spinlock_unlock(&l ## _lock)
+class Synchronized
+{
+public:
+  int *lock;
+  Synchronized(int *_lock)
+    : lock(_lock) { spinlock_lock(lock); }
+  ~Synchronized() { spinlock_unlock(lock); }
+  operator bool () { return true; }
+};
+#define synchronized(l) if (Synchronized s = Synchronized(&l ## _lock))
 #else
-#define acquire(s) pthread_mutex_lock(&s ## _mutex)
-#define release(s) pthread_mutex_unlock(&s ## _mutex)
+#define acquire(l) pthread_mutex_lock(&l ## _mutex)
+#define release(l) pthread_mutex_unlock(&l ## _mutex)
+class Synchronized
+{
+public:
+  pthread_mutex_t *mutex;
+  Synchronized(pthread_mutex_t *_mutex)
+    : mutex(_mutex) { pthread_mutex_lock(mutex); }
+  ~Synchronized() { pthread_mutex_unlock(mutex); }
+  operator bool () { return true; }
+};
+#define synchronized(l) if (Synchronized s = Synchronized(&l ## _mutex))
 #endif /* USE_LITHE */
 
 
@@ -253,34 +273,40 @@ static bool filtering = false;
 /* Filter. */
 static MessageFilter *filterer = NULL;
 
-/* Filtering mutex. */
-static pthread_mutex_t filter_mutex = PTHREAD_MUTEX_INITIALIZER;
+/*
+ * Filtering mutex (needs to be recursive incase a filterer wants to
+ * do anything fancy, which is possible given that filters will get
+ * used for testing).
+*/
+static pthread_mutex_t filter_mutex;
 
 /* Tick, tock ... manually controlled clock! */
 class InternalProcessClock
 {
 public:
-  InternalProcessClock() : current(ev_time()) {}
+  InternalProcessClock()
+  {
+    initial = current = elapsed = ev_time();
+  }
 
   ~InternalProcessClock() {}
 
-  ev_tstamp getElapsed(Process *process, bool init = true)
+  ev_tstamp getCurrent(Process *process)
   {
-    ev_tstamp tstamp = 0;
+    ev_tstamp tstamp;
 
-    if (elapsed.count(process) != 0) {
-      tstamp = elapsed[process];
+    if (currents.count(process) != 0) {
+      tstamp = currents[process];
     } else {
-      if (init)
-        tstamp = elapsed[process] = current;
+      tstamp = currents[process] = initial;
     }
 
     return tstamp;
   }
 
-  void setElapsed(Process *process, ev_tstamp tstamp)
+  void setCurrent(Process *process, ev_tstamp tstamp)
   {
-    elapsed[process] = tstamp;
+    currents[process] = tstamp;
   }
 
   ev_tstamp getCurrent()
@@ -293,15 +319,27 @@ public:
     current = tstamp;
   }
 
+  ev_tstamp getElapsed()
+  {
+    return elapsed;
+  }
+
+  void setElapsed(ev_tstamp tstamp)
+  {
+    elapsed = tstamp;
+  }
+
   void discard(Process *process)
   {
     assert(process != NULL);
-    elapsed.erase(process);
+    currents.erase(process);
   }
 
 private:
-  map<Process *, ev_tstamp> elapsed;
+  map<Process *, ev_tstamp> currents;
+  ev_tstamp initial;
   ev_tstamp current;
+  ev_tstamp elapsed;
 };
 
 static InternalProcessClock *clk = NULL;
@@ -473,10 +511,12 @@ void ProcessClock::advance(double secs)
 {
   acquire(timers);
   {
-    clk->setCurrent(clk->getCurrent() + secs);
+    if (clk != NULL) {
+      clk->setElapsed(clk->getElapsed() + secs);
 
-    update_timer = true;
-    ev_async_send(loop, &async_watcher);
+      // Might need to wakeup the processing thread.
+      gate->open();
+    }
   }
   release(timers);
 }
@@ -1906,7 +1946,7 @@ public:
     acquire(timers);
     {
       if (clk != NULL) {
-        tstamp = clk->getElapsed(process) + secs;
+        tstamp = clk->getCurrent(process) + secs;
       } else {
 	// TODO(benh): Unclear if want ev_now(...) or ev_time().
 	tstamp = ev_time() + secs;
@@ -1960,8 +2000,11 @@ public:
 	    ++it;
 	  }
 	}
-	if (cancelled)
+	if (cancelled) {
+          if (timeouts.size() == 0)
+            timers->erase(tstamp);
 	  break;
+        }
       }
     }
     release(timers);
@@ -2014,34 +2057,33 @@ public:
 //     cout << "msg->id: " << msg->id << endl;
 //     cout << "msg->len: " << msg->len << endl;
 
-    acquire(processes);
-    {
+    synchronized(processes) {
       Process *receiver = NULL;
 
       if (processes.count(msg->to.pipe) != 0)
         receiver = processes[msg->to.pipe];
 
       if (receiver != NULL) {
-        // If sender is local, preserve happens-before timing.
+        // If we have a local sender AND we are using a manual clock
+        // then update the current time of the receiver to preserve
+        // the happens-before relationship between the sender and
+        // receiver. Note that the assumption is that the sender
+        // remains valid for at least the duration of this routine (so
+        // that we can look up it's current time).
         if (sender != NULL) {
-          acquire(timers);
-          {
-            if (clk != NULL)
-              // Set receiver elapsed time based on sender time,
-              // unless receiver is actually ahead of sender.
-              clk->setElapsed(receiver, max(clk->getElapsed(receiver),
-                                            clk->getElapsed(sender, false)));
+          synchronized(timers) {
+            if (clk != NULL) {
+              clk->setCurrent(receiver, max(clk->getCurrent(receiver),
+                                            clk->getCurrent(sender)));
+            }
           }
-          release(timers);
         }
 
-        // Don't forget to actually do the enqueue!
-	receiver->enqueue(msg);
+        receiver->enqueue(msg);
       } else {
 	free(msg);
       }
     }
-    release(processes);
   }
 };
 
@@ -2476,15 +2518,17 @@ void handle_timeout(struct ev_loop *loop, ev_timer *w, int revents)
 	break;
       }
 
-      // Save expired timeouts and determine time elapsed/simulated.
+      // Save expired timeouts and determine the amount of time that
+      // has been simulated if using the manual clock.
       const list<timeout_t> &timeouts = it->second;
+
       foreach (const timeout_t &timeout, timeouts) {
 	if (clk != NULL) {
-	  ev_tstamp elapsed = timeout.get<0>();
+	  ev_tstamp current = timeout.get<0>();
 	  Process *process = timeout.get<1>();
-          // Current elapsed time may be greater than timeout if a
-          // local message is received (and happens-before kicks in).
-          clk->setElapsed(process, max(clk->getElapsed(process), elapsed));
+          // Current time may be greater than timeout if a local
+          // message is received (and happens-before kicks in).
+          clk->setCurrent(process, max(clk->getCurrent(process), current));
 	}
 	// TODO(benh): Ensure deterministic order for testing?
 	timedout.push_back(timeout);
@@ -2497,6 +2541,8 @@ void handle_timeout(struct ev_loop *loop, ev_timer *w, int revents)
       timers->erase(timers->begin(), last);
 
     assert(timers->empty() || (timers->begin()->first > current_tstamp));
+
+    // TODO(benh): Make this code look like the code in handle_async.
 
     if (!timers->empty() && clk == NULL) {
       timer_watcher.repeat = timers->begin()->first - current_tstamp;
@@ -2752,6 +2798,54 @@ void * schedule(void *arg)
       Gate::state_t old = gate->approach();
       process = ProcessManager::instance()->dequeue();
       if (process == NULL) {
+
+        // When using the manual clock, we want to let all the
+        // processes "run" up to the current time so that processes
+        // receive messages in order. If we let one process have a
+        // drastically advanced current time then it may try send
+        // messages to another process that, due to the happens-before
+        // relationship, will inherit it's drastically advanced
+        // current time. If the processing thread gets to this point
+        // (i.e., the point where no other processes are runnable)
+        // with the manual clock means that all of the processes have
+        // been run which could be run up to the current time. The
+        // only way another process could become runnable is if (1) it
+        // receives a message from another node, (2) a file descriptor
+        // it is awaiting has become ready, or (3) if it has a
+        // timeout. We can ignore processes that become runnable due
+        // to receiving a message from another node or getting an
+        // event on a file descriptor because that should not change
+        // the timing happens-before relationship of the local
+        // processes (unless of course the file descriptor was created
+        // from something like timerfd, in which case, since the
+        // programmer is not using the timing source provided in
+        // libprocess and all bets are off). Thus, we can check that
+        // there are no pending timeouts before the current time and
+        // move the current time to the next timeout value, and tell
+        // the timer to update itself.
+
+        synchronized(timers) {
+          if (clk != NULL) {
+            if (!timers->empty()) {
+              // Adjust the current time to the next timeout, provided
+              // it is not past the elapsed time.
+              ev_tstamp tstamp = timers->begin()->first;
+              if (tstamp <= clk->getElapsed())
+                clk->setCurrent(tstamp);
+              
+              update_timer = true;
+              ev_async_send(loop, &async_watcher);
+            } else {
+              // Woah! This comment is the only thing in this else
+              // branch because this is a pretty serious state ... the
+              // only way to make progress is for another node to send
+              // a message or for an event to occur on a file
+              // descriptor that a process is awaiting. We may want to
+              // consider doing (or printing) something here.
+            }
+          }
+        }
+
 	/* Wait at gate if idle. */
 	gate->arrive(old);
 	continue;
@@ -3028,6 +3122,13 @@ static void initialize()
   if (pthread_create(&io_thread, NULL, node, loop) != 0)
     fatalerror("failed to initialize node (pthread_create)");
 
+  // Intialize the filter mutex.
+  pthread_mutexattr_t attr;
+  pthread_mutexattr_init(&attr);
+  pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
+  pthread_mutex_init(&filter_mutex, &attr);
+  pthread_mutexattr_destroy(&attr);
+
   initializing = false;
 }
 
@@ -3077,20 +3178,18 @@ Process::Process()
   pid.ip = ip;
   pid.port = port;
 
-  acquire(timers);
-  {
+  // If using a manual clock, try and set current time of process
+  // using happens before relationship between creator and createe!
+  synchronized(timers) {
     if (clk != NULL) {
-      clk->setElapsed(this, clk->getCurrent());
-
-      // Set new elapsed time of process using happens before
-      // relationship between spawner and spawnee!
       if (pthread_self() == proc_thread) {
         assert(proc_process != NULL);
-        clk->setElapsed(this, clk->getElapsed(proc_process));
+        clk->setCurrent(this, clk->getCurrent(proc_process));
+      } else {
+        clk->setCurrent(this, clk->getCurrent());
       }
     }
   }
-  release(timers);
 }
 
 
@@ -3103,25 +3202,21 @@ Process::~Process()
 void Process::enqueue(struct msg *msg)
 {
   assert(msg != NULL);
+
+  synchronized(filter) {
+    if (filtering) {
+      assert(filterer != NULL);
+      if (filterer->filter(msg)) {
+        free(msg);
+        return;
+      }
+    }
+  }
+
   lock();
   {
     assert (state != EXITED);
 
-    acquire(filter);
-    {
-      if (filtering) {
-        assert(filterer != NULL);
-        if (filterer->filter(msg)) {
-          free(msg);
-          release(filter);
-          unlock();
-          return;
-        }
-      }
-    }
-    release(filter);
-
-    //cout << "enqueing pending message: " << msg << endl;
     msgs.push_back(msg);
 
     if (state == RECEIVING) {
@@ -3154,7 +3249,6 @@ struct msg * Process::dequeue()
     if (!msgs.empty()) {
       msg = msgs.front();
       msgs.pop_front();
-      //cout << "dequeueing pending message: " << msg << endl;
     }
   }
   unlock();
@@ -3199,6 +3293,16 @@ void Process::inject(const PID &from, MSGID id, const char *data, size_t length)
 
   if (length > 0)
     memcpy((char *) msg + sizeof(struct msg), data, length);
+
+  synchronized(filter) {
+    if (filtering) {
+      assert(filterer != NULL);
+      if (filterer->filter(msg)) {
+        free(msg);
+        return;
+      }
+    }
+  }
 
   lock();
   {
@@ -3430,7 +3534,7 @@ double Process::elapsed()
   acquire(timers);
   {
     if (clk != NULL) {
-      now = clk->getElapsed(this);
+      now = clk->getCurrent(this);
     } else {
       // TODO(benh): Unclear if want ev_now(...) or ev_time().
       now = ev_time();
@@ -3492,6 +3596,19 @@ PID Process::spawn(Process *process)
   initialize();
 
   if (process != NULL) {
+    // If using a manual clock, try and set current time of process
+    // using happens before relationship between spawner and spawnee!
+    synchronized(timers) {
+      if (clk != NULL) {
+        if (pthread_self() == proc_thread) {
+          assert(proc_process != NULL);
+          clk->setCurrent(process, clk->getCurrent(proc_process));
+        } else {
+          clk->setCurrent(process, clk->getCurrent());
+        }
+      }
+    }
+
     ProcessManager::instance()->spawn(process);
 #ifdef USE_LITHE
     lithe_sched_request(1);
