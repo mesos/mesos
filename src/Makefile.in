@@ -114,7 +114,8 @@ COMMON_OBJ = fatal.o hash_pid.o messages.o lock.o master_detector.o url_processo
 EXEC_LIB_OBJ = nexus_exec.o
 SCHED_LIB_OBJ = nexus_sched.o nexus_local.o params.o
 TEST_OBJ = tests/main.o tests/test_master.o tests/test_resources.o \
-	   tests/external_test.o tests/test_sample_frameworks.o
+	   tests/external_test.o tests/test_sample_frameworks.o \
+	   tests/test_lxc_isolation.o
 
 ifeq ($(OS_NAME),solaris)
   SLAVE_OBJ += solaris_project_isolation_module.o

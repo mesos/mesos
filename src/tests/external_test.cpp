@@ -38,6 +38,9 @@ bool isValidTestName(const char* name) {
  */
 void nexus::test::runExternalTest(const char* testCase, const char* testName)
 {
+  // Remove DISABLED_ prefix from test name if this is a disabled test
+  if (strncmp(testName, "DISABLED_", strlen("DISABLED_")) == 0)
+    testName += strlen("DISABLED_");
   // Check that the test name is valid
   if (!isValidTestName(testCase) || !isValidTestName(testName)) {
     FAIL() << "Invalid test name for external test (name should " 
