@@ -1,3 +1,5 @@
+#include <iomanip>
+
 #include <glog/logging.h>
 
 #include "allocator.hpp"
@@ -6,13 +8,15 @@
 #include "master_webui.hpp"
 
 using std::endl;
+using std::make_pair;
+using std::map;
 using std::max;
 using std::min;
-using std::pair;
-using std::make_pair;
 using std::ostringstream;
-using std::map;
+using std::pair;
 using std::set;
+using std::setfill;
+using std::setw;
 using std::string;
 using std::vector;
 
@@ -255,7 +259,7 @@ void Master::operator () ()
     if (receive() == GOT_MASTER_ID) {
       string id;
       unpack<GOT_MASTER_ID>(id);
-      masterId = lexical_cast<long>(id);
+      masterId = lexical_cast<int64_t>(id);
       LOG(INFO) << "Master ID:" << masterId;
       break;
     } else {
@@ -290,8 +294,7 @@ void Master::operator () ()
     }
 
     case F2M_REGISTER_FRAMEWORK: {
-      FrameworkID fid = lexical_cast<string>(masterId) + "-"
-	+ lexical_cast<string>(nextFrameworkId++);
+      FrameworkID fid = newFrameworkId();
       Framework *framework = new Framework(from(), fid, elapsed());
       unpack<F2M_REGISTER_FRAMEWORK>(framework->name, framework->user,
 				     framework->executorInfo);
@@ -660,7 +663,8 @@ void Master::operator () ()
 OfferID Master::makeOffer(Framework *framework,
                           const vector<SlaveResources>& resources)
 {
-  OfferID oid = lexical_cast<string>(masterId) + "-" + lexical_cast<string>(nextSlotOfferId++);
+  OfferID oid = lexical_cast<string>(masterId) + "-" 
+    + lexical_cast<string>(nextSlotOfferId++);
 
   SlotOffer *offer = new SlotOffer(oid, framework->id, resources);
   slotOffers[offer->id] = offer;
@@ -996,4 +1000,23 @@ Allocator* Master::createAllocator()
 {
   LOG(INFO) << "Creating \"" << allocatorType << "\" allocator";
   return AllocatorFactory::instantiate(allocatorType, this);
+}
+
+
+// Create a new framework ID. We format the ID as YYYYMMDDhhmm-master-fw,
+// where the first part is the submission date and submission time, master
+// is ID of the master (emphemeral ID from ZooKeeper if ZK is used), and
+// fw is the ID of the framework within the master (an increasing integer).
+FrameworkID Master::newFrameworkId()
+{
+  time_t rawtime;
+  struct tm* timeinfo;
+  time(&rawtime);
+  timeinfo = localtime(&rawtime);
+  char timestr[32];
+  strftime(timestr, sizeof(timestr), "%Y%m%d%H%M", timeinfo);
+  int fwId = nextFrameworkId++;
+  ostringstream oss;
+  oss << timestr << "-" << masterId << "-" << setw(4) << setfill('0') << fwId;
+  return oss.str();
 }
