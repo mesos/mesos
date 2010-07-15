@@ -123,7 +123,7 @@ private:
 	 TIMEDOUT,
 	 EXITED } state;
 
-  /* Queue of messages received. */
+  /* Queue of received messages. */
   std::deque<struct msg *> msgs;
 
   /* Current message. */
@@ -144,13 +144,13 @@ private:
 
   /* Lock/mutex protecting internals. */
 #ifdef USE_LITHE
-  int l;
-  void lock() { spinlock_lock(&l); }
-  void unlock() { spinlock_unlock(&l); }
+  int l_lock;
+  void lock() { spinlock_lock(&l_lock); }
+  void unlock() { spinlock_unlock(&l_lock); }
 #else
-  pthread_mutex_t m;
-  void lock() { pthread_mutex_lock(&m); }
-  void unlock() { pthread_mutex_unlock(&m); }
+  pthread_mutex_t m_mutex;
+  void lock() { pthread_mutex_lock(&m_mutex); }
+  void unlock() { pthread_mutex_unlock(&m_mutex); }
 #endif /* USE_LITHE */
 
   /* Enqueues the specified message. */
