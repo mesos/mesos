@@ -357,6 +357,8 @@ protected:
   void removeSlave(Slave *slave);
 
   virtual Allocator* createAllocator();
+
+  FrameworkID newFrameworkId();
 };
 
 

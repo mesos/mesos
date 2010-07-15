@@ -622,7 +622,7 @@ public:
     // TODO(benh): Cleanup the way we launch local drivers!
     setenv("NEXUS_LOCAL", "1", 1);
     setenv("NEXUS_SLAVE_PID", pid.c_str(), 1);
-    setenv("NEXUS_FRAMEWORK_ID", "0-0", 1);
+    setenv("NEXUS_FRAMEWORK_ID", framework->id.c_str(), 1);
 
     executor = new TaskRunningExecutor();
     driver = new NexusExecutorDriver(executor);
