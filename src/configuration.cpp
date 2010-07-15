@@ -21,43 +21,54 @@ const char* Configuration::CONFIG_FILE_NAME = "mesos.conf";
 const char* Configuration::ENV_VAR_PREFIX = "MESOS_";
 
 
-Configuration::Configuration() 
+void Configuration::validate()
 {
-  loadEnv();
-  loadConfigFileIfGiven();
+  foreachpair(const string& key, const Option& opt, options) {
+    if (params.contains(key) && opt.validator && !opt.validator->isValid(params[key])) {
+      throw BadOptionValueException(params[key].c_str());
+    }
+  }
 }
 
 
-Configuration::Configuration(int argc,
-                             char** argv,
-                             bool inferMesosHomeFromArg0) 
+void Configuration::load(int argc, char** argv, bool inferMesosHomeFromArg0)
 {
   loadEnv();
   loadCommandLine(argc, argv, inferMesosHomeFromArg0);
   loadConfigFileIfGiven();
+  validate();
 }
 
 
-Configuration::Configuration(const map<string, string>& _params) 
+void Configuration::load()
+{
+  loadEnv();
+  loadConfigFileIfGiven();
+  validate();
+}
+
+
+void Configuration::load(const map<string, string>& _params) 
 {
   loadEnv();
   params.loadMap(_params);
   loadConfigFileIfGiven();
+  validate();
 }
 
 
-void Configuration::loadConfigFileIfGiven() {
+void Configuration::loadConfigFileIfGiven(bool overwrite) {
   string confDir = "";
   if (params.contains("conf"))
     confDir = params["conf"];
   else if (params.contains("home")) // find conf dir relative to MESOS_HOME
     confDir = params["home"] + "/" + DEFAULT_CONFIG_DIR;
   if (confDir != "")
-    loadConfigFile(confDir + "/" + CONFIG_FILE_NAME);
+    loadConfigFile(confDir + "/" + CONFIG_FILE_NAME, overwrite);
 }
 
 
-void Configuration::loadEnv()
+void Configuration::loadEnv(bool overwrite)
 {
   int i = 0;
   while (environ[i] != NULL) {
@@ -70,7 +81,9 @@ void Configuration::loadEnv()
       key = line.substr(strlen(ENV_VAR_PREFIX), eq - strlen(ENV_VAR_PREFIX));
       std::transform(key.begin(), key.end(), key.begin(), ::tolower);
       val = line.substr(eq + 1);
-      params[key] = val;
+      if (overwrite || !params.contains(key)) {
+        params[key] = val;
+      }
     }
     i++;
   }
@@ -79,7 +92,8 @@ void Configuration::loadEnv()
 
 void Configuration::loadCommandLine(int argc,
                                     char** argv,
-                                    bool inferMesosHomeFromArg0)
+                                    bool inferMesosHomeFromArg0,
+                                    bool overwrite)
 {
   // Set home based on argument 0 if asked to do so
   if (inferMesosHomeFromArg0) {
@@ -103,40 +117,43 @@ void Configuration::loadCommandLine(int argc,
     if (args[i].find("--", 0) == 0) {
       // handle --blah=25 and --blah
       size_t eq = args[i].find_first_of("=");
-      if (eq == string::npos) {        
+      if (eq == string::npos) { // handle the no value case
         key = args[i].substr(2);
         std::transform(key.begin(), key.end(), key.begin(), ::tolower);
         val = "1";
         set = true;
-      } else {
-        key = args[i].substr(2, eq-2);
+      } else { // handle the value case
+        key = args[i].substr(2, eq-2); 
+        std::transform(key.begin(), key.end(), key.begin(), ::tolower);
         val = args[i].substr(eq+1);
         set = true;
       } 
     } else if (args[i].find_first_of("-", 0) == 0) {
       // handle -blah 25 and -blah
-      if ((i+1 >= args.size()) ||
-          (i+1 < args.size() && args[i+1].find_first_of("-", 0) == 0)) {
+      if ((i+1 >= args.size()) ||  // last arg || next arg is new arg
+          (i+1 < args.size() && args[i+1].find_first_of("-", 0) == 0 &&
+           args[i+1].find_first_of("0123456789.", 1) != 1)) {
         key = args[i].substr(1);
         std::transform(key.begin(), key.end(), key.begin(), ::tolower);
         val = "1";
         set = true;
-      } else if (i+1 < args.size() && args[i+1].find_first_of("-", 0) != 0) {
+      } else { // not last arg && next arg is a value
         key = args[i].substr(1);
         std::transform(key.begin(), key.end(), key.begin(), ::tolower);
         val = args[i+1];
         set = true;
-        i++;  // we've consumed next parameter as "value"-parameter
+        i++;  // we've consumed next parameter as a "value"-parameter
       }
     }
-    if (set) {
+    if (set && (overwrite || !params.contains(key))) {
       params[key] = val;
     }
   }
 }
 
 
-void Configuration::loadConfigFile(const string& fname) {
+void Configuration::loadConfigFile(const string& fname, bool overwrite) 
+{
   ifstream cfg(fname.c_str(), std::ios::in);
   if (!cfg.is_open()) {
     string message = "Couldn't read Mesos config file: " + fname;
@@ -156,14 +173,83 @@ void Configuration::loadConfigFile(const string& fname) {
   fileParams.loadString(buf); // Parse key=value pairs using Params's code
 
   foreachpair (const string& key, const string& value, fileParams.getMap()) {
-    if (!params.contains(key)) {
+    if (overwrite || !params.contains(key)) {
       params[key] = value;
     }
   }
 }
 
 
-Params& Configuration::getParams() 
+string Configuration::getUsage() const 
+{
+  const int PAD = 10;
+  const int PADEXTRA = string("--=VAL").size(); // adjust for "--" and "=VAL"
+  string usage = "Parameters:\n\n";
+  
+  // get max key length
+  int maxLen = 0;
+  foreachpair(const string& key, _, options) {
+    maxLen = key.size() > maxLen ? key.length() : maxLen;
+  }
+  maxLen += PADEXTRA; 
+
+  foreachpair(const string& key, const Option& val, options) {
+    string helpStr = val.helpString;
+
+    if (val.defaultValue != "") {  // add default value
+      helpStr += " (default VAL=" + val.defaultValue + ")";
+    }
+
+    usage += "--" + key + "=VAL";
+    string pad(PAD + maxLen - key.size() - PADEXTRA, ' ');
+    usage += pad;
+    size_t pos1 = 0, pos2 = 0;
+    pos2 = helpStr.find_first_of("\n\r", pos1);
+    usage += helpStr.substr(pos1, pos2 - pos1) + "\n";
+
+    while(pos2 != string::npos) {  // handle multi line help strings
+      pos1 = pos2 + 1;
+      string pad2(PAD + maxLen, ' ');
+      usage += pad2;
+      pos2 = helpStr.find_first_of("\n\r", pos1);
+      usage += helpStr.substr(pos1, pos2 - pos1) + "\n";
+    }
+
+  }
+  return usage;
+}
+  
+
+int Configuration::addOption(string optName, const string& helpString) 
+{
+  std::transform(optName.begin(), optName.end(), optName.begin(), ::tolower);
+  if (options.find(optName) != options.end())
+    return -1;
+  options[optName] = Option(helpString);
+  return 0;
+}
+
+
+string Configuration::getOptionDefault(string optName) const
+{
+  std::transform(optName.begin(), optName.end(), optName.begin(), ::tolower);
+  if (options.find(optName) == options.end()) 
+    return "";
+  return options.find(optName)->second.defaultValue;
+}
+
+
+vector<string> Configuration::getOptions() const 
+{
+  vector<string> ret;
+  foreachpair(const string& key, _, options) {
+    ret.push_back(key);
+  }
+  return ret;
+}
+
+
+Params& Configuration::getParams()
 {
   return params;
 }

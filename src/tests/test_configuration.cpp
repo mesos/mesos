@@ -23,15 +23,50 @@ TEST(ConfigurationTest, Environment)
 {
   setenv("MESOS_TEST", "working", true);
   Configuration conf;
+  conf.load();
   unsetenv("MESOS_TEST");
 
   EXPECT_EQ("working", conf.getParams()["test"]);
 }
 
 
+TEST(ConfigurationTest, DefaultOptions)
+{
+  const int ARGC = 4;
+  char* argv[ARGC];
+  argv[0] = (char*) "./filename";
+  argv[1] = (char*) "--test1=501";
+  argv[2] = (char*) "--test2";
+  argv[3] = (char*) "--excp=txt";
+
+  Configuration conf;
+
+  EXPECT_NO_THROW( {
+      conf.addOption<int>("test1", "Testing option", 500);
+      conf.addOption<short>("test2", "Another tester", 0);
+      conf.addOption<long>("test3", "Tests the default\noption.", 2010);
+      conf.addOption("test4", "Option without default\noption.");
+      conf.addOption<string>("test5", "Option with a default string.", "arb");
+      conf.load(ARGC, argv, false);
+    } );
+  
+  conf.addOption<int>("excp", "Exception tester.", 50);
+  EXPECT_THROW(conf.validate(), BadOptionValueException);
+  conf.getParams()["excp"] = "27";
+  EXPECT_NO_THROW(conf.validate());
+
+  EXPECT_EQ("501",    conf.getParams()["test1"]);
+  EXPECT_EQ("1",      conf.getParams()["test2"]);
+  EXPECT_EQ("2010",   conf.getParams()["test3"]);
+  EXPECT_EQ("",       conf.getParams()["test4"]);
+  EXPECT_EQ("arb",    conf.getParams()["test5"]);
+  EXPECT_EQ("27",     conf.getParams()["excp"]);
+}
+
+
 TEST(ConfigurationTest, CommandLine)
 {
-  const int ARGC = 6;
+  const int ARGC = 10;
   char* argv[ARGC];
   argv[0] = (char*) "./filename";
   argv[1] = (char*) "--test1=text1";
@@ -39,13 +74,21 @@ TEST(ConfigurationTest, CommandLine)
   argv[3] = (char*) "-test3";
   argv[4] = (char*) "text2";
   argv[5] = (char*) "-test4";
+  argv[6] = (char*) "-negative";
+  argv[7] = (char*) "-25";
+  argv[8] = (char*) "--cAsE=4";
+  argv[9] = (char*) "--space=Long String";
 
-  Configuration conf(ARGC, argv, false);
+  Configuration conf;
+  EXPECT_NO_THROW( conf.load(ARGC, argv, false) );
 
-  EXPECT_EQ("text1", conf.getParams()["test1"]);
-  EXPECT_EQ("1",     conf.getParams()["test2"]);
-  EXPECT_EQ("text2", conf.getParams()["test3"]);
-  EXPECT_EQ("1",     conf.getParams()["test4"]);
+  EXPECT_EQ("text1",       conf.getParams()["test1"]);
+  EXPECT_EQ("1",           conf.getParams()["test2"]);
+  EXPECT_EQ("text2",       conf.getParams()["test3"]);
+  EXPECT_EQ("1",           conf.getParams()["test4"]);
+  EXPECT_EQ("-25",         conf.getParams()["negative"]);
+  EXPECT_EQ("4",           conf.getParams()["case"]);
+  EXPECT_EQ("Long String", conf.getParams()["space"]);
 }
 
 
@@ -63,6 +106,7 @@ TEST_WITH_WORKDIR(ConfigurationTest, ConfigFileWithMesosHome)
 
   setenv("MESOS_HOME", ".", 1);
   Configuration conf;
+  EXPECT_NO_THROW( conf.load() );
   unsetenv("MESOS_HOME");
 
   EXPECT_EQ("coffee", conf.getParams()["test1"]);
@@ -82,6 +126,7 @@ TEST_WITH_WORKDIR(ConfigurationTest, ConfigFileWithConfDir)
   file.close();
   setenv("MESOS_CONF", "conf2", 1);
   Configuration conf;
+  EXPECT_NO_THROW( conf.load() );
   unsetenv("MESOS_CONF");
 
   EXPECT_EQ("shake", conf.getParams()["test3"]);
@@ -103,6 +148,7 @@ TEST_WITH_WORKDIR(ConfigurationTest, ConfigFileWithHomeAndDir)
   setenv("MESOS_HOME", ".", 1);
   setenv("MESOS_CONF", "conf2", 1);
   Configuration conf;
+  EXPECT_NO_THROW( conf.load() );
   unsetenv("MESOS_CONF");
   unsetenv("MESOS_HOME");
 
@@ -130,7 +176,8 @@ TEST_WITH_WORKDIR(ConfigurationTest, CommandLineConfFlag)
   argv[2] = (char*) "--b=overridden";
   argv[3] = (char*) "--d=fromCmdLine";
 
-  Configuration conf(ARGC, argv, false);
+  Configuration conf;
+  EXPECT_NO_THROW( conf.load(ARGC, argv, false) );
 
   EXPECT_EQ("1",           conf.getParams()["a"]);
   EXPECT_EQ("overridden",  conf.getParams()["b"]);
@@ -167,7 +214,8 @@ TEST_WITH_WORKDIR(ConfigurationTest, LoadingPriorities)
   argv[1] = (char*) "--a=fromCmdLine";
   argv[2] = (char*) "--c=fromCmdLine";
 
-  Configuration conf(ARGC, argv, false);
+  Configuration conf;
+  EXPECT_NO_THROW( conf.load(ARGC, argv, false) );
 
   // Clear the environment vars set above
   unsetenv("MESOS_HOME");
