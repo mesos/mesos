@@ -13,23 +13,16 @@ using boost::bad_lexical_cast;
 using namespace nexus::internal::master;
 
 
-void usage(const char* programName, const Configuration& conf)
+void usage(const char* progName, const Configuration& conf)
 {
-  cerr << "Usage: " << programName
-       << " [--port PORT]"
-       << " [--url URL]"
-       << " [--allocator ALLOCATOR]"
-#ifdef NEXUS_WEBUI
-       << " [--webui-port PORT]"
-#endif
-       << " [--quiet]" << endl
+  cerr << "Usage: " << progName << " [--port PORT] [--url URL] [...]" << endl
        << endl
        << "URL (used for contending to be a master) may be one of:" << endl
        << "  zoo://host1:port1,host2:port2,..." << endl
-       << "  zoofile://file where file contains a host:port pair per line"
-       << endl << endl
-       << "Option details:" << endl
-       << conf.getUsage() << endl;
+       << "  zoofile://file where file has one host:port pair per line" << endl
+       << endl
+       << "Supported options:" << endl
+       << conf.getUsage();
 }
 
 
