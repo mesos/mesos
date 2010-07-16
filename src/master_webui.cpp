@@ -19,10 +19,14 @@ PID master;
 namespace nexus { namespace internal { namespace master {
 
 
-void *runMasterWebUI(void *)
+void *runMasterWebUI(void* webuiPort)
 {
   LOG(INFO) << "Web UI thread started";
   Py_Initialize();
+  char* nargv[2]; 
+  nargv[0] = const_cast<char*>("webui/master/webui.py");
+  nargv[1] = reinterpret_cast<char*>(webuiPort);
+  PySys_SetArgv(2,nargv);
   PyRun_SimpleString("import sys\n"
       "sys.path.append('webui/master/swig')\n"
       "sys.path.append('webui/common')\n"
@@ -36,12 +40,12 @@ void *runMasterWebUI(void *)
 }
 
 
-void startMasterWebUI(PID master)
+void startMasterWebUI(const PID &master, char* webuiPort)
 {
   LOG(INFO) << "Starting master web UI";
   ::master = master;
   pthread_t thread;
-  pthread_create(&thread, 0, runMasterWebUI, 0);
+  pthread_create(&thread, 0, runMasterWebUI, webuiPort);
 }
 
 
