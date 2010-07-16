@@ -123,7 +123,7 @@ private:
 	 TIMEDOUT,
 	 EXITED } state;
 
-  /* Queue of messages received. */
+  /* Queue of received messages. */
   std::deque<struct msg *> msgs;
 
   /* Current message. */
