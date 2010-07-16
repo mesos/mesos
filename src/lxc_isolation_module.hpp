@@ -29,15 +29,18 @@ public:
   enum { SHUTDOWN_REAPER = NEXUS_MESSAGES };
 
 protected:
+  bool initialized;
   Slave* slave;
   unordered_map<FrameworkID, string> container;
   unordered_map<FrameworkID, pid_t> lxcExecutePid;
   Reaper* reaper;
 
 public:
-  LxcIsolationModule(Slave* slave);
+  LxcIsolationModule();
 
   virtual ~LxcIsolationModule();
+
+  virtual void initialize(Slave* slave);
 
   virtual void frameworkAdded(Framework* framework);
 

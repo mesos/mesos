@@ -1,3 +1,5 @@
+#include <iomanip>
+
 #include <glog/logging.h>
 
 #include "allocator.hpp"
@@ -6,13 +8,15 @@
 #include "master_webui.hpp"
 
 using std::endl;
+using std::make_pair;
+using std::map;
 using std::max;
 using std::min;
-using std::pair;
-using std::make_pair;
 using std::ostringstream;
-using std::map;
+using std::pair;
 using std::set;
+using std::setfill;
+using std::setw;
 using std::string;
 using std::vector;
 
@@ -255,7 +259,7 @@ void Master::operator () ()
     if (receive() == GOT_MASTER_ID) {
       string id;
       unpack<GOT_MASTER_ID>(id);
-      masterId = lexical_cast<long>(id);
+      masterId = lexical_cast<int64_t>(id);
       LOG(INFO) << "Master ID:" << masterId;
       break;
     } else {
@@ -290,8 +294,7 @@ void Master::operator () ()
     }
 
     case F2M_REGISTER_FRAMEWORK: {
-      FrameworkID fid = lexical_cast<string>(masterId) + "-"
-	+ lexical_cast<string>(nextFrameworkId++);
+      FrameworkID fid = newFrameworkId();
       Framework *framework = new Framework(from(), fid, elapsed());
       unpack<F2M_REGISTER_FRAMEWORK>(framework->name, framework->user,
 				     framework->executorInfo);
@@ -337,8 +340,11 @@ void Master::operator () ()
       unpack<F2M_UNREGISTER_FRAMEWORK>(fid);
       LOG(INFO) << "Asked to unregister framework " << fid;
       Framework *framework = lookupFramework(fid);
-      if (framework != NULL)
+      if (framework != NULL && framework->pid == from())
         removeFramework(framework);
+      else
+        LOG(WARNING) << "Non-authoratative PID attempting framework "
+                     << "unregistration ... ignoring";
       break;
     }
 
@@ -417,8 +423,8 @@ void Master::operator () ()
       if (slave->id == "") {
         slave->id = lexical_cast<string>(masterId) + "-"
           + lexical_cast<string>(nextSlaveId++);
-        DLOG(WARNING) << "Slave re-registered without a SlaveID, "
-                      << "generating a new id for it.";
+        LOG(ERROR) << "Slave re-registered without a SlaveID, "
+                   << "generating a new id for it.";
       }
 
       foreach(Task &ti, taskVec) {
@@ -480,11 +486,14 @@ void Master::operator () ()
               removeTask(task, TRR_TASK_ENDED);
             }
           }
-        } else
-          DLOG(INFO) << "S2M_STATUS_UPDATE error: couldn't lookup framework id" << fid;
-      } else 
-        DLOG(INFO) << "S2M_STATUS_UPDATE error: couldn't lookup slave id" << sid;
-      
+        } else {
+          LOG(ERROR) << "S2M_FT_STATUS_UPDATE error: couldn't lookup "
+                     << "framework id " << fid;
+        }
+      } else {
+        LOG(ERROR) << "S2M_FT_STATUS_UPDATE error: couldn't lookup slave id "
+                   << sid;
+      }
       break;
     }
 
@@ -511,10 +520,14 @@ void Master::operator () ()
               removeTask(task, TRR_TASK_ENDED);
             }
           }
-        } else
-          DLOG(INFO) << "S2M_STATUS_UPDATE error: couldn't lookup framework id" << fid;
-      } else
-        DLOG(INFO) << "S2M_STATUS_UPDATE error: couldn't lookup slave id" << sid;
+        } else {
+          LOG(ERROR) << "S2M_STATUS_UPDATE error: couldn't lookup framework id "
+                     << fid;
+        }
+      } else {
+        LOG(ERROR) << "S2M_STATUS_UPDATE error: couldn't lookup slave id "
+                   << sid;
+      }
      break;
     }
       
@@ -650,7 +663,8 @@ void Master::operator () ()
 OfferID Master::makeOffer(Framework *framework,
                           const vector<SlaveResources>& resources)
 {
-  OfferID oid = lexical_cast<string>(masterId) + "-" + lexical_cast<string>(nextSlotOfferId++);
+  OfferID oid = lexical_cast<string>(masterId) + "-" 
+    + lexical_cast<string>(nextSlotOfferId++);
 
   SlotOffer *offer = new SlotOffer(oid, framework->id, resources);
   slotOffers[offer->id] = offer;
@@ -986,4 +1000,23 @@ Allocator* Master::createAllocator()
 {
   LOG(INFO) << "Creating \"" << allocatorType << "\" allocator";
   return AllocatorFactory::instantiate(allocatorType, this);
+}
+
+
+// Create a new framework ID. We format the ID as YYYYMMDDhhmm-master-fw,
+// where the first part is the submission date and submission time, master
+// is ID of the master (emphemeral ID from ZooKeeper if ZK is used), and
+// fw is the ID of the framework within the master (an increasing integer).
+FrameworkID Master::newFrameworkId()
+{
+  time_t rawtime;
+  struct tm* timeinfo;
+  time(&rawtime);
+  timeinfo = localtime(&rawtime);
+  char timestr[32];
+  strftime(timestr, sizeof(timestr), "%Y%m%d%H%M", timeinfo);
+  int fwId = nextFrameworkId++;
+  ostringstream oss;
+  oss << timestr << "-" << masterId << "-" << setw(4) << setfill('0') << fwId;
+  return oss.str();
 }
