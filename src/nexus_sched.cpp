@@ -23,10 +23,11 @@
 #include "fatal.hpp"
 #include "hash_pid.hpp"
 #include "lock.hpp"
+#include "logging.hpp"
+#include "master_detector.hpp"
 #include "messages.hpp"
 #include "nexus_local.hpp"
 #include "nexus_sched.hpp"
-#include "master_detector.hpp"
 
 #define REPLY_TIMEOUT 20
 
@@ -43,6 +44,8 @@ using boost::unordered_map;
 
 using namespace nexus;
 using namespace nexus::internal;
+using nexus::internal::master::Master;
+using nexus::internal::slave::Slave;
 
 
 namespace nexus { namespace internal {
@@ -136,7 +139,7 @@ protected:
     // Get username of current user.
     struct passwd* passwd;
     if ((passwd = getpwuid(getuid())) == NULL)
-      fatal("failed to get username information");
+      fatal("NexusSchedulerDriver failed to get username information");
 
     const string user(passwd->pw_name);
 
@@ -405,12 +408,72 @@ void Scheduler::error(SchedulerDriver* driver, int code, const string &message)
 }
 
 
-NexusSchedulerDriver::NexusSchedulerDriver(Scheduler* _sched,
-					   const string &_url,
-					   FrameworkID _fid)
-  : sched(_sched), url(_url), fid(_fid), running(false),
-    process(NULL), detector(NULL)
+NexusSchedulerDriver::NexusSchedulerDriver(Scheduler* sched,
+					   const string &url,
+					   FrameworkID fid)
 {
+  Configurator configurator;
+  local::registerOptions(&configurator);
+  Params* conf;
+  try {
+    conf = new Params(configurator.load());
+  } catch (ConfigurationException& e) {
+    string message = string("Configuration error: ") + e.what();
+    sched->error(this, 2, message);
+    conf = new Params();
+  }
+  conf->set("url", url); // Override URL param with the one from the user
+  init(sched, conf, fid);
+}
+
+
+NexusSchedulerDriver::NexusSchedulerDriver(Scheduler* sched,
+					   const string_map &params,
+					   FrameworkID fid)
+{
+  Configurator configurator;
+  local::registerOptions(&configurator);
+  try {
+    conf = new Params(configurator.load(params));
+  } catch (ConfigurationException& e) {
+    string message = string("Configuration error: ") + e.what();
+    sched->error(this, 2, message);
+    conf = new Params();
+  }
+  init(sched, conf, fid);
+}
+
+
+NexusSchedulerDriver::NexusSchedulerDriver(Scheduler* sched,
+					   int argc,
+                                           char** argv,
+					   FrameworkID fid)
+{
+  Configurator configurator;
+  local::registerOptions(&configurator);
+  try {
+    conf = new Params(configurator.load(argc, argv, false));
+  } catch (ConfigurationException& e) {
+    string message = string("Configuration error: ") + e.what();
+    sched->error(this, 2, message);
+    conf = new Params();
+  }
+  init(sched, conf, fid);
+}
+
+
+void NexusSchedulerDriver::init(Scheduler* _sched,
+                                Params* _conf,
+                                FrameworkID _fid)
+{
+  sched = _sched;
+  conf = _conf;
+  fid = _fid;
+  url = conf->get<string>("url", "local");
+  process = NULL;
+  detector = NULL;
+  running = false;
+
   // Create mutex and condition variable
   pthread_mutexattr_t attr;
   pthread_mutexattr_init(&attr);
@@ -439,10 +502,17 @@ NexusSchedulerDriver::~NexusSchedulerDriver()
   // that we could add a method to libprocess that told us whether or
   // not this was about to be deadlock, and possibly report this back
   // to the user somehow.
-  Process::wait(process);
-  delete process;
+  if (process != NULL) {
+    Process::wait(process);
+    delete process;
+  }
 
-  MasterDetector::destroy(detector);
+  if (detector != NULL) {
+    MasterDetector::destroy(detector);
+  }
+
+  // Delete conf since we always create it ourselves with new
+  delete conf;
 
   // Check and see if we need to shutdown a local cluster.
   if (url == "local" || url == "localquiet")
@@ -467,14 +537,11 @@ int NexusSchedulerDriver::start()
 
   // Check and see if we need to launch a local cluster.
   if (url == "local") {
-    // TODO(benh): Get number of slaves and resources per slave from
-    // command line (or environment or configuration?).
-    PID master = local::launch(1, 1, 1073741824, true, false);
+    PID master = local::launch(*conf, true);
     detector = new BasicMasterDetector(master, pid);
   } else if (url == "localquiet") {
-    // TODO(benh): Get number of slaves and resources per slave from
-    // command line (or environment?).
-    PID master = local::launch(1, 1, 1073741824, true, true);
+    conf->set("quiet", 1);
+    PID master = local::launch(*conf, true);
     detector = new BasicMasterDetector(master, pid);
   } else {
     detector = MasterDetector::create(url, pid, false, true);
@@ -832,7 +899,76 @@ int nexus_sched_reg(struct nexus_sched* sched, const char* master)
     return -1;
   }
 
-  cs->driver = new NexusSchedulerDriver(cs, master);
+  try {
+    cs->driver = new NexusSchedulerDriver(cs, master);
+  } catch (ConfigurationException& e) {
+    string message = string("Configuration error: ") + e.what();
+    sched->error(sched, 2, message.c_str());
+    errno = EINVAL;
+    return -2;
+  }
+
+  cs->driver->start();
+
+  return 0;
+}
+
+
+int nexus_sched_reg_with_params(struct nexus_sched* sched, const char* params)
+{
+  if (sched == NULL || params == NULL) {
+    errno = EINVAL;
+    return -1;
+  }
+
+  CScheduler* cs = lookupCScheduler(sched);
+
+  if (cs->driver != NULL) {
+    errno = EINVAL;
+    return -1;
+  }
+
+  try {
+    Params paramsObj(params);
+    cs->driver = new NexusSchedulerDriver(cs, paramsObj.getMap());
+  } catch (ConfigurationException& e) {
+    string message = string("Configuration error: ") + e.what();
+    sched->error(sched, 2, message.c_str());
+    errno = EINVAL;
+    return -2;
+  }
+
+  cs->driver->start();
+
+  return 0;
+}
+
+
+int nexus_sched_reg_with_cmdline(struct nexus_sched* sched,
+                                 int argc,
+                                 char** argv)
+{
+  if (sched == NULL || argc < 0 || argv == NULL) {
+    errno = EINVAL;
+    return -1;
+  }
+
+  CScheduler* cs = lookupCScheduler(sched);
+
+  if (cs->driver != NULL) {
+    errno = EINVAL;
+    return -1;
+  }
+
+  try {
+    cs->driver = new NexusSchedulerDriver(cs, argc, argv);
+  } catch (ConfigurationException& e) {
+    string message = string("Configuration error: ") + e.what();
+    sched->error(sched, 2, message.c_str());
+    errno = EINVAL;
+    return -2;
+  }
+
   cs->driver->start();
 
   return 0;

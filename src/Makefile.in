@@ -110,12 +110,15 @@ NEXUS_LIBS = $(SCHED_LIB) $(EXEC_LIB) $(NEXUS_LIB)
 MASTER_OBJ = master.o allocator_factory.o simple_allocator.o
 SLAVE_OBJ = slave.o launcher.o isolation_module.o \
 	    process_based_isolation_module.o
-COMMON_OBJ = fatal.o hash_pid.o messages.o lock.o master_detector.o url_processor.o zookeeper.o
+COMMON_OBJ = fatal.o hash_pid.o messages.o lock.o master_detector.o \
+	     url_processor.o zookeeper.o configurator.o string_utils.o \
+	     logging.o
 EXEC_LIB_OBJ = nexus_exec.o
 SCHED_LIB_OBJ = nexus_sched.o nexus_local.o params.o
 TEST_OBJ = tests/main.o tests/test_master.o tests/test_resources.o \
 	   tests/external_test.o tests/test_sample_frameworks.o \
-	   tests/test_lxc_isolation.o
+	   tests/testing_utils.o tests/test_configurator.o \
+	   tests/test_string_utils.o tests/test_lxc_isolation.o
 
 ifeq ($(OS_NAME),solaris)
   SLAVE_OBJ += solaris_project_isolation_module.o
@@ -193,8 +196,8 @@ slave_webui.o: slave_webui.cpp config.hpp messages.hpp
 nexus-slave: slave_main.cpp $(SLAVE_OBJ) $(COMMON_OBJ) slave_webui.o webui/slave/swig/slave_wrap.o
 	$(CXX) $(CXXFLAGS) $(WEBUI_FLAGS) -o $@ $< $(SLAVE_OBJ) slave_webui.o webui/slave/swig/slave_wrap.o $(COMMON_OBJ) $(LDFLAGS) $(LIBS)
 
-nexus-launcher: launcher_main.cpp launcher.o fatal.o
-	$(CXX) $(CXXFLAGS) -o $@ $< launcher.o fatal.o $(LDFLAGS) $(LIBS)
+nexus-launcher: launcher_main.cpp launcher.o $(COMMON_OBJ)
+	$(CXX) $(CXXFLAGS) -o $@ $< launcher.o $(COMMON_OBJ) $(LDFLAGS) $(LIBS)
 
 nexus-projd: projd.cpp $(COMMON_OBJ)
 	$(CXX) $(CXXFLAGS) -o $@ $< $(COMMON_OBJ) $(LDFLAGS) $(LIBS)

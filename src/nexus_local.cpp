@@ -6,7 +6,9 @@
 #include <map>
 #include <vector>
 
+#include "configurator.hpp"
 #include "foreach.hpp"
+#include "logging.hpp"
 #include "nexus_local.hpp"
 #include "process_based_isolation_module.hpp"
 
@@ -40,9 +42,32 @@ static map<IsolationModule*, Slave*> slaves;
 static MasterDetector *detector = NULL;
 
 
+void registerOptions(Configurator* conf)
+{
+  conf->addOption<int>("slaves", 's', "Number of slaves", 1);
+  Logging::registerOptions(conf);
+  Master::registerOptions(conf);
+  Slave::registerOptions(conf);
+}
+
+
 PID launch(int numSlaves, int32_t cpus, int64_t mem,
 	   bool initLogging, bool quiet)
 {
+  Params conf;
+  conf.set("slaves", numSlaves);
+  conf.set("cpus", cpus);
+  conf.set("mem", mem);
+  conf.set("quiet", quiet);
+  return launch(conf, initLogging);
+}
+
+
+PID launch(const Params& conf, bool initLogging)
+{
+  int numSlaves = conf.get<int>("slaves", 1);
+  bool quiet = conf.get<bool>("quiet", false);
+
   if (master != NULL)
     fatal("can only launch one local cluster at a time (for now)");
 
@@ -52,7 +77,7 @@ PID launch(int numSlaves, int32_t cpus, int64_t mem,
       google::SetStderrLogging(google::INFO);
   }
 
-  master = new Master();
+  master = new Master(conf);
 
   PID pid = Process::spawn(master);
 
@@ -62,7 +87,7 @@ PID launch(int numSlaves, int32_t cpus, int64_t mem,
     // TODO(benh): Create a local isolation module?
     ProcessBasedIsolationModule *isolationModule =
       new ProcessBasedIsolationModule();
-    Slave* slave = new Slave(Resources(cpus, mem), true, isolationModule);
+    Slave* slave = new Slave(conf, true, isolationModule);
     slaves[isolationModule] = slave;
     pids.push_back(Process::spawn(slave));
   }

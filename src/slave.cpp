@@ -58,6 +58,12 @@ public:
     : master(_master), slave(_slave), sid(_sid), interval(_interval) {}
 };
 
+
+// Default values for CPU cores and memory to include in configuration
+const int32_t DEFAULT_CPUS = 1;
+const int64_t DEFAULT_MEM = 1 * Gigabyte;
+
+
 } /* namespace */
 
 
@@ -65,6 +71,26 @@ Slave::Slave(Resources _resources, bool _local,
              IsolationModule *_isolationModule)
   : id(""), resources(_resources), local(_local),
     isolationModule(_isolationModule) {}
+
+
+Slave::Slave(const Params& _conf, bool _local, IsolationModule *_module)
+  : id(""), conf(_conf), local(_local), isolationModule(_module)
+{
+  resources = Resources(conf.get<int32_t>("cpus", DEFAULT_CPUS),
+                        conf.get<int64_t>("mem", DEFAULT_MEM));
+}
+
+
+void Slave::registerOptions(Configurator* conf)
+{
+  conf->addOption<int32_t>("cpus", 'c', "CPU cores for use by tasks",
+                           DEFAULT_CPUS);
+  conf->addOption<int64_t>("mem", 'm', "Memory for use by tasks, in bytes\n",
+                           DEFAULT_MEM);
+  conf->addOption<string>("work_dir",
+                          "Where to place framework work directories\n"
+                          "(default: MESOS_HOME/work)");
+}
 
 
 Slave::~Slave()
@@ -478,7 +504,21 @@ void Slave::executorExited(FrameworkID fid, int status)
 
 
 string Slave::getWorkDirectory(FrameworkID fid) {
-  ostringstream workDir;
-  workDir << "work/slave-" << id << "/framework-" << fid;
-  return workDir.str();
+  string workDir;
+  if (conf.contains("work_dir")) {
+    workDir = conf["work_dir"];
+  } else if (conf.contains("home")) {
+    workDir = conf["home"] + "/work";
+  } else {
+    workDir = "work";
+  }
+  ostringstream fwDir;
+  fwDir << workDir << "/slave-" << id << "/fw-" << fid;
+  return fwDir.str();
+}
+
+
+const Params& Slave::getConf()
+{
+  return conf;
 }
