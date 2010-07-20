@@ -129,14 +129,6 @@ struct __construct< map<string, string> >
 };
 
 
-// <FrameworkID>(arg<string>("s"))
-// <SlaveID>(arg<string>("s"))
-// <OfferID>(arg<string>("s"))
-// <TaskID>(arg<int>("i"))
-
-// <TaskDescription>(arg<
-
-
 template <>
 struct __construct<FrameworkID>
 {
@@ -517,6 +509,7 @@ struct __convert<TaskDescription>
   {
     jobject jtaskId = convert<TaskID>(env, desc.taskId);
     jobject jslaveId = convert<SlaveID>(env, desc.slaveId);
+    jobject jname = convert<string>(env, desc.name);
     jobject jparams = convert< map<string, string> >(env, desc.params);
     jobject jdata = convert<bytes>(env, desc.data);
 
@@ -527,7 +520,7 @@ struct __convert<TaskDescription>
       "(Lmesos/TaskID;Lmesos/SlaveID;Ljava/lang/String;Ljava/util/Map;[B)V");
 
     jobject jdesc = env->NewObject(clazz, _init_, jtaskId, jslaveId,
-                                   jparams, jdata);
+                                   jname, jparams, jdata);
 
     return jdesc;
   }
