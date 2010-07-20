@@ -9,6 +9,54 @@ using namespace process::serialization;
 namespace nexus { namespace internal {
 
 
+void operator & (serializer& s, const bytes& data)
+{
+  s & data.s;
+}
+
+
+void operator & (deserializer& d, bytes& data)
+{
+  d & data.s;
+}
+
+
+void operator & (serializer& s, const FrameworkID& frameworkId)
+{
+  s & frameworkId.s;
+}
+
+
+void operator & (deserializer& d, FrameworkID& frameworkId)
+{
+  d & frameworkId.s;
+}
+
+
+void operator & (serializer& s, const SlaveID& slaveId)
+{
+  s & slaveId.s;
+}
+
+
+void operator & (deserializer& d, SlaveID& slaveId)
+{
+  d & slaveId.s;
+}
+
+
+void operator & (serializer& s, const OfferID& offerId)
+{
+  s & offerId.s;
+}
+
+
+void operator & (deserializer& d, OfferID& offerId)
+{
+  d & offerId.s;
+}
+
+
 void operator & (serializer& s, const TaskState& state)
 {
   s & (const int32_t&) state;
@@ -44,7 +92,7 @@ void operator & (serializer& s, const TaskDescription& task)
   s & task.taskId;
   s & task.slaveId;
   s & task.name;
-  s & task.arg;
+  s & task.data;
   s & task.params;
 }
 
@@ -54,7 +102,7 @@ void operator & (deserializer& s, TaskDescription& task)
   s & task.taskId;
   s & task.slaveId;
   s & task.name;
-  s & task.arg;
+  s & task.data;
   s & task.params;
 }
 
@@ -78,7 +126,7 @@ void operator & (deserializer& s, FrameworkMessage& message)
 void operator & (serializer& s, const ExecutorInfo& info)
 {
   s & info.uri;
-  s & info.initArg;
+  s & info.data;
   s & info.params;
 }
 
@@ -86,7 +134,7 @@ void operator & (serializer& s, const ExecutorInfo& info)
 void operator & (deserializer& s, ExecutorInfo& info)
 {
   s & info.uri;
-  s & info.initArg;
+  s & info.data;
   s & info.params;
 }
 

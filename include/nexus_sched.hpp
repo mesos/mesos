@@ -27,11 +27,11 @@ public:
   virtual ~Scheduler() {}
 
   // Callbacks for getting framework properties
-  virtual std::string getFrameworkName(SchedulerDriver*);
-  virtual ExecutorInfo getExecutorInfo(SchedulerDriver*);
+  virtual std::string getFrameworkName(SchedulerDriver* d);
+  virtual ExecutorInfo getExecutorInfo(SchedulerDriver* d);
 
   // Callbacks for various Nexus events
-  virtual void registered(SchedulerDriver* d, FrameworkID fid) {}
+  virtual void registered(SchedulerDriver* d, FrameworkID frameworkId) {}
   virtual void resourceOffer(SchedulerDriver* d,
                              OfferID oid,
                              const std::vector<SlaveOffer>& offers) {}
@@ -65,9 +65,9 @@ public:
 
   // Communication methods
   virtual int sendFrameworkMessage(const FrameworkMessage& message) { return -1; }
-  virtual int killTask(TaskID tid) { return -1; }
-  virtual int replyToOffer(OfferID oid,
-			   const std::vector<TaskDescription>& task,
+  virtual int killTask(TaskID taskId) { return -1; }
+  virtual int replyToOffer(OfferID offerId,
+			   const std::vector<TaskDescription>& tasks,
 			   const string_map& params) { return -1; }
   virtual int reviveOffers() { return -1; }
   virtual int sendHints(const string_map& hints) { return -1; }
@@ -88,12 +88,12 @@ public:
    *
    * @param sched scheduler to make callbacks into
    * @param url Mesos master URL
-   * @param fid optional framework ID for registering redundant schedulers
-   *            for the same framework
+   * @param frameworkId optional framework ID for registering
+   *                    redundant schedulers for the same framework
    */
   NexusSchedulerDriver(Scheduler* sched,
-		       const std::string& url,
-		       FrameworkID fid = "");
+                       const std::string& url,
+                       FrameworkID frameworkId = "");
 
   /**
    * Create a scheduler driver with a configuration, which the master URL
@@ -103,12 +103,12 @@ public:
    *
    * @param sched scheduler to make callbacks into
    * @param params Map containing configuration options
-   * @param fid optional framework ID for registering redundant schedulers
-   *            for the same framework
+   * @param frameworkId optional framework ID for registering
+   *                    redundant schedulers for the same framework
    */
   NexusSchedulerDriver(Scheduler* sched,
-		       const string_map& params,
-		       FrameworkID fid = "");
+                       const string_map& params,
+                       FrameworkID frameworkId = "");
 
 #ifndef SWIG
   /**
@@ -123,13 +123,13 @@ public:
    * @param argc argument count
    * @param argv argument values (argument 0 is expected to be program name
    *             and will not be looked at for options)
-   * @param fid optional framework ID for registering redundant schedulers
-   *            for the same framework
+   * @param frameworkId optional framework ID for registering
+   *                    redundant schedulers for the same framework
    */
   NexusSchedulerDriver(Scheduler* sched,
-		       int argc,
+                       int argc,
                        char** argv,
-		       FrameworkID fid = "");
+                       FrameworkID frameworkId = "");
 #endif
 
   virtual ~NexusSchedulerDriver();
@@ -142,9 +142,9 @@ public:
 
   // Communication methods
   virtual int sendFrameworkMessage(const FrameworkMessage& message);
-  virtual int killTask(TaskID tid);
+  virtual int killTask(TaskID taskId);
   virtual int replyToOffer(OfferID offerId,
-			   const std::vector<TaskDescription>& task,
+			   const std::vector<TaskDescription>& tasks,
 			   const string_map& params);
   virtual int reviveOffers();
   virtual int sendHints(const string_map& hints);
@@ -154,14 +154,14 @@ public:
 
 private:
   // Initialization method used by constructors
-  void init(Scheduler* sched, internal::Params* conf, FrameworkID fid);
+  void init(Scheduler* sched, internal::Params* conf, FrameworkID frameworkId);
 
   // Internal utility method to report an error to the scheduler
   void error(int code, const std::string& message);
 
   Scheduler* sched;
   std::string url;
-  FrameworkID fid;
+  FrameworkID frameworkId;
 
   // LibProcess process for communicating with master
   internal::SchedulerProcess* process;
@@ -181,7 +181,6 @@ private:
 
   // Condition variable for waiting until driver terminates
   pthread_cond_t cond;
-
 };
 
 

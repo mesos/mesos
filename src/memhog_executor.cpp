@@ -47,7 +47,7 @@ public:
     int64_t memToHog;
     double duration;
     int numThreads;
-    istringstream in(task.arg);
+    istringstream in(task.data);
     in >> memToHog >> duration >> numThreads;
     for (int i = 0; i < numThreads; i++) {
       ThreadArg* arg = new ThreadArg(this, task.taskId, i, memToHog, duration);

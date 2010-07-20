@@ -358,8 +358,8 @@ public:
                            task.slaveId.c_str(),
                            task.name.c_str(),
                            paramsStr.c_str(),
-                           task.arg.data(),
-                           task.arg.size() };
+                           task.data.data(),
+                           task.data.size() };
     exec->launch_task(exec, &td);
   }
 

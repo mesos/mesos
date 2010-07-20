@@ -800,7 +800,7 @@ void Master::launchTask(Framework *f, const TaskDescription& t)
   allocator->taskAdded(task);
   send(slave->pid, pack<M2S_RUN_TASK>(
         f->id, t.taskId, f->name, f->user, f->executorInfo,
-        t.name, t.arg, t.params, (string)f->pid));
+        t.name, t.data, t.params, (string)f->pid));
 }
 
 

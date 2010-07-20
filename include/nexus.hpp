@@ -17,6 +17,26 @@ namespace nexus {
 //    in SWIG code (e.g. to map them to byte[]'s in Java).
 typedef std::string data_string;
 
+struct bytes
+{
+  bytes(const char *data = "")
+    : s(data) {}
+
+  bytes(const std::string &data)
+    : s(data) {}
+
+  bytes(const void *data, size_t length)
+    : s((const char *) data, length) {}
+
+  operator std::string () const { return s; }
+
+  const char * data() const { return s.data(); }
+
+  size_t size() const { return s.size(); }
+
+  std::string s;
+};
+
 
 // Convenience typedef for map<string, string>, which is used for
 // key-value parameters throughout the Nexus API
@@ -28,15 +48,15 @@ struct TaskDescription
   TaskDescription() {}
 
   TaskDescription(TaskID _taskId, SlaveID _slaveId, const std::string& _name,
-      const string_map& _params, const data_string& _arg)
+      const string_map& _params, const bytes& _data)
     : taskId(_taskId), slaveId(_slaveId), name(_name),
-      params(_params), arg(_arg) {}
+      params(_params), data(_data) {}
 
   TaskID taskId;
   SlaveID slaveId;
   std::string name;
   string_map params;
-  data_string arg;
+  bytes data;
 };
 
 
@@ -44,12 +64,12 @@ struct TaskStatus
 {
   TaskStatus() {}
 
-  TaskStatus(TaskID _taskId, TaskState _state, const data_string& _data)
+  TaskStatus(TaskID _taskId, TaskState _state, const bytes& _data)
     : taskId(_taskId), state(_state), data(_data) {}
 
   TaskID taskId;
   TaskState state;
-  data_string data;
+  bytes data;
 };
 
 
@@ -74,12 +94,12 @@ struct FrameworkMessage
 {
   FrameworkMessage() {}
 
-  FrameworkMessage(SlaveID _slaveId, TaskID _taskId, const data_string& _data)
+  FrameworkMessage(SlaveID _slaveId, TaskID _taskId, const bytes& _data)
     : slaveId(_slaveId), taskId(_taskId), data(_data) {}
 
   SlaveID slaveId;
   TaskID taskId;
-  data_string data;
+  bytes data;
 };
 
 
@@ -97,15 +117,15 @@ struct ExecutorInfo
 {
   ExecutorInfo() {}
   
-  ExecutorInfo(const std::string& _uri, const data_string& _initArg)
-    : uri(_uri), initArg(_initArg) {}
+  ExecutorInfo(const std::string& _uri, const bytes& _data)
+    : uri(_uri), data(_data) {}
   
-  ExecutorInfo(const std::string& _uri, const data_string& _initArg,
+  ExecutorInfo(const std::string& _uri, const bytes& _data,
       const string_map& _params)
-    : uri(_uri), initArg(_initArg), params(_params) {}
+    : uri(_uri), data(_data), params(_params) {}
 
   std::string uri;
-  data_string initArg;
+  bytes data;
   string_map params;
 };
 

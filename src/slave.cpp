@@ -159,7 +159,7 @@ void Slave::operator () ()
 	master = masterPid;
 	link(master);
 
-	if (id.empty()) {
+	if (id == "") {
 	  // Slave started before master.
 	  send(master, pack<S2M_REGISTER_SLAVE>(hostname, publicDns, resources));
 	} else {
@@ -195,12 +195,13 @@ void Slave::operator () ()
       }
       
       case M2S_REREGISTER_REPLY: {
-        FrameworkID tmpfid;
+        SlaveID slaveId;
 	double interval = 0;
-        unpack<M2S_REGISTER_REPLY>(tmpfid, interval);
-        LOG(INFO) << "RE-registered with master; given slave ID " << tmpfid << " had "<< this->id;
+        unpack<M2S_REGISTER_REPLY>(slaveId, interval);
+        LOG(INFO) << "RE-registered with master; given slave ID " << slaveId << " had "<< this->id;
         if (this->id == "")
-          this->id = tmpfid;
+          this->id = slaveId;
+        // TODO(benh): Delete the old heart!?
         link(spawn(new Heart(master, getPID(), this->id, interval)));
         break;
       }
@@ -304,7 +305,7 @@ void Slave::operator () ()
           send(from(), pack<S2E_REGISTER_REPLY>(this->id,
                                                 hostname,
                                                 fw->name,
-                                                fw->executorInfo.initArg));
+                                                fw->executorInfo.data));
           sendQueuedTasks(fw);
         } else {
           // Framework is gone; tell the executor to exit

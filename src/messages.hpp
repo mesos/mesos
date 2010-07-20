@@ -123,7 +123,7 @@ TUPLE(F2M_REGISTER_FRAMEWORK,
        ExecutorInfo));
 
 TUPLE(F2M_REREGISTER_FRAMEWORK,
-      (std::string /*fid*/,
+      (FrameworkID,
        std::string /*name*/,
        std::string /*user*/,
        ExecutorInfo,
@@ -190,14 +190,13 @@ TUPLE(M2F_ERROR,
       (int32_t /*code*/,
        std::string /*msg*/));
 
-
 TUPLE(S2M_REGISTER_SLAVE,
       (std::string /*name*/,
        std::string /*publicDns*/,
        Resources));
 
 TUPLE(S2M_REREGISTER_SLAVE,
-      (std::string /*slave id*/,
+      (SlaveID,
        std::string /*name*/,
        std::string /*publicDns*/,
        Resources,
@@ -354,6 +353,15 @@ TUPLE(S2S_SHUTDOWN,
 
 
 /* Serialization functions for various Nexus data types. */
+
+void operator & (process::serialization::serializer&, const FrameworkID&);
+void operator & (process::serialization::deserializer&, FrameworkID&);
+
+void operator & (process::serialization::serializer&, const SlaveID&);
+void operator & (process::serialization::deserializer&, SlaveID&);
+
+void operator & (process::serialization::serializer&, const OfferID&);
+void operator & (process::serialization::deserializer&, OfferID&);
 
 void operator & (process::serialization::serializer&, const TaskState&);
 void operator & (process::serialization::deserializer&, TaskState&);

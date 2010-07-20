@@ -213,9 +213,8 @@ protected:
         
 	// Save all the slave PIDs found in the offer so later we can
 	// send framework messages directly.
-        foreach(const SlaveOffer &offer, offs) {
+        foreach(const SlaveOffer &offer, offs)
 	  savedOffers[oid][offer.slaveId] = offer.slavePid;
-        }
 
         invoke(bind(&Scheduler::resourceOffer, sched, driver, oid, ref(offs)));
         break;
@@ -464,11 +463,11 @@ NexusSchedulerDriver::NexusSchedulerDriver(Scheduler* sched,
 
 void NexusSchedulerDriver::init(Scheduler* _sched,
                                 Params* _conf,
-                                FrameworkID _fid)
+                                FrameworkID _frameworkId)
 {
   sched = _sched;
   conf = _conf;
-  fid = _fid;
+  frameworkId = _frameworkId;
   url = conf->get<string>("url", "local");
   process = NULL;
   detector = NULL;
@@ -530,9 +529,11 @@ int NexusSchedulerDriver::start()
   }
 
   const string& frameworkName = sched->getFrameworkName(this);
-  const ExecutorInfo& executorInfo = sched->getExecutorInfo(this);
+  const ExecutorInfo& execInfo = sched->getExecutorInfo(this);
 
-  process = new SchedulerProcess(this, sched, fid, frameworkName, executorInfo);
+  process =
+    new SchedulerProcess(this, sched, frameworkId, frameworkName, execInfo);
+
   PID pid = Process::spawn(process);
 
   // Check and see if we need to launch a local cluster.
@@ -785,9 +786,9 @@ public:
     sched->framework_message(sched, &c_message);
   }
 
-  virtual void slaveLost(SchedulerDriver*, SlaveID sid)
+  virtual void slaveLost(SchedulerDriver*, SlaveID slaveId)
   {
-    sched->slave_lost(sched, sid.c_str());
+    sched->slave_lost(sched, slaveId.c_str());
   }
 
   virtual void error(SchedulerDriver*, int code, const std::string &message)
