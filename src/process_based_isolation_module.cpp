@@ -142,7 +142,7 @@ void ProcessBasedIsolationModule::Reaper::operator () ()
         foreachpair (FrameworkID fid, pid_t& pgid, module->pgids) {
           if (pgid == pid) {
             // Kill the process group to clean up the tasks.
-            LOG(INFO) << "Sending SIGKILL to gpid " << pgid;
+            LOG(INFO) << "Sending SIGKILL to pgid " << pgid;
             killpg(pgid, SIGKILL);
             module->pgids[fid] = -1;
             LOG(INFO) << "Telling slave of lost framework " << fid;
