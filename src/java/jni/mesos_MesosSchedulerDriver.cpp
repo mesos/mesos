@@ -129,13 +129,21 @@ struct __construct< map<string, string> >
 };
 
 
+// <FrameworkID>(arg<string>("s"))
+// <SlaveID>(arg<string>("s"))
+// <OfferID>(arg<string>("s"))
+// <TaskID>(arg<int>("i"))
+
+// <TaskDescription>(arg<
+
+
 template <>
 struct __construct<FrameworkID>
 {
   static FrameworkID impl(JNIEnv *env, jobject jobj)
   {
     jclass clazz = env->GetObjectClass(jobj);
-    jfieldID id = env->GetFieldID(clazz, "id", "Ljava/lang/String;");
+    jfieldID id = env->GetFieldID(clazz, "s", "Ljava/lang/String;");
     jstring jstr = (jstring) env->GetObjectField(jobj, id);
     return FrameworkID(construct<string>(env, jstr));
   }
@@ -148,7 +156,7 @@ struct __construct<TaskID>
   static TaskID impl(JNIEnv *env, jobject jobj)
   {
     jclass clazz = env->GetObjectClass(jobj);
-    jfieldID id = env->GetFieldID(clazz, "id", "I");
+    jfieldID id = env->GetFieldID(clazz, "i", "I");
     jint jtaskId = env->GetIntField(jobj, id);
     TaskID taskId = jtaskId;
     return taskId;
@@ -162,7 +170,7 @@ struct __construct<SlaveID>
   static SlaveID impl(JNIEnv *env, jobject jobj)
   {
     jclass clazz = env->GetObjectClass(jobj);
-    jfieldID id = env->GetFieldID(clazz, "id", "Ljava/lang/String;");
+    jfieldID id = env->GetFieldID(clazz, "s", "Ljava/lang/String;");
     jstring jstr = (jstring) env->GetObjectField(jobj, id);
     return SlaveID(construct<string>(env, jstr));
   }
@@ -175,7 +183,7 @@ struct __construct<OfferID>
   static OfferID impl(JNIEnv *env, jobject jobj)
   {
     jclass clazz = env->GetObjectClass(jobj);
-    jfieldID id = env->GetFieldID(clazz, "id", "Ljava/lang/String;");
+    jfieldID id = env->GetFieldID(clazz, "s", "Ljava/lang/String;");
     jstring jstr = (jstring) env->GetObjectField(jobj, id);
     return OfferID(construct<string>(env, jstr));
   }
