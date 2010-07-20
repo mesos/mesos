@@ -6,6 +6,7 @@ using std::string;
 using namespace nexus::internal;
 
 namespace {
+// TODO(benh): DON'T LOG TO A DIRECTORY BEHIND SYS ADMINS BACKS!
 const string DEFAULT_LOG_DIR = "/tmp";
 }
 
