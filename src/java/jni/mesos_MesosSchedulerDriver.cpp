@@ -14,357 +14,273 @@ using std::vector;
 
 using namespace nexus;
 
-// void func(FrameworkID frameworkId, SlaveID slaveId)
-// {
 
-// }
-
-// void anotherfunc()
-// {
-//   func("hi", "hello");
-//   func(FrameworkID("hi"), SlaveID("hello"));
-// //   func(SlaveID("hello"), FrameworkID("hi"));
-
-//   FrameworkID frameworkId = "hi";
-//   SlaveID slaveId = "hello";
-
-//   func(frameworkId, slaveId);
-//   func(slaveId, frameworkId);
-
-//   if (frameworkId == slaveId);
-// }
+template <typename T>
+T construct(JNIEnv *env, jobject jobj);
 
 
 template <typename T>
-struct __construct
-{
-  static T impl(JNIEnv *env, jobject jobj);
-};
+jobject convert(JNIEnv *env, const T &t);
 
 
-template <typename T>
-T construct(JNIEnv *env, jobject jobj)
+template <>
+string construct(JNIEnv *env, jobject jobj)
 {
-  return __construct<T>::impl(env, jobj);
+  string s;
+  jstring jstr = (jstring) jobj;
+  const char *str = (const char *) env->GetStringUTFChars(jstr, NULL);
+  s = str;
+  env->ReleaseStringUTFChars(jstr, str);
+  return s;
 }
 
 
 template <>
-struct __construct<string>
+bytes construct(JNIEnv *env, jobject jobj)
 {
-  static string impl(JNIEnv *env, jobject jobj)
-  {
-    string s;
-    jstring jstr = (jstring) jobj;
-    const char *str = (const char *) env->GetStringUTFChars(jstr, NULL);
-    s = str;
-    env->ReleaseStringUTFChars(jstr, str);
-    return s;
-  }
-};
-
-
-template <>
-struct __construct<bytes>
-{
-  static bytes impl(JNIEnv *env, jobject jobj)
-  {
-    jbyteArray jarray = (jbyteArray) jobj;
-    const jsize length = env->GetArrayLength(jarray);
-    jbyte *array = env->GetByteArrayElements(jarray, NULL);
-    bytes data(array, length);
-    env->ReleaseByteArrayElements(jarray, array, NULL);
-    return data;
-  }
-};
-
-
-template <>
-struct __construct< map<string, string> >
-{
-  static map<string, string> impl(JNIEnv *env, jobject jobj)
-  {
-    map<string, string> result;
-
-    jclass clazz = env->GetObjectClass(jobj);
-
-    // Set entrySet = map.entrySet();
-    jmethodID entrySet = env->GetMethodID(clazz, "entrySet", "()Ljava/util/Set;");
-    jobject jentrySet = env->CallObjectMethod(jobj, entrySet);
-
-    clazz = env->GetObjectClass(jentrySet);
-
-    // Iterator iterator = entrySet.iterator();
-    jmethodID iterator = env->GetMethodID(clazz, "iterator", "()Ljava/util/Iterator;");
-    jobject jiterator = env->CallObjectMethod(jentrySet, iterator);
-
-    clazz = env->GetObjectClass(jiterator);
-
-    // while (iterator.hasNext()) {
-    jmethodID hasNext = env->GetMethodID(clazz, "hasNext", "()Z");
-
-    while (env->CallBooleanMethod(jiterator, hasNext)) {
-      // Map.Entry next = iterator.next();
-      jmethodID next = env->GetMethodID(clazz, "next", "()Ljava/lang/Object;");
-      jobject jnext = env->CallObjectMethod(jiterator, next);
-
-      clazz = env->GetObjectClass(jnext);
-
-      // String key = next.getKey();
-      jmethodID getKey = env->GetMethodID(clazz, "getKey", "()Ljava/lang/Object");
-      jstring jkey = (jstring) env->CallObjectMethod(jiterator, getKey);
-
-      // String value = next.getValue();
-      jmethodID getValue = env->GetMethodID(clazz, "getValue", "()Ljava/lang/Object");
-      jstring jvalue = (jstring) env->CallObjectMethod(jiterator, getValue);
-
-      const string& key = construct<string>(env, jkey);
-      const string& value = construct<string>(env, jvalue);
-
-      result[key] = value;
-    }
-
-    return result;
-  }
-};
-
-
-template <>
-struct __construct<FrameworkID>
-{
-  static FrameworkID impl(JNIEnv *env, jobject jobj)
-  {
-    jclass clazz = env->GetObjectClass(jobj);
-    jfieldID id = env->GetFieldID(clazz, "s", "Ljava/lang/String;");
-    jstring jstr = (jstring) env->GetObjectField(jobj, id);
-    return FrameworkID(construct<string>(env, jstr));
-  }
-};
-
-
-template <>
-struct __construct<TaskID>
-{
-  static TaskID impl(JNIEnv *env, jobject jobj)
-  {
-    jclass clazz = env->GetObjectClass(jobj);
-    jfieldID id = env->GetFieldID(clazz, "i", "I");
-    jint jtaskId = env->GetIntField(jobj, id);
-    TaskID taskId = jtaskId;
-    return taskId;
-  }
-};
-
-
-template <>
-struct __construct<SlaveID>
-{
-  static SlaveID impl(JNIEnv *env, jobject jobj)
-  {
-    jclass clazz = env->GetObjectClass(jobj);
-    jfieldID id = env->GetFieldID(clazz, "s", "Ljava/lang/String;");
-    jstring jstr = (jstring) env->GetObjectField(jobj, id);
-    return SlaveID(construct<string>(env, jstr));
-  }
-};
-
-
-template <>
-struct __construct<OfferID>
-{
-  static OfferID impl(JNIEnv *env, jobject jobj)
-  {
-    jclass clazz = env->GetObjectClass(jobj);
-    jfieldID id = env->GetFieldID(clazz, "s", "Ljava/lang/String;");
-    jstring jstr = (jstring) env->GetObjectField(jobj, id);
-    return OfferID(construct<string>(env, jstr));
-  }
-};
-
-
-template <>
-struct __construct<TaskState>
-{
-  static TaskState impl(JNIEnv *env, jobject jobj)
-  {
-    jclass clazz = env->GetObjectClass(jobj);
-
-    jmethodID name = env->GetMethodID(clazz, "name", "()Ljava/lang/String;");
-    jstring jstr = (jstring) env->CallObjectMethod(jobj, name);
-
-    const string& str = construct<string>(env, jstr);
-
-    if (str == "TASK_STARTING") {
-      return TASK_STARTING;
-    } else if (str == "TASK_RUNNING") {
-      return TASK_RUNNING;
-    } else if (str == "TASK_FINISHED") {
-      return TASK_FINISHED;
-    } else if (str == "TASK_FAILED") {
-      return TASK_FAILED;
-    } else if (str == "TASK_KILLED") {
-      return TASK_KILLED;
-    } else if (str == "TASK_LOST") {
-      return TASK_LOST;
-    }
-    
-    fatal("Bad enum value while converting between Java and C++.");
-  }
-};
-
-
-template <>
-struct __construct<TaskDescription>
-{
-  static TaskDescription impl(JNIEnv *env, jobject jobj)
-  {
-    TaskDescription desc;
-
-    jclass clazz = env->GetObjectClass(jobj);
-
-    jfieldID taskId = env->GetFieldID(clazz, "taskId", "Lmesos/TaskID;");
-    jobject jtaskId = env->GetObjectField(jobj, taskId);
-    desc.taskId = construct<TaskID>(env, jtaskId);
-
-    jfieldID slaveId = env->GetFieldID(clazz, "slaveId", "Lmesos/SlaveID;");
-    jobject jslaveId = env->GetObjectField(jobj, slaveId);
-    desc.slaveId = construct<SlaveID>(env, jslaveId);
-
-    jfieldID name = env->GetFieldID(clazz, "name", "Ljava/lang/String;");
-    jstring jstr = (jstring) env->GetObjectField(jobj, name);
-    desc.name = construct<string>(env, jstr);
-
-    jfieldID params = env->GetFieldID(clazz, "params", "Ljava/util/Map;");
-    jobject jparams = env->GetObjectField(jobj, params);
-    desc.params = construct< map<string, string> >(env, jparams);
-
-    jfieldID data = env->GetFieldID(clazz, "data", "[B");
-    jobject jdata = env->GetObjectField(jobj, data);
-    desc.data = construct<bytes>(env, (jbyteArray) jdata);
-
-    return desc;
-  }
-};
-
-
-template <>
-struct __construct<TaskStatus>
-{
-  static TaskStatus impl(JNIEnv *env, jobject jobj)
-  {
-    TaskStatus status;
-
-    jclass clazz = env->GetObjectClass(jobj);
-
-    jfieldID taskId = env->GetFieldID(clazz, "taskId", "Lmesos/TaskID;");
-    jobject jtaskId = env->GetObjectField(jobj, taskId);
-    status.taskId = construct<TaskID>(env, jtaskId);
-
-    jfieldID state = env->GetFieldID(clazz, "state", "Lmesos/TaskState;");
-    jobject jstate = env->GetObjectField(jobj, state);
-    status.state = construct<TaskState>(env, jstate);
-
-    jfieldID data = env->GetFieldID(clazz, "data", "[B");
-    jobject jdata = env->GetObjectField(jobj, data);
-    status.data = construct<bytes>(env, jdata);
-
-    return status;
-  }
-};
-
-
-template <>
-struct __construct<FrameworkMessage>
-{
-  static FrameworkMessage impl(JNIEnv *env, jobject jobj)
-  {
-    FrameworkMessage message;
-
-    jclass clazz = env->GetObjectClass(jobj);
-
-    jfieldID slaveId = env->GetFieldID(clazz, "slaveId", "Lmesos/SlaveID;");
-    jobject jslaveId = env->GetObjectField(jobj, slaveId);
-    message.slaveId = construct<SlaveID>(env, jslaveId);
-
-    jfieldID taskId = env->GetFieldID(clazz, "taskId", "Lmesos/TaskID;");
-    jobject jtaskId = env->GetObjectField(jobj, taskId);
-    message.taskId = construct<TaskID>(env, jtaskId);
-
-    jfieldID data = env->GetFieldID(clazz, "data", "[B");
-    jobject jdata = env->GetObjectField(jobj, data);
-    message.data = construct<bytes>(env, jdata);
-
-    return message;
-  }
-};
-
-
-template <>
-struct __construct<ExecutorInfo>
-{
-  static ExecutorInfo impl(JNIEnv *env, jobject jobj)
-  {
-    ExecutorInfo execInfo;
-
-    jclass clazz = env->GetObjectClass(jobj);
-
-    jfieldID uri = env->GetFieldID(clazz, "uri", "Ljava/lang/String;");
-    jobject juri = env->GetObjectField(jobj, uri);
-    execInfo.uri = construct<string>(env, (jstring) juri);
-
-    jfieldID data = env->GetFieldID(clazz, "data", "[B");
-    jobject jdata = env->GetObjectField(jobj, data);
-    execInfo.data = construct<bytes>(env, jdata);
-
-    jfieldID params = env->GetFieldID(clazz, "params", "Ljava/util/Map;");
-    jobject jparams = env->GetObjectField(jobj, params);
-    execInfo.params = construct< map<string, string> >(env, jparams);
-
-    return execInfo;
-  }
-};
-
-
-template <typename T>
-struct __convert
-{
-  static jobject impl(JNIEnv *env, const T &t);
-};
-
-
-template <typename T>
-jobject convert(JNIEnv *env, const T &t)
-{
-  return __convert<T>::impl(env, t);
+  jbyteArray jarray = (jbyteArray) jobj;
+  const jsize length = env->GetArrayLength(jarray);
+  jbyte *array = env->GetByteArrayElements(jarray, NULL);
+  bytes data(array, length);
+  env->ReleaseByteArrayElements(jarray, array, NULL);
+  return data;
 }
 
 
 template <>
-struct __convert<string>
+map<string, string> construct(JNIEnv *env, jobject jobj)
 {
-  static jobject impl(JNIEnv *env, const string &s)
-  {
-    return env->NewStringUTF(s.c_str());
+  map<string, string> result;
+
+  jclass clazz = env->GetObjectClass(jobj);
+
+  // Set entrySet = map.entrySet();
+  jmethodID entrySet = env->GetMethodID(clazz, "entrySet", "()Ljava/util/Set;");
+  jobject jentrySet = env->CallObjectMethod(jobj, entrySet);
+
+  clazz = env->GetObjectClass(jentrySet);
+
+  // Iterator iterator = entrySet.iterator();
+  jmethodID iterator = env->GetMethodID(clazz, "iterator", "()Ljava/util/Iterator;");
+  jobject jiterator = env->CallObjectMethod(jentrySet, iterator);
+
+  clazz = env->GetObjectClass(jiterator);
+
+  // while (iterator.hasNext()) {
+  jmethodID hasNext = env->GetMethodID(clazz, "hasNext", "()Z");
+
+  while (env->CallBooleanMethod(jiterator, hasNext)) {
+    // Map.Entry next = iterator.next();
+    jmethodID next = env->GetMethodID(clazz, "next", "()Ljava/lang/Object;");
+    jobject jnext = env->CallObjectMethod(jiterator, next);
+
+    clazz = env->GetObjectClass(jnext);
+
+    // String key = next.getKey();
+    jmethodID getKey = env->GetMethodID(clazz, "getKey", "()Ljava/lang/Object");
+    jstring jkey = (jstring) env->CallObjectMethod(jiterator, getKey);
+
+    // String value = next.getValue();
+    jmethodID getValue = env->GetMethodID(clazz, "getValue", "()Ljava/lang/Object");
+    jstring jvalue = (jstring) env->CallObjectMethod(jiterator, getValue);
+
+    const string& key = construct<string>(env, jkey);
+    const string& value = construct<string>(env, jvalue);
+
+    result[key] = value;
   }
-};
+
+  return result;
+}
 
 
 template <>
-struct __convert<bytes>
+FrameworkID construct(JNIEnv *env, jobject jobj)
 {
-  static jobject impl(JNIEnv *env, const bytes &data)
+  jclass clazz = env->GetObjectClass(jobj);
+  jfieldID id = env->GetFieldID(clazz, "s", "Ljava/lang/String;");
+  jstring jstr = (jstring) env->GetObjectField(jobj, id);
+  return FrameworkID(construct<string>(env, jstr));
+}
+
+
+template <>
+TaskID construct(JNIEnv *env, jobject jobj)
+{
+  jclass clazz = env->GetObjectClass(jobj);
+  jfieldID id = env->GetFieldID(clazz, "i", "I");
+  jint jtaskId = env->GetIntField(jobj, id);
+  TaskID taskId = jtaskId;
+  return taskId;
+}
+
+
+template <>
+SlaveID construct(JNIEnv *env, jobject jobj)
+{
+  jclass clazz = env->GetObjectClass(jobj);
+  jfieldID id = env->GetFieldID(clazz, "s", "Ljava/lang/String;");
+  jstring jstr = (jstring) env->GetObjectField(jobj, id);
+  return SlaveID(construct<string>(env, jstr));
+}
+
+
+template <>
+OfferID construct(JNIEnv *env, jobject jobj)
+{
+  jclass clazz = env->GetObjectClass(jobj);
+  jfieldID id = env->GetFieldID(clazz, "s", "Ljava/lang/String;");
+  jstring jstr = (jstring) env->GetObjectField(jobj, id);
+  return OfferID(construct<string>(env, jstr));
+}
+
+
+template <>
+TaskState construct(JNIEnv *env, jobject jobj)
+{
+  jclass clazz = env->GetObjectClass(jobj);
+
+  jmethodID name = env->GetMethodID(clazz, "name", "()Ljava/lang/String;");
+  jstring jstr = (jstring) env->CallObjectMethod(jobj, name);
+
+  const string& str = construct<string>(env, jstr);
+
+  if (str == "TASK_STARTING") {
+    return TASK_STARTING;
+  } else if (str == "TASK_RUNNING") {
+    return TASK_RUNNING;
+  } else if (str == "TASK_FINISHED") {
+    return TASK_FINISHED;
+  } else if (str == "TASK_FAILED") {
+    return TASK_FAILED;
+  } else if (str == "TASK_KILLED") {
+    return TASK_KILLED;
+  } else if (str == "TASK_LOST") {
+    return TASK_LOST;
+  }
+
+  fatal("Bad enum value while converting between Java and C++.");
+}
+
+
+template <>
+TaskDescription construct(JNIEnv *env, jobject jobj)
+{
+  TaskDescription desc;
+
+  jclass clazz = env->GetObjectClass(jobj);
+
+  jfieldID taskId = env->GetFieldID(clazz, "taskId", "Lmesos/TaskID;");
+  jobject jtaskId = env->GetObjectField(jobj, taskId);
+  desc.taskId = construct<TaskID>(env, jtaskId);
+
+  jfieldID slaveId = env->GetFieldID(clazz, "slaveId", "Lmesos/SlaveID;");
+  jobject jslaveId = env->GetObjectField(jobj, slaveId);
+  desc.slaveId = construct<SlaveID>(env, jslaveId);
+
+  jfieldID name = env->GetFieldID(clazz, "name", "Ljava/lang/String;");
+  jstring jstr = (jstring) env->GetObjectField(jobj, name);
+  desc.name = construct<string>(env, jstr);
+
+  jfieldID params = env->GetFieldID(clazz, "params", "Ljava/util/Map;");
+  jobject jparams = env->GetObjectField(jobj, params);
+  desc.params = construct< map<string, string> >(env, jparams);
+
+  jfieldID data = env->GetFieldID(clazz, "data", "[B");
+  jobject jdata = env->GetObjectField(jobj, data);
+  desc.data = construct<bytes>(env, (jbyteArray) jdata);
+
+  return desc;
+}
+
+
+template <>
+TaskStatus construct(JNIEnv *env, jobject jobj)
+{
+  TaskStatus status;
+
+  jclass clazz = env->GetObjectClass(jobj);
+
+  jfieldID taskId = env->GetFieldID(clazz, "taskId", "Lmesos/TaskID;");
+  jobject jtaskId = env->GetObjectField(jobj, taskId);
+  status.taskId = construct<TaskID>(env, jtaskId);
+
+  jfieldID state = env->GetFieldID(clazz, "state", "Lmesos/TaskState;");
+  jobject jstate = env->GetObjectField(jobj, state);
+  status.state = construct<TaskState>(env, jstate);
+
+  jfieldID data = env->GetFieldID(clazz, "data", "[B");
+  jobject jdata = env->GetObjectField(jobj, data);
+  status.data = construct<bytes>(env, jdata);
+
+  return status;
+}
+
+
+template <>
+FrameworkMessage construct(JNIEnv *env, jobject jobj)
+{
+  FrameworkMessage message;
+
+  jclass clazz = env->GetObjectClass(jobj);
+
+  jfieldID slaveId = env->GetFieldID(clazz, "slaveId", "Lmesos/SlaveID;");
+  jobject jslaveId = env->GetObjectField(jobj, slaveId);
+  message.slaveId = construct<SlaveID>(env, jslaveId);
+
+  jfieldID taskId = env->GetFieldID(clazz, "taskId", "Lmesos/TaskID;");
+  jobject jtaskId = env->GetObjectField(jobj, taskId);
+  message.taskId = construct<TaskID>(env, jtaskId);
+
+  jfieldID data = env->GetFieldID(clazz, "data", "[B");
+  jobject jdata = env->GetObjectField(jobj, data);
+  message.data = construct<bytes>(env, jdata);
+
+  return message;
+}
+
+
+template <>
+ExecutorInfo construct(JNIEnv *env, jobject jobj)
+{
+  ExecutorInfo execInfo;
+
+  jclass clazz = env->GetObjectClass(jobj);
+
+  jfieldID uri = env->GetFieldID(clazz, "uri", "Ljava/lang/String;");
+  jobject juri = env->GetObjectField(jobj, uri);
+  execInfo.uri = construct<string>(env, (jstring) juri);
+
+  jfieldID data = env->GetFieldID(clazz, "data", "[B");
+  jobject jdata = env->GetObjectField(jobj, data);
+  execInfo.data = construct<bytes>(env, jdata);
+
+  jfieldID params = env->GetFieldID(clazz, "params", "Ljava/util/Map;");
+  jobject jparams = env->GetObjectField(jobj, params);
+  execInfo.params = construct< map<string, string> >(env, jparams);
+
+  return execInfo;
+}
+
+
+template <>
+jobject convert(JNIEnv *env, const string &s)
+{
+  return env->NewStringUTF(s.c_str());
+}
+
+
+template <>
+ jobject convert(JNIEnv *env, const bytes &data)
   {
     jbyteArray jarray = env->NewByteArray(data.size());
     env->SetByteArrayRegion(jarray, 0, data.size(), (jbyte *) data.data());
     return jarray;
   }
-};
 
 
 template <>
-struct __convert< map<string, string> >
-{
-  static jobject impl(JNIEnv *env, const map<string, string> &m)
+ jobject convert(JNIEnv *env, const map<string, string> &m)
   {
     // HashMap m = new HashMap();
     jclass clazz = env->FindClass("java/util/HashMap");
@@ -384,13 +300,10 @@ struct __convert< map<string, string> >
 
     return jm;
   }
-};
 
 
 template <>
-struct __convert<FrameworkID>
-{
-  static jobject impl(JNIEnv *env, const FrameworkID &frameworkId)
+ jobject convert(JNIEnv *env, const FrameworkID &frameworkId)
   {
     // String id = ...;
     jobject jid = convert<string>(env, frameworkId);
@@ -405,13 +318,10 @@ struct __convert<FrameworkID>
 
     return jframeworkId;
   }
-};
 
 
 template <>
-struct __convert<TaskID>
-{
-  static jobject impl(JNIEnv *env, const TaskID &taskId)
+ jobject convert(JNIEnv *env, const TaskID &taskId)
   {
     // int id = ...;
     jint jid = taskId;
@@ -425,13 +335,10 @@ struct __convert<TaskID>
 
     return jtaskId;
   }
-};
 
 
 template <>
-struct __convert<SlaveID>
-{
-  static jobject impl(JNIEnv *env, const SlaveID &slaveId)
+ jobject convert(JNIEnv *env, const SlaveID &slaveId)
   {
     // String id = ...;
     jobject jid = convert<string>(env, slaveId);
@@ -446,13 +353,10 @@ struct __convert<SlaveID>
 
     return jslaveId;
   }
-};
 
 
 template <>
-struct __convert<OfferID>
-{
-  static jobject impl(JNIEnv *env, const OfferID &offerId)
+ jobject convert(JNIEnv *env, const OfferID &offerId)
   {
     // String id = ...;
     jobject jid = convert<string>(env, offerId);
@@ -467,13 +371,10 @@ struct __convert<OfferID>
 
     return jofferId;
   }
-};
 
 
 template <>
-struct __convert<TaskState>
-{
-  static jobject impl(JNIEnv *env, const TaskState &state)
+ jobject convert(JNIEnv *env, const TaskState &state)
   {
     jclass clazz = env->FindClass("mesos/TaskState");
 
@@ -498,14 +399,10 @@ struct __convert<TaskState>
     jfieldID TASK_X = env->GetStaticFieldID(clazz, name, "Lmesos/TaskState;");
     return env->GetStaticObjectField(clazz, TASK_X);
   }
-};
-
 
 
 template <>
-struct __convert<TaskDescription>
-{
-  static jobject impl(JNIEnv *env, const TaskDescription &desc)
+ jobject convert(JNIEnv *env, const TaskDescription &desc)
   {
     jobject jtaskId = convert<TaskID>(env, desc.taskId);
     jobject jslaveId = convert<SlaveID>(env, desc.slaveId);
@@ -524,13 +421,10 @@ struct __convert<TaskDescription>
 
     return jdesc;
   }
-};
 
 
 template <>
-struct __convert<TaskStatus>
-{
-  static jobject impl(JNIEnv *env, const TaskStatus &status)
+ jobject convert(JNIEnv *env, const TaskStatus &status)
   {
     jobject jtaskId = convert<TaskID>(env, status.taskId);
     jobject jstate = convert<TaskState>(env, status.state);
@@ -546,13 +440,10 @@ struct __convert<TaskStatus>
 
     return jstatus;
   }
-};
 
 
 template <>
-struct __convert<FrameworkMessage>
-{
-  static jobject impl(JNIEnv *env, const FrameworkMessage &message)
+ jobject convert(JNIEnv *env, const FrameworkMessage &message)
   {
     jobject jslaveId = convert<SlaveID>(env, message.slaveId);
     jobject jtaskId = convert<TaskID>(env, message.taskId);
@@ -568,13 +459,10 @@ struct __convert<FrameworkMessage>
 
     return jmessage;
   }
-};
 
 
 template <>
-struct __convert<ExecutorInfo>
-{
-  static jobject impl(JNIEnv *env, const ExecutorInfo &execInfo)
+ jobject convert(JNIEnv *env, const ExecutorInfo &execInfo)
   {
     jobject juri = convert<string>(env, execInfo.uri);
     jobject jdata = convert<bytes>(env, execInfo.data);
@@ -590,7 +478,6 @@ struct __convert<ExecutorInfo>
 
     return jexecInfo;
   }
-};
 
 
 class JNIScheduler : public Scheduler
