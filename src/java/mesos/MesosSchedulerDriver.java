@@ -8,10 +8,10 @@ import java.util.Map;
  * Concrete implementation of SchedulerDriver that communicates with
  * a Mesos master.
  */
-class MesosSchedulerDriver extends SchedulerDriver {
+public class MesosSchedulerDriver extends SchedulerDriver {
 
   static {
-    System.loadLibrary("nexus");
+    System.loadLibrary("mesos");
   }
 
   public MesosSchedulerDriver(Scheduler sched, String url,
