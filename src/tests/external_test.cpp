@@ -11,7 +11,7 @@
 #include "testing_utils.hpp"
 
 using std::string;
-using namespace nexus::internal::test;
+using namespace mesos::internal::test;
 
 
 /**
@@ -21,7 +21,7 @@ using namespace nexus::internal::test;
  * piping its output to files called stdout and stderr, and the test
  * passes if the script returns 0.
  */
-void nexus::internal::test::runExternalTest(const char* testCase,
+void mesos::internal::test::runExternalTest(const char* testCase,
                                             const char* testName)
 {
   // Create and go into the test's work directory

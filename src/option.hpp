@@ -10,7 +10,7 @@
 #include "params.hpp"
 #include "foreach.hpp"
 
-namespace nexus { namespace internal {
+namespace mesos { namespace internal {
     
 using std::string;
 using std::cout;
@@ -120,6 +120,6 @@ public:
   ValidatorBase *validator;
 };
 
-} }   // end nexus :: internal namespace
+} }   // end mesos :: internal namespace
 
 #endif

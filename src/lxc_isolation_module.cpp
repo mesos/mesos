@@ -23,9 +23,9 @@ using boost::lexical_cast;
 using boost::unordered_map;
 using boost::unordered_set;
 
-using namespace nexus;
-using namespace nexus::internal;
-using namespace nexus::internal::slave;
+using namespace mesos;
+using namespace mesos::internal;
+using namespace mesos::internal::slave;
 
 namespace {
 
@@ -104,21 +104,21 @@ void LxcIsolationModule::startExecutor(Framework *fw)
             << fw->executorInfo.uri;
   CHECK(infos[fw->id]->lxcExecutePid == -1 && infos[fw->id]->container == "");
 
-  // Get location of Nexus install in order to find nexus-launcher.
-  const char *nexusHome = getenv("NEXUS_HOME");
-  if (!nexusHome)
-    nexusHome = "..";
-  string nexusLauncher = string(nexusHome) + "/src/nexus-launcher";
+  // Get location of Mesos install in order to find mesos-launcher.
+  const char *mesosHome = getenv("MESOS_HOME");
+  if (!mesosHome)
+    mesosHome = "..";
+  string mesosLauncher = string(mesosHome) + "/src/mesos-launcher";
 
   // Create a name for the container
   ostringstream oss;
-  oss << "nexus.slave-" << slave->id << ".framework-" << fw->id;
+  oss << "mesos.slave-" << slave->id << ".framework-" << fw->id;
   string containerName = oss.str();
 
   infos[fw->id]->container = containerName;
   fw->executorStatus = "Container: " + containerName;
 
-  // Run lxc-execute nexus-launcher using a fork-exec (since lxc-execute
+  // Run lxc-execute mesos-launcher using a fork-exec (since lxc-execute
   // does not return until the container is finished). Note that lxc-execute
   // automatically creates the container and will delete it when finished.
   pid_t pid;
@@ -140,17 +140,17 @@ void LxcIsolationModule::startExecutor(Framework *fw)
       }
     }
 
-    // Set up Nexus environment variables for launcher.
-    setenv("NEXUS_FRAMEWORK_ID", lexical_cast<string>(fw->id).c_str(), 1);
-    setenv("NEXUS_EXECUTOR_URI", fw->executorInfo.uri.c_str(), 1);
-    setenv("NEXUS_USER", fw->user.c_str(), 1);
-    setenv("NEXUS_SLAVE_PID", lexical_cast<string>(slave->self()).c_str(), 1);
-    setenv("NEXUS_REDIRECT_IO", slave->local ? "0" : "1", 1);
-    setenv("NEXUS_WORK_DIRECTORY", slave->getWorkDirectory(fw->id).c_str(), 1);
+    // Set up Mesos environment variables for launcher.
+    setenv("MESOS_FRAMEWORK_ID", lexical_cast<string>(fw->id).c_str(), 1);
+    setenv("MESOS_EXECUTOR_URI", fw->executorInfo.uri.c_str(), 1);
+    setenv("MESOS_USER", fw->user.c_str(), 1);
+    setenv("MESOS_SLAVE_PID", lexical_cast<string>(slave->self()).c_str(), 1);
+    setenv("MESOS_REDIRECT_IO", slave->local ? "0" : "1", 1);
+    setenv("MESOS_WORK_DIRECTORY", slave->getWorkDirectory(fw->id).c_str(), 1);
 
     // Run lxc-execute.
     execlp("lxc-execute", "lxc-execute", "-n", containerName.c_str(),
-           nexusLauncher.c_str(), (char *) NULL);
+           mesosLauncher.c_str(), (char *) NULL);
     // If we get here, the execl call failed.
     fatalerror("Could not exec lxc-execute");
     // TODO: Exit the slave if this happens
