@@ -27,7 +27,8 @@ public class MesosSchedulerDriver extends SchedulerDriver {
     this(sched, url, FrameworkID.EMPTY);
   }
 
-  private native void initialize();
+  protected native void initialize();
+  protected native void finalize();
 
   public native int start();
   public native int stop();

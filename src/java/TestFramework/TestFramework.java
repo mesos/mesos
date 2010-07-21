@@ -22,7 +22,7 @@ public class TestFramework {
     public ExecutorInfo getExecutorInfo(SchedulerDriver d) {
       try {
         return new ExecutorInfo(
-            new File("./test_executor").getCanonicalPath(),
+            new File("../../cpp-test-executor").getCanonicalPath(),
             new byte[0]);
       } catch (Exception e) {
         e.printStackTrace();
@@ -42,11 +42,11 @@ public class TestFramework {
                               Collection<SlaveOffer> offers)
     {
       System.out.println("Got offer offer " + oid);
-      ArrayList<TaskDescription> tasks = new ArrayList();
-      SlaveOffer[] o = offers.toArray(new SlaveOffer[offers.size()]);
-      for (int i = 0; i < o.length; i++) {
+
+      ArrayList<TaskDescription> tasks = new ArrayList<TaskDescription>();
+
+      for (SlaveOffer offer : offers) {
         if (launchedTasks < totalTasks) {
-          SlaveOffer offer = o[i];
           TaskID taskId = new TaskID(launchedTasks++);
           Map<String, String> taskParams = new HashMap<String, String>();
           taskParams.put("cpus", "1");
@@ -83,7 +83,7 @@ public class TestFramework {
 
     @Override
     public void frameworkMessage(SchedulerDriver driver,
-                                        FrameworkMessage message)
+                                 FrameworkMessage message)
     {
       System.out.println("Received message: " + message);
     }
@@ -102,5 +102,7 @@ public class TestFramework {
 
   public static void main(String[] args) throws Exception {
     new MesosSchedulerDriver(new MyScheduler(), args[0]).run();
+    System.out.println("all done");
+    System.gc();
   }
 }

@@ -1,3 +1,5 @@
+#include <iostream>
+
 #include <map>
 #include <string>
 #include <vector>
@@ -69,20 +71,21 @@ map<string, string> construct(JNIEnv *env, jobject jobj)
   // while (iterator.hasNext()) {
   jmethodID hasNext = env->GetMethodID(clazz, "hasNext", "()Z");
 
+  jmethodID next = env->GetMethodID(clazz, "next", "()Ljava/lang/Object;");
+
   while (env->CallBooleanMethod(jiterator, hasNext)) {
-    // Map.Entry next = iterator.next();
-    jmethodID next = env->GetMethodID(clazz, "next", "()Ljava/lang/Object;");
-    jobject jnext = env->CallObjectMethod(jiterator, next);
+    // Map.Entry entry = iterator.next();
+    jobject jentry = env->CallObjectMethod(jiterator, next);
 
-    clazz = env->GetObjectClass(jnext);
+    clazz = env->GetObjectClass(jentry);
 
-    // String key = next.getKey();
-    jmethodID getKey = env->GetMethodID(clazz, "getKey", "()Ljava/lang/Object");
-    jstring jkey = (jstring) env->CallObjectMethod(jiterator, getKey);
+    // String key = entry.getKey();
+    jmethodID getKey = env->GetMethodID(clazz, "getKey", "()Ljava/lang/Object;");
+    jobject jkey = env->CallObjectMethod(jentry, getKey);
 
-    // String value = next.getValue();
-    jmethodID getValue = env->GetMethodID(clazz, "getValue", "()Ljava/lang/Object");
-    jstring jvalue = (jstring) env->CallObjectMethod(jiterator, getValue);
+    // String value = entry.getValue();
+    jmethodID getValue = env->GetMethodID(clazz, "getValue", "()Ljava/lang/Object;");
+    jobject jvalue = env->CallObjectMethod(jentry, getValue);
 
     const string& key = construct<string>(env, jkey);
     const string& value = construct<string>(env, jvalue);
@@ -484,7 +487,10 @@ class JNIScheduler : public Scheduler
 {
 public:
   JNIScheduler(JNIEnv *_env, jobject _jdriver)
-    : env(_env), jdriver(_jdriver) {}
+    : jvm(NULL), env(_env), jdriver(_jdriver)
+  {
+    env->GetJavaVM(&jvm);
+  }
 
   virtual ~JNIScheduler() {}
 
@@ -499,7 +505,7 @@ public:
   virtual void slaveLost(SchedulerDriver*, SlaveID);
   virtual void error(SchedulerDriver*, int code, const string& message);
 
-private:
+  JavaVM *jvm;
   JNIEnv *env;
   jobject jdriver;
 };
@@ -507,6 +513,8 @@ private:
 
 string JNIScheduler::getFrameworkName(SchedulerDriver* driver)
 {
+  jvm->AttachCurrentThread((void **) &env, NULL);
+
   string name;
 
   jclass clazz = env->GetObjectClass(jdriver);
@@ -515,20 +523,22 @@ string JNIScheduler::getFrameworkName(SchedulerDriver* driver)
   jobject jsched = env->GetObjectField(jdriver, sched);
 
   clazz = env->GetObjectClass(jsched);
-                                   
+
   // String name = sched.getFrameworkName();
   jmethodID getFrameworkName =
-    env->GetMethodID(clazz, "getFrameworkName", "()Ljava/lang/String;");
+    env->GetMethodID(clazz, "getFrameworkName", "(Lmesos/SchedulerDriver;)Ljava/lang/String;");
 
   env->ExceptionClear();
 
-  jobject jname = env->CallObjectMethod(jsched, getFrameworkName);
+  jobject jname = env->CallObjectMethod(jsched, getFrameworkName, jdriver);
 
   if (!env->ExceptionOccurred()) {
     name = construct<string>(env, (jstring) jname);
+    jvm->DetachCurrentThread();
   } else {
     env->ExceptionDescribe();
     env->ExceptionClear();
+    jvm->DetachCurrentThread();
     driver->stop();
     this->error(driver, -1, "Java exception caught");
   }
@@ -539,6 +549,8 @@ string JNIScheduler::getFrameworkName(SchedulerDriver* driver)
 
 ExecutorInfo JNIScheduler::getExecutorInfo(SchedulerDriver* driver)
 {
+  jvm->AttachCurrentThread((void **) &env, NULL);
+
   ExecutorInfo execInfo;
 
   jclass clazz = env->GetObjectClass(jdriver);
@@ -550,17 +562,19 @@ ExecutorInfo JNIScheduler::getExecutorInfo(SchedulerDriver* driver)
 
   // ExecutorInfo execInfo = sched.getExecutorInfo();
   jmethodID getExecutorInfo =
-    env->GetMethodID(clazz, "getExecutorInfo", "()Lmesos/ExecutorInfo;");
+    env->GetMethodID(clazz, "getExecutorInfo", "(Lmesos/SchedulerDriver;)Lmesos/ExecutorInfo;");
 
   env->ExceptionClear();
 
-  jobject jexecInfo = env->CallObjectMethod(jsched, getExecutorInfo);
+  jobject jexecInfo = env->CallObjectMethod(jsched, getExecutorInfo, jdriver);
 
   if (!env->ExceptionOccurred()) {
     execInfo = construct<ExecutorInfo>(env, jexecInfo);
+    jvm->DetachCurrentThread();
   } else {
     env->ExceptionDescribe();
     env->ExceptionClear();
+    jvm->DetachCurrentThread();
     driver->stop();
     this->error(driver, -1, "Java exception caught");
   }
@@ -571,6 +585,8 @@ ExecutorInfo JNIScheduler::getExecutorInfo(SchedulerDriver* driver)
 
 void JNIScheduler::registered(SchedulerDriver* driver, FrameworkID frameworkId)
 {
+  jvm->AttachCurrentThread((void **) &env, NULL);
+
   jclass clazz = env->GetObjectClass(jdriver);
 
   jfieldID sched = env->GetFieldID(clazz, "sched", "Lmesos/Scheduler;");
@@ -588,9 +604,12 @@ void JNIScheduler::registered(SchedulerDriver* driver, FrameworkID frameworkId)
 
   env->CallVoidMethod(jsched, registered, jdriver, jframeworkId);
 
-  if (env->ExceptionOccurred()) {
+  if (!env->ExceptionOccurred()) {
+    jvm->DetachCurrentThread();
+  } else {
     env->ExceptionDescribe();
     env->ExceptionClear();
+    jvm->DetachCurrentThread();
     driver->stop();
     this->error(driver, -1, "Java exception caught");
   }
@@ -600,6 +619,8 @@ void JNIScheduler::registered(SchedulerDriver* driver, FrameworkID frameworkId)
 void JNIScheduler::resourceOffer(SchedulerDriver* driver, OfferID offerId,
                                  const vector<SlaveOffer>& offers)
 {
+  jvm->AttachCurrentThread((void **) &env, NULL);
+
   jclass clazz = env->GetObjectClass(jdriver);
 
   jfieldID sched = env->GetFieldID(clazz, "sched", "Lmesos/Scheduler;");
@@ -641,9 +662,12 @@ void JNIScheduler::resourceOffer(SchedulerDriver* driver, OfferID offerId,
 
   env->CallVoidMethod(jsched, resourceOffer, jdriver, jofferId, joffers);
 
-  if (env->ExceptionOccurred()) {
+  if (!env->ExceptionOccurred()) {
+    jvm->DetachCurrentThread();
+  } else {
     env->ExceptionDescribe();
     env->ExceptionClear();
+    jvm->DetachCurrentThread();
     driver->stop();
     this->error(driver, -1, "Java exception caught");
   }
@@ -652,6 +676,8 @@ void JNIScheduler::resourceOffer(SchedulerDriver* driver, OfferID offerId,
 
 void JNIScheduler::offerRescinded(SchedulerDriver* driver, OfferID offerId)
 {
+  jvm->AttachCurrentThread((void **) &env, NULL);
+
   jclass clazz = env->GetObjectClass(jdriver);
 
   jfieldID sched = env->GetFieldID(clazz, "sched", "Lmesos/Scheduler;");
@@ -669,9 +695,12 @@ void JNIScheduler::offerRescinded(SchedulerDriver* driver, OfferID offerId)
 
   env->CallVoidMethod(jsched, offerRescinded, jdriver, jofferId);
 
-  if (env->ExceptionOccurred()) {
+  if (!env->ExceptionOccurred()) {
+    jvm->DetachCurrentThread();
+  } else {
     env->ExceptionDescribe();
     env->ExceptionClear();
+    jvm->DetachCurrentThread();
     driver->stop();
     this->error(driver, -1, "Java exception caught");
   }
@@ -680,6 +709,8 @@ void JNIScheduler::offerRescinded(SchedulerDriver* driver, OfferID offerId)
 
 void JNIScheduler::statusUpdate(SchedulerDriver* driver, const TaskStatus& status)
 {
+  jvm->AttachCurrentThread((void **) &env, NULL);
+
   jclass clazz = env->GetObjectClass(jdriver);
 
   jfieldID sched = env->GetFieldID(clazz, "sched", "Lmesos/Scheduler;");
@@ -697,9 +728,12 @@ void JNIScheduler::statusUpdate(SchedulerDriver* driver, const TaskStatus& statu
 
   env->CallVoidMethod(jsched, statusUpdate, jdriver, jstatus);
 
-  if (env->ExceptionOccurred()) {
+  if (!env->ExceptionOccurred()) {
+    jvm->DetachCurrentThread();
+  } else {
     env->ExceptionDescribe();
     env->ExceptionClear();
+    jvm->DetachCurrentThread();
     driver->stop();
     this->error(driver, -1, "Java exception caught");
   }
@@ -708,6 +742,8 @@ void JNIScheduler::statusUpdate(SchedulerDriver* driver, const TaskStatus& statu
 
 void JNIScheduler::frameworkMessage(SchedulerDriver* driver, const FrameworkMessage& message)
 {
+  jvm->AttachCurrentThread((void **) &env, NULL);
+
   jclass clazz = env->GetObjectClass(jdriver);
 
   jfieldID sched = env->GetFieldID(clazz, "sched", "Lmesos/Scheduler;");
@@ -725,9 +761,12 @@ void JNIScheduler::frameworkMessage(SchedulerDriver* driver, const FrameworkMess
 
   env->CallVoidMethod(jsched, frameworkMessage, jdriver, jmessage);
 
-  if (env->ExceptionOccurred()) {
+  if (!env->ExceptionOccurred()) {
+    jvm->DetachCurrentThread();
+  } else {
     env->ExceptionDescribe();
     env->ExceptionClear();
+    jvm->DetachCurrentThread();
     driver->stop();
     this->error(driver, -1, "Java exception caught");
   }
@@ -736,6 +775,8 @@ void JNIScheduler::frameworkMessage(SchedulerDriver* driver, const FrameworkMess
 
 void JNIScheduler::slaveLost(SchedulerDriver* driver, SlaveID slaveId)
 {
+  jvm->AttachCurrentThread((void **) &env, NULL);
+
   jclass clazz = env->GetObjectClass(jdriver);
 
   jfieldID sched = env->GetFieldID(clazz, "sched", "Lmesos/Scheduler;");
@@ -753,9 +794,12 @@ void JNIScheduler::slaveLost(SchedulerDriver* driver, SlaveID slaveId)
 
   env->CallVoidMethod(jsched, slaveLost, jdriver, jslaveId);
 
-  if (env->ExceptionOccurred()) {
+  if (!env->ExceptionOccurred()) {
+    jvm->DetachCurrentThread();
+  } else {
     env->ExceptionDescribe();
     env->ExceptionClear();
+    jvm->DetachCurrentThread();
     driver->stop();
     this->error(driver, -1, "Java exception caught");
   }
@@ -764,6 +808,8 @@ void JNIScheduler::slaveLost(SchedulerDriver* driver, SlaveID slaveId)
 
 void JNIScheduler::error(SchedulerDriver* driver, int code, const string& message)
 {
+  jvm->AttachCurrentThread((void **) &env, NULL);
+
   jclass clazz = env->GetObjectClass(jdriver);
 
   jfieldID sched = env->GetFieldID(clazz, "sched", "Lmesos/Scheduler;");
@@ -782,11 +828,14 @@ void JNIScheduler::error(SchedulerDriver* driver, int code, const string& messag
 
   env->CallVoidMethod(jsched, error, jdriver, jcode, jmessage);
 
-  if (env->ExceptionOccurred()) {
+  if (!env->ExceptionOccurred()) {
+    jvm->DetachCurrentThread();
+  } else {
     env->ExceptionDescribe();
     env->ExceptionClear();
+    jvm->DetachCurrentThread();
     driver->stop();
-    this->error(driver, -1, "Java exception caught");
+    // Don't call error recursively here!
   }
 }
 
@@ -805,8 +854,11 @@ JNIEXPORT void JNICALL Java_mesos_MesosSchedulerDriver_initialize
 {
   jclass clazz = env->GetObjectClass(thiz);
 
+  // Create a global reference to the MesosSchedulerDriver instance.
+  jobject jdriver = env->NewWeakGlobalRef(thiz);
+
   // Create the C++ scheduler and initialize the __sched variable.
-  Scheduler *sched = new JNIScheduler(env, thiz);
+  JNIScheduler *sched = new JNIScheduler(env, jdriver);
 
   jfieldID __sched = env->GetFieldID(clazz, "__sched", "J");
   env->SetLongField(thiz, __sched, (jlong) sched);
@@ -816,11 +868,41 @@ JNIEXPORT void JNICALL Java_mesos_MesosSchedulerDriver_initialize
   jobject jstr = env->GetObjectField(thiz, url);
   
   // Create the C++ driver and initialize the __driver variable.
-  SchedulerDriver *driver =
+  NexusSchedulerDriver *driver =
     new NexusSchedulerDriver(sched, construct<string>(env, jstr));
 
   jfieldID __driver = env->GetFieldID(clazz, "__driver", "J");
   env->SetLongField(thiz, __driver, (jlong) driver);
+}
+
+
+/*
+ * Class:     mesos_MesosSchedulerDriver
+ * Method:    finalize
+ * Signature: ()V
+ */
+JNIEXPORT void JNICALL Java_mesos_MesosSchedulerDriver_finalize
+  (JNIEnv *env, jobject thiz)
+{
+  jclass clazz = env->GetObjectClass(thiz);
+
+  jfieldID __driver = env->GetFieldID(clazz, "__driver", "J");
+  NexusSchedulerDriver *driver = (NexusSchedulerDriver *)
+    env->GetLongField(thiz, __driver);
+
+  // Call stop just in case.
+  driver->stop();
+  driver->join();
+
+  delete driver;
+
+  jfieldID __sched = env->GetFieldID(clazz, "__sched", "J");
+  JNIScheduler *sched = (JNIScheduler *)
+    env->GetLongField(thiz, __sched);
+
+  env->DeleteWeakGlobalRef(sched->jdriver);
+
+  delete sched;
 }
 
 
@@ -835,7 +917,7 @@ JNIEXPORT jint JNICALL Java_mesos_MesosSchedulerDriver_start
   jclass clazz = env->GetObjectClass(thiz);
 
   jfieldID __driver = env->GetFieldID(clazz, "__driver", "J");
-  SchedulerDriver *driver = (SchedulerDriver *)
+  NexusSchedulerDriver *driver = (NexusSchedulerDriver *)
     env->GetLongField(thiz, __driver);
 
   return driver->start();
@@ -853,7 +935,7 @@ JNIEXPORT jint JNICALL Java_mesos_MesosSchedulerDriver_stop
   jclass clazz = env->GetObjectClass(thiz);
 
   jfieldID __driver = env->GetFieldID(clazz, "__driver", "J");
-  SchedulerDriver *driver = (SchedulerDriver *)
+  NexusSchedulerDriver *driver = (NexusSchedulerDriver *)
     env->GetLongField(thiz, __driver);
 
   return driver->stop();
@@ -871,7 +953,7 @@ JNIEXPORT jint JNICALL Java_mesos_MesosSchedulerDriver_join
   jclass clazz = env->GetObjectClass(thiz);
 
   jfieldID __driver = env->GetFieldID(clazz, "__driver", "J");
-  SchedulerDriver *driver = (SchedulerDriver *)
+  NexusSchedulerDriver *driver = (NexusSchedulerDriver *)
     env->GetLongField(thiz, __driver);
 
   return driver->join();
@@ -893,7 +975,7 @@ JNIEXPORT jint JNICALL Java_mesos_MesosSchedulerDriver_sendFrameworkMessage
   jclass clazz = env->GetObjectClass(thiz);
 
   jfieldID __driver = env->GetFieldID(clazz, "__driver", "J");
-  SchedulerDriver *driver = (SchedulerDriver *)
+  NexusSchedulerDriver *driver = (NexusSchedulerDriver *)
     env->GetLongField(thiz, __driver);
 
   return driver->sendFrameworkMessage(message);
@@ -915,7 +997,7 @@ JNIEXPORT jint JNICALL Java_mesos_MesosSchedulerDriver_killTask
   jclass clazz = env->GetObjectClass(thiz);
 
   jfieldID __driver = env->GetFieldID(clazz, "__driver", "J");
-  SchedulerDriver *driver = (SchedulerDriver *)
+  NexusSchedulerDriver *driver = (NexusSchedulerDriver *)
     env->GetLongField(thiz, __driver);
 
   return driver->killTask(taskId);
@@ -947,9 +1029,10 @@ JNIEXPORT jint JNICALL Java_mesos_MesosSchedulerDriver_replyToOffer
   // while (iterator.hasNext()) {
   jmethodID hasNext = env->GetMethodID(clazz, "hasNext", "()Z");
 
+  jmethodID next = env->GetMethodID(clazz, "next", "()Ljava/lang/Object;");
+
   while (env->CallBooleanMethod(jiterator, hasNext)) {
     // Object task = iterator.next();
-    jmethodID next = env->GetMethodID(clazz, "next", "()Ljava/lang/Object;");
     jobject jtask = env->CallObjectMethod(jiterator, next);
     TaskDescription task = construct<TaskDescription>(env, jtask);
     tasks.push_back(task);
@@ -962,7 +1045,7 @@ JNIEXPORT jint JNICALL Java_mesos_MesosSchedulerDriver_replyToOffer
   clazz = env->GetObjectClass(thiz);
 
   jfieldID __driver = env->GetFieldID(clazz, "__driver", "J");
-  SchedulerDriver *driver = (SchedulerDriver *)
+  NexusSchedulerDriver *driver = (NexusSchedulerDriver *)
     env->GetLongField(thiz, __driver);
 
   return driver->replyToOffer(offerId, tasks, params);
@@ -980,7 +1063,7 @@ JNIEXPORT jint JNICALL Java_mesos_MesosSchedulerDriver_reviveOffers
   jclass clazz = env->GetObjectClass(thiz);
 
   jfieldID __driver = env->GetFieldID(clazz, "__driver", "J");
-  SchedulerDriver *driver = (SchedulerDriver *)
+  NexusSchedulerDriver *driver = (NexusSchedulerDriver *)
     env->GetLongField(thiz, __driver);
 
   return driver->reviveOffers();
@@ -1002,7 +1085,7 @@ JNIEXPORT jint JNICALL Java_mesos_MesosSchedulerDriver_sendHints
   jclass clazz = env->GetObjectClass(thiz);
 
   jfieldID __driver = env->GetFieldID(clazz, "__driver", "J");
-  SchedulerDriver *driver = (SchedulerDriver *)
+  NexusSchedulerDriver *driver = (NexusSchedulerDriver *)
     env->GetLongField(thiz, __driver);
 
   return driver->sendHints(hints);

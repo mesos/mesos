@@ -14,6 +14,7 @@ public abstract class SchedulerDriver {
   public abstract int join();
 
   public int run() {
+    System.out.println("SchedulerDriver.run()");
     int ret = start();
     return ret != 0 ? ret : join();
   }

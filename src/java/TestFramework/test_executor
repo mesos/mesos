@@ -8,4 +8,4 @@ fi
 
 export PYTHONPATH=`dirname $0`/../../src/swig/python:$PYTHONPATH
 
-$PYTHON `dirname $0`/daemon_executor.py $@
+$PYTHON `dirname $0`/test_executor.py $@

@@ -229,16 +229,16 @@ python: $(PYTHON_LIB)
 
 ruby: $(RUBY_LIB)
 
-java/mesos.jar:
+java/mesos.jar: java/mesos/*.java
 ifdef JAVA_HOME
 	rm -f java/classes/mesos/*
 	mkdir -p java/classes/mesos
 	$(JAVA_HOME)/bin/javac -sourcepath java -d java/classes java/mesos/*.java
-	$(JAVA_HOME)/bin/jar cf $@ -C java mesos
+	$(JAVA_HOME)/bin/jar cf $@ -C java/classes mesos
 	$(JAVA_HOME)/bin/javah -d java/jni -classpath java/classes mesos.MesosSchedulerDriver
 endif
 
-$(NEW_JAVA_LIB): $(NEXUS_LIB) java/mesos.jar
+$(NEW_JAVA_LIB): $(NEXUS_LIB) java/mesos.jar java/jni/mesos_MesosSchedulerDriver.cpp
 ifdef JAVA_HOME
 	$(CXX) $(CXXFLAGS) -shared -o $@ java/jni/mesos_MesosSchedulerDriver.cpp -I$(JAVA_HOME)/include -I$(JAVA_HOME)/include/$(OS_NAME) -L. $(LDFLAGS) -lnexus++ $(LIBS)
 endif
