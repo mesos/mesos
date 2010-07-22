@@ -33,7 +33,7 @@
 #include "task.hpp"
 
 
-namespace nexus { namespace internal { namespace master {
+namespace mesos { namespace internal { namespace master {
 
 using std::make_pair;
 using std::map;
@@ -45,8 +45,8 @@ using std::vector;
 using boost::unordered_map;
 using boost::unordered_set;
 
-using namespace nexus;
-using namespace nexus::internal;
+using namespace mesos;
+using namespace mesos::internal;
 
 
 // Maximum number of slot offers to have outstanding for each framework.
@@ -71,7 +71,7 @@ const int64_t MAX_MEM = 1024LL * 1024LL * 1024LL * 1024LL * 1024LL;
 const double HEARTBEAT_INTERVAL = 2;
 
 // Acceptable time since we saw the last heartbeat (four heartbeats).
-const double HEARTBEAT_TIMEOUT = HEARTBEAT_INTERVAL * 4;
+const double HEARTBEAT_TIMEOUT = 15;
 
 // Some forward declarations
 class Slave;

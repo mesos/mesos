@@ -9,7 +9,7 @@
 #include "messages.hpp"
 #include "slave.hpp"
 
-namespace nexus { namespace internal { namespace slave {
+namespace mesos { namespace internal { namespace slave {
 
 using std::string;
 using boost::unordered_map;
@@ -28,13 +28,18 @@ public:
   };
 
   // Extra shutdown message for reaper
-  enum { SHUTDOWN_REAPER = NEXUS_MESSAGES };
+  enum { SHUTDOWN_REAPER = MESOS_MESSAGES };
+
+  // Per-framework information object maintained in info hashmap
+  struct FrameworkInfo {
+    string container;    // Name of Linux container used for this framework
+    pid_t lxcExecutePid; // PID of lxc-execute command running the executor
+  };
 
 protected:
   bool initialized;
   Slave* slave;
-  unordered_map<FrameworkID, string> container;
-  unordered_map<FrameworkID, pid_t> lxcExecutePid;
+  unordered_map<FrameworkID, FrameworkInfo*> infos;
   Reaper* reaper;
 
 public:
@@ -55,7 +60,12 @@ public:
   virtual void resourcesChanged(Framework* framework);
 
 protected:
+  // Run a shell command formatted with varargs and return its exit code.
   int shell(const char* format, ...);
+
+  // Attempt to set a resource limit of a framework's container for a given
+  // cgroup property (e.g. cpu.shares). Returns true on success.
+  bool setResourceLimit(Framework* fw, const string& property, int64_t value);
 };
 
 }}}

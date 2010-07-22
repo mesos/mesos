@@ -39,10 +39,10 @@
 #include "master_detector.hpp"
 #include "task.hpp"
 
-namespace nexus { namespace internal { namespace slave {
+namespace mesos { namespace internal { namespace slave {
 
-using namespace nexus;
-using namespace nexus::internal;
+using namespace mesos;
+using namespace mesos::internal;
 
 using std::list;
 using std::pair;
@@ -191,6 +191,9 @@ public:
 
   string getWorkDirectory(FrameworkID fid);
 
+  // Remove a framework's Executor, possibly killing its process
+  void removeExecutor(FrameworkID frameworkId, bool killProcess);
+
   // TODO(benh): Can this be cleaner?
   // Make self() public so that isolation modules and tests can access it
   using Tuple<ReliableProcess>::self;
@@ -207,9 +210,6 @@ protected:
   // Send any tasks queued up for the given framework to its executor
   // (needed if we received tasks while the executor was starting up)
   void sendQueuedTasks(Framework *framework);
-
-  // Remove a framework's Executor, possibly killing its process
-  void removeExecutor(FrameworkID frameworkId, bool killProcess);
 
   // Kill a framework (including its executor)
   void killFramework(Framework *fw);

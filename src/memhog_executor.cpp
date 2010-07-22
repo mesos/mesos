@@ -1,18 +1,13 @@
 #include <time.h>
 
-#include <nexus_exec.hpp>
-
-#include <boost/lexical_cast.hpp>
+#include <mesos_exec.hpp>
 
 #include <cstdlib>
 #include <iostream>
 #include <sstream>
 
-
 using namespace std;
-using namespace nexus;
-
-using boost::lexical_cast;
+using namespace mesos;
 
 
 class MemHogExecutor;
@@ -20,41 +15,42 @@ class MemHogExecutor;
 
 struct ThreadArg
 {
-  MemHogExecutor *executor;
-  TaskID tid;
-  bool primary;
+  MemHogExecutor* executor;
+  TaskID taskId;
+  int threadId;
+  int64_t memToHog;
+  double duration;
 
-  ThreadArg(MemHogExecutor *e, TaskID t, bool p)
-    : executor(e), tid(t), primary(p) {}
+  ThreadArg(MemHogExecutor* executor_, TaskID taskId_, int threadId_,
+            int64_t memToHog_, double duration_)
+    : executor(executor_), taskId(taskId_), threadId(threadId_),
+      memToHog(memToHog_), duration(duration_) {}
 };
 
 
-void *runTask(void *arg);
+void* runTask(void* threadArg);
 
 
 class MemHogExecutor : public Executor
 {
 public:
-  double taskLen;
-  int64_t memToHog;
-  int threadsPerTask;
   ExecutorDriver* driver;
 
   virtual ~MemHogExecutor() {}
 
   virtual void init(ExecutorDriver* driver, const ExecutorArgs &args) {
     this->driver = driver;
-    istringstream in(args.data);
-    in >> memToHog >> taskLen >> threadsPerTask;
-    cout << "Initialized: memToHog = " << memToHog
-         << ", taskLen = " << taskLen
-         << ", threadsPerTask = " << threadsPerTask << endl;
   }
 
   virtual void launchTask(ExecutorDriver*, const TaskDescription& task) {
     cout << "Executor starting task " << task.taskId << endl;
-    for (int i = 0; i < threadsPerTask; i++) {
-      ThreadArg *arg = new ThreadArg(this, task.taskId, i == 0);
+    int64_t memToHog;
+    double duration;
+    int numThreads;
+    istringstream in(task.arg);
+    in >> memToHog >> duration >> numThreads;
+    for (int i = 0; i < numThreads; i++) {
+      ThreadArg* arg = new ThreadArg(this, task.taskId, i, memToHog, duration);
       pthread_t thread;
       pthread_create(&thread, 0, runTask, arg);
       pthread_detach(thread);
@@ -63,41 +59,51 @@ public:
 };
 
 
-void *runTask(void *arg)
+// A simple linear congruential generator, used to access memory in a random
+// pattern without relying on a possibly synchronized stdlib rand().
+// Constants from http://en.wikipedia.org/wiki/Linear_congruential_generator.
+uint32_t nextRand(uint32_t x) {
+  const int64_t A = 1664525;
+  const int64_t B = 1013904223;
+  int64_t longX = x;
+  return (uint32_t) ((A * longX + B) & 0xFFFFFFFF);
+}
+
+
+// Function executed by each worker thread.
+void* runTask(void* threadArg)
 {
-  ThreadArg *threadArg = (ThreadArg *) arg;
-  MemHogExecutor *executor = threadArg->executor;
-  int64_t memToHog = executor->memToHog;
-  double taskLen = executor->taskLen;
+  ThreadArg* arg = (ThreadArg*) threadArg;
   cout << "Running a worker thread..." << endl;
-  char *data = new char[memToHog];
+  char* data = new char[arg->memToHog];
   int32_t count = 0;
   time_t start = time(0);
+  uint32_t pos = arg->threadId;
   while (true) {
-    for (int64_t i = 0; i < memToHog; i++) {
-      data[i] = i;
-      count++;
-      if (count == 10000) {
-        count = 0;
-        time_t now = time(0);
-        if (difftime(now, start) > taskLen) {
-          delete[] data;
-          if (threadArg->primary) {
-            usleep(100000); // sleep 0.1 seconds
-            TaskStatus status(threadArg->tid, TASK_FINISHED, "");
-            executor->driver->sendStatusUpdate(status);
-          }
-          return 0;
+    pos = nextRand(pos);
+    data[pos % arg->memToHog] = pos;
+    count++;
+    if (count == 2000) {
+      // Check whether enough time has elapsed to end the task
+      count = 0;
+      time_t now = time(0);
+      if (difftime(now, start) > arg->duration) {
+        delete[] data;
+        if (arg->threadId == 0) {
+          usleep(100000); // sleep 0.1 seconds for other threads to finish
+          TaskStatus status(arg->taskId, TASK_FINISHED, "");
+          arg->executor->driver->sendStatusUpdate(status);
         }
+        return 0;
       }
     }
   }
 }
 
 
-int main(int argc, char ** argv) {
+int main(int argc, char** argv) {
   MemHogExecutor exec;
-  NexusExecutorDriver driver(&exec);
+  MesosExecutorDriver driver(&exec);
   driver.run();
   return 0;
 }
