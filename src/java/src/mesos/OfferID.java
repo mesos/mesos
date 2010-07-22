@@ -2,7 +2,6 @@ package mesos;
 
 
 public class OfferID {
-
   public OfferID(String s) {
     this.s = s;
   }

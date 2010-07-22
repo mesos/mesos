@@ -4,9 +4,7 @@ import java.util.Map;
 
 
 public class TaskDescription {
-
-  public TaskDescription(TaskID taskId, SlaveID slaveId, String name,
-                         Map<String, String> params, byte[] data) {
+  public TaskDescription(TaskID taskId, SlaveID slaveId, String name, Map<String, String> params, byte[] data) {
     this.taskId = taskId;
     this.slaveId = slaveId;
     this.name = name;

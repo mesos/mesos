@@ -229,18 +229,19 @@ python: $(PYTHON_LIB)
 
 ruby: $(RUBY_LIB)
 
-java/mesos.jar: java/mesos/*.java
+java/mesos.jar: java/src/mesos/*.java
 ifdef JAVA_HOME
 	rm -f java/classes/mesos/*
 	mkdir -p java/classes/mesos
-	$(JAVA_HOME)/bin/javac -sourcepath java -d java/classes java/mesos/*.java
-	$(JAVA_HOME)/bin/jar cf $@ -C java/classes mesos
+	$(JAVA_HOME)/bin/javac -sourcepath java/src -d java/classes java/src/mesos/*.java
+	$(JAVA_HOME)/bin/jar cf $@ -C java/classes src
 	$(JAVA_HOME)/bin/javah -d java/jni -classpath java/classes mesos.MesosSchedulerDriver
+	$(JAVA_HOME)/bin/javah -d java/jni -classpath java/classes mesos.MesosExecutorDriver
 endif
 
-$(NEW_JAVA_LIB): $(NEXUS_LIB) java/mesos.jar java/jni/mesos_MesosSchedulerDriver.cpp
+$(NEW_JAVA_LIB): $(NEXUS_LIB) java/mesos.jar java/jni/mesos_MesosSchedulerDriver.cpp java/jni/mesos_MesosExecutorDriver.cpp java/jni/convert.cpp java/jni/construct.cpp java/jni/convert.hpp java/jni/construct.hpp
 ifdef JAVA_HOME
-	$(CXX) $(CXXFLAGS) -shared -o $@ java/jni/mesos_MesosSchedulerDriver.cpp -I$(JAVA_HOME)/include -I$(JAVA_HOME)/include/$(OS_NAME) -L. $(LDFLAGS) -lnexus++ $(LIBS)
+	$(CXX) $(CXXFLAGS) -shared -o $@ java/jni/convert.cpp java/jni/construct.cpp java/jni/mesos_MesosSchedulerDriver.cpp java/jni/mesos_MesosExecutorDriver.cpp -I$(JAVA_HOME)/include -I$(JAVA_HOME)/include/$(OS_NAME) -L. $(LDFLAGS) -lnexus++ $(LIBS)
 endif
 
 swig/java/nexus.jar: $(JAVA_LIB)

@@ -2,7 +2,6 @@ package mesos;
 
 
 public class FrameworkID {
-
   public static final FrameworkID EMPTY = new FrameworkID("");
 
   public FrameworkID(String s) {

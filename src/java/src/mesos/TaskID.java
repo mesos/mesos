@@ -2,7 +2,6 @@ package mesos;
 
 
 public class TaskID {
-
   public TaskID(int i) {
     this.i = i;
   }

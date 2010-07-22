@@ -9,7 +9,6 @@ import java.util.Map;
  * a Mesos master.
  */
 public class MesosSchedulerDriver extends SchedulerDriver {
-
   static {
     System.loadLibrary("mesos");
   }
@@ -35,15 +34,9 @@ public class MesosSchedulerDriver extends SchedulerDriver {
   public native int join();
 
   public native int sendFrameworkMessage(FrameworkMessage message);
-
   public native int killTask(TaskID taskId);
-
-  public native int replyToOffer(OfferID offerId,
-                                 Collection<TaskDescription> tasks,
-                                 Map<String, String> params);
-
+  public native int replyToOffer(OfferID offerId, Collection<TaskDescription> tasks, Map<String, String> params);
   public native int reviveOffers();
-
   public native int sendHints(Map<String, String> hints);
 
   private Scheduler sched;

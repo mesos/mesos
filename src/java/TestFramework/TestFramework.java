@@ -91,7 +91,7 @@ public class TestFramework {
     @Override
     public void slaveLost(SchedulerDriver driver, SlaveID sid) {
       System.out.println("Received notification that slave " + sid 
-                       + "was lost.");
+                         + "was lost.");
     }
 
     @Override
@@ -102,7 +102,5 @@ public class TestFramework {
 
   public static void main(String[] args) throws Exception {
     new MesosSchedulerDriver(new MyScheduler(), args[0]).run();
-    System.out.println("all done");
-    System.gc();
   }
 }
