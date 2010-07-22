@@ -529,7 +529,14 @@ int NexusSchedulerDriver::start()
   }
 
   const string& frameworkName = sched->getFrameworkName(this);
+
+  if (frameworkName == "")
+    return -1;
+
   const ExecutorInfo& execInfo = sched->getExecutorInfo(this);
+
+  if (execInfo.uri == "")
+    return -1;
 
   process =
     new SchedulerProcess(this, sched, frameworkId, frameworkName, execInfo);
