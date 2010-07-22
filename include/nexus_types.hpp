@@ -6,33 +6,25 @@
 
 #include "nexus.h"
 
-// TODO(benh): Eliminate this dependency!
-#include <boost/unordered_map.hpp>
-
 namespace nexus {
 
-
-template <typename T>
-class ID
+class FrameworkID
 {
 public:
-  ID(const char *_s)
-    : s(_s) {}
+  FrameworkID(const char *s = "") { this->s = s; }
+  FrameworkID(const std::string& s) { this->s = s; }
 
-  ID(const std::string& _s)
-    : s(_s) {}
-
-  bool operator == (const ID<T> &that) const
+  bool operator == (const FrameworkID& that) const
   {
     return s == that.s;
   }
 
-  bool operator != (const ID<T> &that) const
+  bool operator != (const FrameworkID& that) const
   {
     return s != that.s;
   }
 
-  bool operator < (const ID<T> &that) const
+  bool operator < (const FrameworkID& that) const
   {
     return s < that.s;
   }
@@ -52,55 +44,97 @@ public:
 };
 
 
-template <typename T>
-std::ostream& operator << (std::ostream& out, const ID<T>& id)
-{
-  out << id.s;
-}
-
-
-template <typename T>
-std::istream& operator >> (std::istream& in, ID<T>& id)
-{
-  in >> id.s;
-}
-
-
-template <typename T>
-std::size_t hash_value(const ID<T>& id)
-{
-  // TODO(benh): Removed boost dependency here.
-  return boost::hash_value(id.s);
-}
-
-
-class FrameworkID : public ID<FrameworkID>
+class SlaveID
 {
 public:
-  FrameworkID(const char *s = "") : ID<FrameworkID>(s) {}
-  FrameworkID(const std::string& s) : ID<FrameworkID>(s) {}
+  SlaveID(const char *s = "") { this->s = s; }
+  SlaveID(const std::string& s) { this->s = s; }
+
+  bool operator == (const SlaveID& that) const
+  {
+    return s == that.s;
+  }
+
+  bool operator != (const SlaveID& that) const
+  {
+    return s != that.s;
+  }
+
+  bool operator < (const SlaveID& that) const
+  {
+    return s < that.s;
+  }
+
+  operator std::string () const
+  {
+    return s;
+  }
+
+  // TODO(benh): Eliminate this backwards compatibility dependency.
+  const char * c_str() const
+  {
+    return s.c_str();
+  }
+
+  std::string s;
 };
 
 
-class SlaveID : public ID<SlaveID>
+class OfferID
 {
 public:
-  SlaveID(const char *s = "") : ID<SlaveID>(s) {}
-  SlaveID(const std::string& s) : ID<SlaveID>(s) {}
-};
+  OfferID(const char *s = "") { this->s = s; }
+  OfferID(const std::string& s) { this->s = s; }
 
+  bool operator == (const OfferID& that) const
+  {
+    return s == that.s;
+  }
 
-class OfferID : public ID<OfferID>
-{
-public:
-  OfferID(const char *s = "") : ID<OfferID>(s) {}
-  OfferID(const std::string& s) : ID<OfferID>(s) {}
+  bool operator != (const OfferID& that) const
+  {
+    return s != that.s;
+  }
+
+  bool operator < (const OfferID& that) const
+  {
+    return s < that.s;
+  }
+
+  operator std::string () const
+  {
+    return s;
+  }
+
+  // TODO(benh): Eliminate this backwards compatibility dependency.
+  const char * c_str() const
+  {
+    return s.c_str();
+  }
+
+  std::string s;
 };
 
 
 typedef task_id TaskID;
 typedef task_state TaskState;
 
+
+std::ostream& operator << (std::ostream& out, const FrameworkID& id);
+std::istream& operator >> (std::istream& in, FrameworkID& id);
+
+
+std::ostream& operator << (std::ostream& out, const SlaveID& id);
+std::istream& operator >> (std::istream& in, SlaveID& id);
+
+
+std::ostream& operator << (std::ostream& out, const OfferID& id);
+std::istream& operator >> (std::istream& in, OfferID& id);
+
+
+std::size_t hash_value(const FrameworkID& id);
+std::size_t hash_value(const SlaveID& id);
+std::size_t hash_value(const OfferID& id);
 
 } /* namespace nexus { */
 

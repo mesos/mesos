@@ -100,9 +100,9 @@ NEXUS_LIBS = $(SCHED_LIB) $(EXEC_LIB) $(NEXUS_LIB)
 MASTER_OBJ = master.o allocator_factory.o simple_allocator.o
 SLAVE_OBJ = slave.o launcher.o isolation_module.o \
 	    process_based_isolation_module.o
-COMMON_OBJ = fatal.o hash_pid.o messages.o lock.o master_detector.o \
-	     url_processor.o zookeeper.o configurator.o string_utils.o \
-	     logging.o
+COMMON_OBJ = nexus_types.o fatal.o hash_pid.o messages.o lock.o \
+	     master_detector.o url_processor.o zookeeper.o configurator.o \
+	     string_utils.o logging.o
 EXEC_LIB_OBJ = nexus_exec.o
 SCHED_LIB_OBJ = nexus_sched.o nexus_local.o params.o
 TEST_OBJ = tests/main.o tests/test_master.o tests/test_resources.o \
@@ -121,14 +121,17 @@ endif
 ALL_OBJ = $(MASTER_OBJ) $(SLAVE_OBJ) $(COMMON_OBJ) \
 	  $(SCHED_LIB_OBJ) $(EXEC_LIB_OBJ) $(TEST_OBJ)
 
-# Setup libraries from the SWIG world.
 ifeq ($(OS_NAME),darwin)
-  JAVA_LIB = swig/java/libnexus.dylib
-  NEW_JAVA_LIB = java/libmesos.dylib
+  JAVA_LIB = java/libmesos.dylib
 else
-  JAVA_LIB = swig/java/libnexus.so
-  NEW_JAVA_LIB = java/libmesos.so
+  JAVA_LIB = java/libmesos.so
 endif
+
+JAVA_LIB_OBJ = java/jni/convert.o java/jni/construct.o \
+	       java/jni/mesos_MesosSchedulerDriver.o \
+	       java/jni/mesos_MesosExecutorDriver.o
+
+MESOS_JAR = java/mesos.jar
 
 PYTHON_LIB = swig/python/_nexus.so
 
@@ -223,41 +226,28 @@ memhog-executor: memhog_executor.cpp $(NEXUS_LIB) third_party/libprocess/libproc
 scheduled-memhog: scheduled_memhog.cpp $(NEXUS_LIB) third_party/libprocess/libprocess.a
 	$(CXX) $(CXXFLAGS) -o $@ $< -L. $(LDFLAGS) -lnexus++ $(LIBS) 
 
-java: $(JAVA_LIB) $(NEW_JAVA_LIB) swig/java/nexus.jar swig/java/TestFramework.class swig/java/TestExecutor.class swig/java/TestExceptionFramework.class swig/java/TestExceptionExecutor.class
+java: $(MESOS_JAR) $(JAVA_LIB)  #swig/java/TestFramework.class swig/java/TestExecutor.class swig/java/TestExceptionFramework.class swig/java/TestExceptionExecutor.class
 
 python: $(PYTHON_LIB)
 
 ruby: $(RUBY_LIB)
 
-java/mesos.jar: java/src/mesos/*.java
+$(MESOS_JAR): java/src/mesos/*.java
 ifdef JAVA_HOME
 	rm -f java/classes/mesos/*
 	mkdir -p java/classes/mesos
 	$(JAVA_HOME)/bin/javac -sourcepath java/src -d java/classes java/src/mesos/*.java
-	$(JAVA_HOME)/bin/jar cf $@ -C java/classes src
+	$(JAVA_HOME)/bin/jar cf $@ -C java/classes mesos
 	$(JAVA_HOME)/bin/javah -d java/jni -classpath java/classes mesos.MesosSchedulerDriver
 	$(JAVA_HOME)/bin/javah -d java/jni -classpath java/classes mesos.MesosExecutorDriver
 endif
 
-$(NEW_JAVA_LIB): $(NEXUS_LIB) java/mesos.jar java/jni/mesos_MesosSchedulerDriver.cpp java/jni/mesos_MesosExecutorDriver.cpp java/jni/convert.cpp java/jni/construct.cpp java/jni/convert.hpp java/jni/construct.hpp
-ifdef JAVA_HOME
-	$(CXX) $(CXXFLAGS) -shared -o $@ java/jni/convert.cpp java/jni/construct.cpp java/jni/mesos_MesosSchedulerDriver.cpp java/jni/mesos_MesosExecutorDriver.cpp -I$(JAVA_HOME)/include -I$(JAVA_HOME)/include/$(OS_NAME) -L. $(LDFLAGS) -lnexus++ $(LIBS)
-endif
+$(JAVA_LIB_OBJ): %.o: %.cpp $(MESOS_JAR)
+	$(CXX) -c $(CXXFLAGS) -I$(JAVA_HOME)/include -I$(JAVA_HOME)/include/$(OS_NAME) -o $@ $<
 
-swig/java/nexus.jar: $(JAVA_LIB)
+$(JAVA_LIB): $(NEXUS_LIB) $(MESOS_JAR) $(JAVA_LIB_OBJ)
 ifdef JAVA_HOME
-	$(JAVA_HOME)/bin/javac -sourcepath swig/java -d swig/java swig/java/nexus/*.java
-	patch -N swig/java/nexus/nexusJNI.java < swig/java/nexusJNI.java.patch1 || echo -n
-	patch swig/java/nexus/nexusJNI.java < swig/java/nexusJNI.java.patch2 || echo -n
-	$(JAVA_HOME)/bin/jar cf $@ -C swig/java nexus
-endif
-
-$(JAVA_LIB): swig/nexus.i $(NEXUS_LIB)
-ifdef JAVA_HOME
-	rm -f swig/java/nexus/*
-	mkdir -p swig/java/nexus
-	$(SWIG) -c++ -java -I../include -o swig/java/nexus_wrap.cpp -outdir swig/java/nexus -package nexus swig/nexus.i
-	$(CXX) $(CXXFLAGS) -shared -o $@ swig/java/nexus_wrap.cpp -I$(JAVA_HOME)/include -I$(JAVA_HOME)/include/$(OS_NAME) -L. $(LDFLAGS) -lnexus++ $(LIBS)
+	$(CXX) $(CXXFLAGS) -shared -o $@ $(JAVA_LIB_OBJ) -L. $(LDFLAGS) -lnexus++ $(LIBS)
 endif
 
 swig/java/TestFramework.class: $(JAVA_LIB) swig/java/nexus.jar swig/java/TestFramework.java
@@ -316,23 +306,20 @@ endif
 	rm -f $(ALL_OBJ)
 	rm -f $(NEXUS_LIBS)
 	rm -f $(NEXUS_EXES)
-	rm -f $(NEW_JAVA_LIB)
-	rm -rf $(NEW_JAVA_LIB).dSYM
-	rm -f java/mesos.jar
+	rm -f $(patsubst %.o, %.d, $(JAVA_LIB_OBJ))
+	rm -f $(JAVA_LIB_OBJ)
+	rm -f $(JAVA_LIB)
+	rm -rf $(JAVA_LIB).dSYM
+	rm -f $(MESOS_JAR)
 	rm -rf java/classes
-	rm -f java/*.d
-	rm -f java/jni/*.o
-	rm -f java/jni/*.d
 	rm -f java/jni/mesos_MesosSchedulerDriver.h
-	rm -f $(JAVA_LIB) $(PYTHON_LIB) $(RUBY_LIB)
-	rm -rf $(JAVA_LIB).dSYM $(PYTHON_LIB).dSYM $(RUBY_LIB).dSYM
+	rm -f java/jni/mesos_MesosExecutorDriver.h
+	rm -f $(PYTHON_LIB) $(RUBY_LIB)
+	rm -rf $(PYTHON_LIB).dSYM $(RUBY_LIB).dSYM
 	rm -f swig/*/nexus_wrap.cpp
 	rm -f swig/*/nexus_wrap.h
 	rm -f swig/*/*.o
 	rm -f swig/*/*.d
-	rm -f swig/java/nexus.jar
-	rm -f swig/java/nexus/*
-	rm -f swig/java/*.class
 	rm -f swig/python/nexus.py
 	rm -f swig/python/nexus.pyc
 	rm -f master_webui.o
