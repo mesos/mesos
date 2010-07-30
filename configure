@@ -566,7 +566,7 @@ CPPFLAGS
 LDFLAGS
 CXXFLAGS
 CXX
-LOCAL_ZOOKEEPER
+SYSTEM_ZOOKEEPER
 SWIG
 WEBUI_FLAGS
 WITH_WEBUI
@@ -636,7 +636,7 @@ with_python_headers
 with_ruby_headers
 with_webui
 with_swig
-with_local_zookeeper
+with_system_zookeeper
 '
       ac_precious_vars='build_alias
 host_alias
@@ -1270,7 +1270,8 @@ Optional Packages:
   --with-ruby-headers=DIR find Ruby headers in DIR
   --with-webui            enable web UI (requires Python)
   --with-swig=PATH        use the SWIG binary at PATH
-  --with-local-zookeeper  Use local ZooKeeper for building
+  --with-system-zookeeper Use system ZooKeeper installation instead of the
+                          version packaged with Mesos
 
 Some influential environment variables:
   CXX         C++ compiler command
@@ -2088,15 +2089,15 @@ fi
 
 
 
-LOCAL_ZOOKEEPER="no"
+SYSTEM_ZOOKEEPER="no"
 
-# Check whether --with-local-zookeeper was given.
-if test "${with_local_zookeeper+set}" = set; then :
-  withval=$with_local_zookeeper; case "$with_local_zookeeper" in
-		    yes) LOCAL_ZOOKEEPER="yes" ;;
-                    no) LOCAL_ZOOKEEPER="no" ;;
+# Check whether --with-system-zookeeper was given.
+if test "${with_system_zookeeper+set}" = set; then :
+  withval=$with_system_zookeeper; case "$with_system_zookeeper" in
+		    yes) SYSTEM_ZOOKEEPER="yes" ;;
+                    no) SYSTEM_ZOOKEEPER="no" ;;
 		    *) as_fn_error "
-*** --with-local-zookeeper does not take arguments" "$LINENO" 5 ;;
+*** --with-system-zookeeper does not take arguments" "$LINENO" 5 ;;
 	          esac
 fi
 

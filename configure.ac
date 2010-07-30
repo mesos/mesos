@@ -157,18 +157,18 @@ AC_ARG_WITH([swig],
 	         [])
 AC_SUBST(SWIG)
 
-LOCAL_ZOOKEEPER="no"
-AC_ARG_WITH([local-zookeeper],
-  AC_HELP_STRING([--with-local-zookeeper],
-                 [Use local ZooKeeper for building]),
-	         [case "$with_local_zookeeper" in
-		    yes) LOCAL_ZOOKEEPER="yes" ;;
-                    no) LOCAL_ZOOKEEPER="no" ;;
+SYSTEM_ZOOKEEPER="no"
+AC_ARG_WITH([system-zookeeper],
+  AC_HELP_STRING([--with-system-zookeeper],
+                 [Use system ZooKeeper installation instead of the version packaged with Mesos]),
+	         [case "$with_system_zookeeper" in
+		    yes) SYSTEM_ZOOKEEPER="yes" ;;
+                    no) SYSTEM_ZOOKEEPER="no" ;;
 		    *) AC_MSG_ERROR([
-*** --with-local-zookeeper does not take arguments]) ;;
+*** --with-system-zookeeper does not take arguments]) ;;
 	          esac],
 	         [])
-AC_SUBST(LOCAL_ZOOKEEPER)
+AC_SUBST(SYSTEM_ZOOKEEPER)
 
 # Checks for programs.
 AC_PROG_CXX([g++])

@@ -20,7 +20,7 @@ RUBY_HEADERS = @RUBY_HEADERS@
 WITH_WEBUI = @WITH_WEBUI@
 WEBUI_FLAGS = @WEBUI_FLAGS@
 
-LOCAL_ZOOKEEPER = @LOCAL_ZOOKEEPER@
+SYSTEM_ZOOKEEPER = @SYSTEM_ZOOKEEPER@
 
 LIBEV = third_party/libprocess/third_party/libev-3.8
 
@@ -58,7 +58,7 @@ CXXFLAGS += -I$(GLOG)/src -I$(GTEST)/include
 LDFLAGS += -L$(GLOG)/.libs -L$(GTEST)/lib/.libs
 
 # Add local ZooKeeper to include and lib paths if necessary.
-ifeq ($(LOCAL_ZOOKEEPER),yes)
+ifeq ($(SYSTEM_ZOOKEEPER),no)
   CXXFLAGS += -I$(ZOOKEEPER)/include -I$(ZOOKEEPER)/generated
   LDFLAGS += -L$(ZOOKEEPER)/.libs
 endif
@@ -286,7 +286,7 @@ third_party:
 	$(MAKE) -C third_party/libprocess
 	$(MAKE) -C $(GLOG)
 	$(MAKE) -C $(GTEST)
-ifeq ($(LOCAL_ZOOKEEPER),yes)
+ifeq ($(SYSTEM_ZOOKEEPER),no)
 	$(MAKE) -C $(ZOOKEEPER)
 endif
 
@@ -296,7 +296,7 @@ clean:
 	$(MAKE) -C third_party/libprocess clean
 	$(MAKE) -C $(GLOG) clean
 	$(MAKE) -C $(GTEST) clean
-ifeq ($(LOCAL_ZOOKEEPER),yes)
+ifeq ($(SYSTEM_ZOOKEEPER),no)
 	$(MAKE) -C $(ZOOKEEPER) clean
 endif
 	rm -f $(patsubst %.o, %.d, $(ALL_OBJ))
