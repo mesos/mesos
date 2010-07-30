@@ -1299,9 +1299,15 @@ void initialize()
 
   char *value;
 
-  /* Check environment for ip. */
+  /* Check environment for ip address. */
   value = getenv("LIBPROCESS_IP");
-  ip = value != NULL ? atoi(value) : 0;
+
+  if (value != NULL) {
+    if (inet_pton(AF_INET, value, &ip) <= 0)
+      fatalerror("failed to initialize (unparseable ip address: '%s')", value);
+  } else {
+    ip = 0;
+  }
 
   /* Check environment for port. */
   value = getenv("LIBPROCESS_PORT");

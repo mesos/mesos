@@ -26,8 +26,6 @@ if [ ! -d $MESOS_LOGS ]; then
   mkdir -p $MESOS_LOGS
 fi
 
-
 cd $MESOS_HOME
 echo "now in dir `pwd`"
-echo "LIBPROCESS_IP=`$LIBPROCESS_IP_GETTER` nohup ./$PROGRAM $EXTRA_OPTS $@ </dev/null >$MESOS_LOGS/$PROGRAM.out 2>&1"
-LIBPROCESS_IP=`$LIBPROCESS_IP_GETTER` nohup ./$PROGRAM $EXTRA_OPTS $@ </dev/null  >$MESOS_LOGS/$PROGRAM.out 2>&1 &
+nohup ./$PROGRAM $EXTRA_OPTS $@ </dev/null >$MESOS_LOGS/$PROGRAM.out 2>&1 &
