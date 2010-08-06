@@ -143,59 +143,6 @@ void FairAllocator::timerTick()
 
 namespace {
 
-/**
- * Compares objects of type T for weighted dominant resource fairness (DRF),
- * given functions to extract the resources, weight and ID of each object
- * as well as the total quantity of resources in the system.
- */
-template<typename T>
-struct DrfComparator
-{
-  typedef Resources (*ResourceGetter)(T t);
-  typedef double (*WeightGetter)(T t);
-  typedef string (*IdGetter)(T t);
-
-  Resources total;
-  ResourceGetter getResources;
-  WeightGetter getWeight;
-  IdGetter getId;
-  
-  DrfComparator(Resources _total,
-                ResourceGetter _getResources,
-                WeightGetter _getWeight,
-                IdGetter _getId)
-    : total(_total), getResources(_getResources),
-      getWeight(_getWeight), getId(_getId)
-  {
-    if (total.cpus == 0) // Prevent division by zero if there are no slaves
-      total.cpus = 1;
-    if (total.mem == 0)
-      total.mem = 1;
-  }
-
-  /**
-   * Each T's score in the comparison is its dominant share divided by its
-   * weight, so that if we sort by these scores, we get weighted DRF.
-   */
-  double getScore(T t) {
-    Resources res = getResources(t);
-    double dominantShare = max(res.cpus / (double) total.cpus,
-                               res.mem  / (double) total.mem);
-    return dominantShare / getWeight(t);
-  }
-  
-  bool operator() (T t1, T t2)
-  {
-    double score1 = getScore(t1);
-    double score2 = getScore(t2);
-    if (score1 == score2)
-      return getId(t1) < getId(t2); // Make the sort deterministic for tests
-    else
-      return score1 < score2;
-  }
-};
-
-
 // DRF comparator functions for Frameworks
 
 Resources getFrameworkResources(Framework* fw) {
@@ -330,6 +277,16 @@ void FairAllocator::makeNewOffers(const vector<Slave*>& slaves)
       master->makeOffer(framework, offerable);
     }
   }
+}
+
+
+void FairAllocator::reloadConfig()
+{
+}
+
+
+void FairAllocator::reloadConfigIfNecessary()
+{
 }
 
 
