@@ -27,7 +27,7 @@ LIBEV = third_party/libprocess/third_party/libev-3.8
 
 GLOG = third_party/glog-0.3.1
 GTEST = third_party/gtest-1.5.0
-
+TINYXML = third_party/tinyxml
 ZOOKEEPER = third_party/zookeeper-3.3.1/src/c
 
 # Ensure that we get better debugging info.
@@ -54,9 +54,9 @@ LDFLAGS += -Lthird_party/libprocess
 # Add libev to LDFLAGS.
 LDFLAGS += -L$(LIBEV)/.libs
 
-# Add glog and gtest to include and lib paths.
-CXXFLAGS += -I$(GLOG)/src -I$(GTEST)/include
-LDFLAGS += -L$(GLOG)/.libs -L$(GTEST)/lib/.libs
+# Add glog, gtest and tinyxml to include and lib paths.
+CXXFLAGS += -I$(GLOG)/src -I$(GTEST)/include -I$(TINYXML)
+LDFLAGS += -L$(GLOG)/.libs -L$(GTEST)/lib/.libs -L$(TINYXML)
 
 # Add included ZooKeeper to include and lib paths if necessary.
 ifeq ($(WITH_INCLUDED_ZOOKEEPER),1)
@@ -80,7 +80,7 @@ CXXFLAGS += -DBUILD_USER="\"$$USER\""
 LDFLAGS += -L$(LIBEV)/.libs
 
 # Add libev, libprocess, pthread, and dl to LIBS.
-LIBS += -lglog -lgtest -lprocess -lev -lpthread -ldl
+LIBS += -lglog -lgtest -lprocess -lev -lpthread -ldl -ltinyxml
 
 # Add ZooKeeper if necessary.
 ifeq ($(WITH_ZOOKEEPER),1)
@@ -161,7 +161,9 @@ $(MESOS_LIBS): $(COMMON_OBJ) third_party/libprocess/libprocess.a
 $(MESOS_EXES): $(COMMON_OBJ) third_party/libprocess/libprocess.a
 
 $(SCHED_LIB): $(SCHED_LIB_OBJ) $(MASTER_OBJ) $(SLAVE_OBJ) $(COMMON_OBJ)
-	$(AR) rcs $@ $^ third_party/libprocess/libprocess.a $(GLOG)/.libs/libglog.a $(LIBEV)/.libs/libev.a
+	$(AR) rcs $@ $^ third_party/libprocess/libprocess.a \
+	  $(GLOG)/.libs/libglog.a $(LIBEV)/.libs/libev.a \
+	  $(TINYXML)/libtinyxml.a
 
 $(EXEC_LIB): $(EXEC_LIB_OBJ) $(COMMON_OBJ)
 	$(AR) rcs $@ $^
@@ -300,6 +302,7 @@ third_party:
 	$(MAKE) -C third_party/libprocess
 	$(MAKE) -C $(GLOG)
 	$(MAKE) -C $(GTEST)
+	$(MAKE) -C $(TINYXML)
 ifeq ($(WITH_INCLUDED_ZOOKEEPER),1)
 	$(MAKE) -C $(ZOOKEEPER)
 endif
