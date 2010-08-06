@@ -104,7 +104,7 @@ MESOS_LIB = libmesos++.a
 
 MESOS_LIBS = $(SCHED_LIB) $(EXEC_LIB) $(MESOS_LIB)
 
-MASTER_OBJ = master.o allocator_factory.o simple_allocator.o
+MASTER_OBJ = master.o allocator_factory.o simple_allocator.o fair_allocator.o
 
 SLAVE_OBJ = slave.o launcher.o isolation_module.o	\
 	    process_based_isolation_module.o

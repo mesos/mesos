@@ -11,6 +11,7 @@ using std::sort;
 using namespace mesos;
 using namespace mesos::internal;
 using namespace mesos::internal::master;
+using namespace mesos::internal::simple_allocator;
 
 
 void SimpleAllocator::frameworkAdded(Framework* framework)

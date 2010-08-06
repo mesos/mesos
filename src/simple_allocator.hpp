@@ -9,12 +9,17 @@
 #include "allocator.hpp"
 #include "resources.hpp"
 
-namespace mesos { namespace internal { namespace master {
+namespace mesos { namespace internal { namespace simple_allocator {
 
 using std::vector;
 using boost::unordered_map;
 using boost::unordered_set;
+using namespace mesos::internal::master;
 
+/**
+ * An allocation module that performs fair sharing between frameworks using
+ * Dominant Resource Fairness (DRF). Does not perform any killing.
+ */
 class SimpleAllocator : public Allocator {
   Master* master;
 
