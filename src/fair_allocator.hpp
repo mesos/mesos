@@ -1,6 +1,8 @@
 #ifndef __FAIR_ALLOCATOR_HPP__
 #define __FAIR_ALLOCATOR_HPP__
 
+#include <time.h>
+
 #include <algorithm>
 #include <vector>
 
@@ -37,9 +39,14 @@ class FairAllocator : public Allocator {
   unordered_map<Slave*, unordered_set<Framework*> > refusers;
 
   unordered_map<string, UserInfo*> userInfos;
+
+  // Variables used to reload config file periodically
+  time_t lastReloadAttempt;
+  bool lastReloadAttemptFailed;
+  time_t lastSuccessfulReload;
   
 public:
-  FairAllocator(Master* _master): master(_master) {}
+  FairAllocator(Master* _master);
   
   ~FairAllocator();
   
@@ -80,8 +87,13 @@ private:
   // Make resource offers for a subset of the slaves
   void makeNewOffers(const vector<Slave*>& slaves);
 
-  // Reload the FairAllocator's configuration file
-  void reloadConfig();
+  // Get our config file's location based on the Master's configuration.
+  // Returns empty string if config file location cannot be determined
+  // (because Mesos conf directory is not set).
+  string getConfigFile();
+
+  // Reload the FairAllocator's configuration file. Returns true if successful.
+  bool reloadConfig();
 
   // Reload the configuration file if enough time has elapsed since the
   // last load and the file is modified on disk. Called periodically to
