@@ -1,4 +1,6 @@
 import java.io.File;
+import java.util.ArrayList;
+import java.util.List;
 import mesos.*;
 
 public class TestFramework {
@@ -43,12 +45,11 @@ public class TestFramework {
     @Override
     public void resourceOffer(SchedulerDriver d,
                               String oid,
-                              SlaveOfferVector offers) {
+                              SlaveOffer[] offers) {
       System.out.println("Got offer offer " + oid);
-      TaskDescriptionVector tasks = new TaskDescriptionVector();
-      for (int i = 0; i < offers.size(); i++) {
+      List<TaskDescription> tasks = new ArrayList<TaskDescription>();
+      for (SlaveOffer offer: offers) {
         if (launchedTasks < totalTasks) {
-          SlaveOffer offer = offers.get(i);
           int taskId = launchedTasks++;
           StringMap taskParams = new StringMap();
           taskParams.set("cpus", "1");
@@ -63,7 +64,7 @@ public class TestFramework {
       }
       StringMap params = new StringMap();
       params.set("timeout", "1");
-      d.replyToOffer(oid, tasks, params);
+      d.replyToOffer(oid, tasks.toArray(new TaskDescription[0]), params);
     }
 
     @Override

@@ -40,11 +40,11 @@ public class TestExceptionFramework {
     @Override
     public void resourceOffer(SchedulerDriver d,
                               String oid,
-                              SlaveOfferVector offers) {
+                              SlaveOffer[] offers) {
       System.out.println("Got offer offer " + oid);
       TaskDescriptionVector tasks = new TaskDescriptionVector();
       if (launchedTasks < totalTasks) {
-        SlaveOffer offer = offers.get(0);
+        SlaveOffer offer = offers[0];
         int taskId = launchedTasks++;
         StringMap taskParams = new StringMap();
         taskParams.set("cpus", "1");
