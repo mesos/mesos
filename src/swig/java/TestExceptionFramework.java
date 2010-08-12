@@ -45,7 +45,7 @@ public class TestExceptionFramework {
     public void resourceOffer(SchedulerDriver d,
                               String oid,
                               List<SlaveOffer> offers) {
-      System.out.println("Got offer offer " + oid);
+      System.out.println("Got offer " + oid);
       List<TaskDescription> tasks = new ArrayList<TaskDescription>();
       if (launchedTasks < totalTasks) {
         SlaveOffer offer = offers.get(0);
