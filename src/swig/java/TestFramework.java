@@ -45,7 +45,7 @@ public class TestFramework {
     @Override
     public void resourceOffer(SchedulerDriver d,
                               String oid,
-                              SlaveOffer[] offers) {
+                              List<SlaveOffer> offers) {
       System.out.println("Got offer offer " + oid);
       List<TaskDescription> tasks = new ArrayList<TaskDescription>();
       for (SlaveOffer offer: offers) {
@@ -64,7 +64,7 @@ public class TestFramework {
       }
       StringMap params = new StringMap();
       params.set("timeout", "1");
-      d.replyToOffer(oid, tasks.toArray(new TaskDescription[0]), params);
+      d.replyToOffer(oid, tasks, params);
     }
 
     @Override

@@ -1,4 +1,6 @@
 import java.io.File;
+import java.util.ArrayList;
+import java.util.List;
 import mesos.*;
 
 public class TestExceptionFramework {
@@ -40,11 +42,11 @@ public class TestExceptionFramework {
     @Override
     public void resourceOffer(SchedulerDriver d,
                               String oid,
-                              SlaveOffer[] offers) {
+                              List<SlaveOffer> offers) {
       System.out.println("Got offer offer " + oid);
-      TaskDescriptionVector tasks = new TaskDescriptionVector();
+      List<TaskDescription> tasks = new ArrayList<TaskDescription>();
       if (launchedTasks < totalTasks) {
-        SlaveOffer offer = offers[0];
+        SlaveOffer offer = offers.get(0);
         int taskId = launchedTasks++;
         StringMap taskParams = new StringMap();
         taskParams.set("cpus", "1");
