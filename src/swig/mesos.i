@@ -137,33 +137,35 @@
   %typemap(javadirectorout) const std::vector<mesos::SlaveOffer> & "$javacall"
 
   %typemap(in) const std::vector<mesos::SlaveOffer> & 
-  %{ if(!$input) { 
-       SWIG_JavaThrowException(jenv, SWIG_JavaNullPointerException,
-         "null std::vector<mesos::SlaveOffer>"); 
-       return $null; 
-      } 
-      jclass listCls = jenv->GetObjectClass($input);
-      jmethodID iterator = jenv->GetMethodID(listCls, "iterator", "()Ljava/util/Iterator;");
-      jobject iterObj = jenv->CallObjectMethod($input, iterator);
-      jclass iterCls = jenv->GetObjectClass(iterObj);
-      jmethodID hasNext = jenv->GetMethodID(iterCls, "hasNext", "()Z");
-      jmethodID next = jenv->GetMethodID(iterCls, "next", "()Ljava/lang/Object;");
-      jclass taskDescCls = jenv->FindClass("mesos/SlaveOffer");
-      jmethodID getCPtr = jenv->GetStaticMethodID(taskDescCls, "getCPtr", "(Lmesos/SlaveOffer;)J");
-      std::vector<mesos::SlaveOffer> $1_vec;
-      while (jenv->CallBooleanMethod(iterObj, hasNext)) {
-        jobject obj = jenv->CallObjectMethod(iterObj, next);
-        jlong offerPtr = jenv->CallStaticLongMethod(taskDescCls, getCPtr, obj);
-        $1_vec.push_back(*((mesos::SlaveOffer*) offerPtr));
-        jenv->DeleteLocalRef(obj); // Recommended in case array is big and fills local ref table
-      }
-      $1 = &$1_vec; 
-  %} 
+  %{ 
+     std::vector<mesos::SlaveOffer> $1_vec;
+     {
+     if(!$input) { 
+      SWIG_JavaThrowException(jenv, SWIG_JavaNullPointerException,
+        "null std::vector<mesos::SlaveOffer>"); 
+      return $null; 
+     } 
+     jclass listCls = jenv->GetObjectClass($input);
+     jmethodID iterator = jenv->GetMethodID(listCls, "iterator", "()Ljava/util/Iterator;");
+     jobject iterObj = jenv->CallObjectMethod($input, iterator);
+     jclass iterCls = jenv->GetObjectClass(iterObj);
+     jmethodID hasNext = jenv->GetMethodID(iterCls, "hasNext", "()Z");
+     jmethodID next = jenv->GetMethodID(iterCls, "next", "()Ljava/lang/Object;");
+     jclass taskDescCls = jenv->FindClass("mesos/SlaveOffer");
+     jmethodID getCPtr = jenv->GetStaticMethodID(taskDescCls, "getCPtr", "(Lmesos/SlaveOffer;)J");
+     while (jenv->CallBooleanMethod(iterObj, hasNext)) {
+       jobject obj = jenv->CallObjectMethod(iterObj, next);
+       jlong offerPtr = jenv->CallStaticLongMethod(taskDescCls, getCPtr, obj);
+       $1_vec.push_back(*((mesos::SlaveOffer*) offerPtr));
+       jenv->DeleteLocalRef(obj); // Recommended in case list is big and fills local ref table
+     }
+     $1 = &$1_vec; 
+  } %} 
 
   %typemap(javain) const std::vector<mesos::SlaveOffer> & "$javainput" 
 
   %typemap(directorin,descriptor="Ljava/util/List;") const std::vector<mesos::SlaveOffer> &
-  %{ 
+  %{ {
      jclass listCls = jenv->FindClass("java/util/ArrayList");
      jmethodID listCtor = jenv->GetMethodID(listCls, "<init>", "()V");
      jmethodID add = jenv->GetMethodID(listCls, "add", "(Ljava/lang/Object;)Z");
@@ -174,13 +176,13 @@
        // TODO: Copy the SlaveOffer object here so Java owns it?
        jobject obj = jenv->NewObject(taskDescCls, taskDescCtor, &($1.at(i)), JNI_FALSE); 
        jenv->CallVoidMethod(list, add, obj);
-       jenv->DeleteLocalRef(obj); // Recommended in case array is big and fills local ref table
+       jenv->DeleteLocalRef(obj); // Recommended in case list is big and fills local ref table
      }
      $input = list;
-  %} 
+  } %} 
 
   %typemap(out) const std::vector<mesos::SlaveOffer> & 
-  %{ 
+  %{ {
      jclass listCls = jenv->FindClass("java/util/ArrayList");
      jmethodID listCtor = jenv->GetMethodID(listCls, "<init>", "()V");
      jmethodID add = jenv->GetMethodID(listCls, "add", "(Ljava/lang/Object;)Z");
@@ -191,10 +193,10 @@
        // TODO: Copy the SlaveOffer object here so Java owns it?
        jobject obj = jenv->NewObject(taskDescCls, taskDescCtor, &($1.at(i)), JNI_FALSE); 
        jenv->CallVoidMethod(list, add, obj);
-       jenv->DeleteLocalRef(obj); // Recommended in case array is big and fills local ref table
+       jenv->DeleteLocalRef(obj); // Recommended in case list is big and fills local ref table
      }
      $result = list;
-  %}
+  } %}
 
   %typemap(javaout) const std::vector<mesos::SlaveOffer> & 
   { 
@@ -212,33 +214,35 @@
   %typemap(javadirectorout) const std::vector<mesos::TaskDescription> & "$javacall"
 
   %typemap(in) const std::vector<mesos::TaskDescription> & 
-  %{ if(!$input) { 
-       SWIG_JavaThrowException(jenv, SWIG_JavaNullPointerException,
-         "null std::vector<mesos::TaskDescription>"); 
-       return $null; 
-      } 
-      jclass listCls = jenv->GetObjectClass($input);
-      jmethodID iterator = jenv->GetMethodID(listCls, "iterator", "()Ljava/util/Iterator;");
-      jobject iterObj = jenv->CallObjectMethod($input, iterator);
-      jclass iterCls = jenv->GetObjectClass(iterObj);
-      jmethodID hasNext = jenv->GetMethodID(iterCls, "hasNext", "()Z");
-      jmethodID next = jenv->GetMethodID(iterCls, "next", "()Ljava/lang/Object;");
-      jclass taskDescCls = jenv->FindClass("mesos/TaskDescription");
-      jmethodID getCPtr = jenv->GetStaticMethodID(taskDescCls, "getCPtr", "(Lmesos/TaskDescription;)J");
-      std::vector<mesos::TaskDescription> $1_vec;
-      while (jenv->CallBooleanMethod(iterObj, hasNext)) {
-        jobject obj = jenv->CallObjectMethod(iterObj, next);
-        jlong offerPtr = jenv->CallStaticLongMethod(taskDescCls, getCPtr, obj);
-        $1_vec.push_back(*((mesos::TaskDescription*) offerPtr));
-        jenv->DeleteLocalRef(obj); // Recommended in case array is big and fills local ref table
-      }
-      $1 = &$1_vec; 
-  %} 
+  %{ 
+     std::vector<mesos::TaskDescription> $1_vec;
+     {
+     if(!$input) { 
+      SWIG_JavaThrowException(jenv, SWIG_JavaNullPointerException,
+        "null std::vector<mesos::TaskDescription>"); 
+      return $null; 
+     } 
+     jclass listCls = jenv->GetObjectClass($input);
+     jmethodID iterator = jenv->GetMethodID(listCls, "iterator", "()Ljava/util/Iterator;");
+     jobject iterObj = jenv->CallObjectMethod($input, iterator);
+     jclass iterCls = jenv->GetObjectClass(iterObj);
+     jmethodID hasNext = jenv->GetMethodID(iterCls, "hasNext", "()Z");
+     jmethodID next = jenv->GetMethodID(iterCls, "next", "()Ljava/lang/Object;");
+     jclass taskDescCls = jenv->FindClass("mesos/TaskDescription");
+     jmethodID getCPtr = jenv->GetStaticMethodID(taskDescCls, "getCPtr", "(Lmesos/TaskDescription;)J");
+     while (jenv->CallBooleanMethod(iterObj, hasNext)) {
+       jobject obj = jenv->CallObjectMethod(iterObj, next);
+       jlong offerPtr = jenv->CallStaticLongMethod(taskDescCls, getCPtr, obj);
+       $1_vec.push_back(*((mesos::TaskDescription*) offerPtr));
+       jenv->DeleteLocalRef(obj); // Recommended in case list is big and fills local ref table
+     }
+     $1 = &$1_vec; 
+  } %} 
 
   %typemap(javain) const std::vector<mesos::TaskDescription> & "$javainput" 
 
   %typemap(directorin,descriptor="Ljava/util/List;") const std::vector<mesos::TaskDescription> &
-  %{ 
+  %{ {
      jclass listCls = jenv->FindClass("java/util/ArrayList");
      jmethodID listCtor = jenv->GetMethodID(listCls, "<init>", "()V");
      jmethodID add = jenv->GetMethodID(listCls, "add", "(Ljava/lang/Object;)V");
@@ -249,13 +253,13 @@
        // TODO: Copy the TaskDescription object here so Java owns it?
        jobject obj = jenv->NewObject(taskDescCls, taskDescCtor, &($1.at(i)), JNI_FALSE); 
        jenv->CallVoidMethod(list, add, obj);
-       jenv->DeleteLocalRef(obj); // Recommended in case array is big and fills local ref table
+       jenv->DeleteLocalRef(obj); // Recommended in case list is big and fills local ref table
      }
      $input = list;
-  %} 
+  } %} 
 
   %typemap(out) const std::vector<mesos::TaskDescription> & 
-  %{ 
+  %{ {
      jclass listCls = jenv->FindClass("java/util/ArrayList");
      jmethodID listCtor = jenv->GetMethodID(listCls, "<init>", "()V");
      jmethodID add = jenv->GetMethodID(listCls, "add", "(Ljava/lang/Object;)V");
@@ -266,12 +270,130 @@
        // TODO: Copy the TaskDescription object here so Java owns it?
        jobject obj = jenv->NewObject(taskDescCls, taskDescCtor, &($1.at(i)), JNI_FALSE); 
        jenv->CallVoidMethod(list, add, obj);
-       jenv->DeleteLocalRef(obj); // Recommended in case array is big and fills local ref table
+       jenv->DeleteLocalRef(obj); // Recommended in case list is big and fills local ref table
      }
      $result = list;
-  %}
+  } %}
 
   %typemap(javaout) const std::vector<mesos::TaskDescription> & 
+  { 
+    return $jnicall; 
+  } 
+
+
+  /* Typemaps for map<string, string> to map it to a java.util.Map */
+  %naturalvar std::map<std::string, std::string>; 
+
+  %typemap(jni) const std::map<std::string, std::string> & "jobject" 
+  %typemap(jtype) const std::map<std::string, std::string> & "java.util.Map<String, String>" 
+  %typemap(jstype) const std::map<std::string, std::string> & "java.util.Map<String, String>" 
+  %typemap(javadirectorin) const std::map<std::string, std::string> & "$jniinput"
+  %typemap(javadirectorout) const std::map<std::string, std::string> & "$javacall"
+
+  %typemap(in) const std::map<std::string, std::string> & 
+  %{ 
+     std::map<std::string, std::string> $1_map;
+     {
+     if(!$input) { 
+      SWIG_JavaThrowException(jenv, SWIG_JavaNullPointerException,
+        "null std::map<std::string, std::string>"); 
+      return $null; 
+     } 
+     jclass mapCls = jenv->GetObjectClass($input);
+     jmethodID entrySet = jenv->GetMethodID(mapCls, "entrySet", "()Ljava/util/Set;");
+     jobject entriesObj = jenv->CallObjectMethod($input, entrySet);
+     jclass entriesCls = jenv->GetObjectClass(entriesObj);
+     jmethodID iterator = jenv->GetMethodID(entriesCls, "iterator", "()Ljava/util/Iterator;");
+     jobject iterObj = jenv->CallObjectMethod(entriesObj, iterator);
+     jclass iterCls = jenv->GetObjectClass(iterObj);
+     jmethodID hasNext = jenv->GetMethodID(iterCls, "hasNext", "()Z");
+     jmethodID next = jenv->GetMethodID(iterCls, "next", "()Ljava/lang/Object;");
+     jclass entryCls = jenv->FindClass("java/util/Map$Entry");
+     jmethodID getKey = jenv->GetMethodID(entryCls, "getKey", "()Ljava/lang/Object;");
+     jmethodID getValue = jenv->GetMethodID(entryCls, "getValue", "()Ljava/lang/Object;");
+     while (jenv->CallBooleanMethod(iterObj, hasNext)) {
+       // Get the key and value for this entry
+       jobject entryObj = jenv->CallObjectMethod(iterObj, next);
+       jstring keyObj = (jstring) jenv->CallObjectMethod(entryObj, getKey);
+       jstring valueObj = (jstring) jenv->CallObjectMethod(entryObj, getValue);
+       // Convert them to strings
+       const char* keyChars = jenv->GetStringUTFChars(keyObj, NULL);
+       if (keyChars == NULL) {
+         return $null; // OutOfMemoryError has been thrown
+       }
+       std::string keyStr(keyChars);
+       jenv->ReleaseStringUTFChars(keyObj, keyChars);
+       const char* valueChars = jenv->GetStringUTFChars(valueObj, NULL);
+       if (valueChars == NULL) {
+         return $null; // OutOfMemoryError has been thrown
+       }
+       std::string valueStr(valueChars);
+       jenv->ReleaseStringUTFChars(valueObj, valueChars);
+       // Add the entry to the map
+       $1_map[keyStr] = valueStr;
+       // Delete local refs -- recommended in case map is big and fills local ref table.
+       jenv->DeleteLocalRef(entryObj); 
+       jenv->DeleteLocalRef(keyObj);
+       jenv->DeleteLocalRef(valueObj);
+     }
+     $1 = &$1_map; 
+  } %} 
+
+  %typemap(javain) const std::map<std::string, std::string> & "$javainput" 
+
+  %typemap(directorin,descriptor="Ljava/util/Map;") const std::map<std::string, std::string> &
+  %{ {
+     jclass mapCls = jenv->FindClass("java/util/HashMap");
+     jmethodID mapCtor = jenv->GetMethodID(mapCls, "<init>", "()V");
+     jmethodID put = jenv->GetMethodID(mapCls, "put", 
+        "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;");
+     jobject mapObj = jenv->NewObject(mapCls, mapCtor);
+     for (std::map<std::string, std::string>::const_iterator it = $1->begin();
+          it != $1->end(); ++it) 
+     {
+       jstring keyObj = jenv->NewStringUTF(it->first.c_str());
+       if (keyObj == NULL) {
+         return $null; // OutOfMemoryError has been thrown
+       }
+       jstring valueObj = jenv->NewStringUTF(it->second.c_str());
+       if (valueObj == NULL) {
+         return $null; // OutOfMemoryError has been thrown
+       }
+       jenv->CallObjectMethod(mapObj, put, keyObj, valueObj);
+       // Delete local refs to avoid filling up local ref table if map is big
+       jenv->DeleteLocalRef(keyObj);
+       jenv->DeleteLocalRef(valueObj);
+     }
+     $input = mapObj;
+  } %} 
+
+  %typemap(out) const std::map<std::string, std::string> & 
+  %{ {
+     jclass mapCls = jenv->FindClass("java/util/HashMap");
+     jmethodID mapCtor = jenv->GetMethodID(mapCls, "<init>", "()V");
+     jmethodID put = jenv->GetMethodID(mapCls, "put", 
+        "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;");
+     jobject mapObj = jenv->NewObject(mapCls, mapCtor);
+     for (std::map<std::string, std::string>::const_iterator it = $1->begin();
+          it != $1->end(); ++it) 
+     {
+       jstring keyObj = jenv->NewStringUTF(it->first.c_str());
+       if (keyObj == NULL) {
+         return $null; // OutOfMemoryError has been thrown
+       }
+       jstring valueObj = jenv->NewStringUTF(it->second.c_str());
+       if (valueObj == NULL) {
+         return $null; // OutOfMemoryError has been thrown
+       }
+       jenv->CallObjectMethod(mapObj, put, keyObj, valueObj);
+       // Delete local refs to avoid filling up local ref table if map is big
+       jenv->DeleteLocalRef(keyObj);
+       jenv->DeleteLocalRef(valueObj);
+     }
+     $result = mapObj;
+  } %}
+
+  %typemap(javaout) const std::map<std::string, std::string> & 
   { 
     return $jnicall; 
   } 
@@ -289,13 +411,12 @@
   %feature("pythonappend") mesos::MesosExecutorDriver::MesosExecutorDriver %{
         self.executor = args[0]
   %}
-#endif /* SWIGPYTHON */
 
-#ifdef SWIGRUBY
-  /* Hide MesosSchedulerDriver::getScheduler because it would require
-     object tracking to be turned on */
-  %ignore mesos::MesosSchedulerDriver::getScheduler();
-#endif /* SWIGRUBY */
+  /* Declare template instantiations we will use */
+  %template(SlaveOfferVector) std::vector<mesos::SlaveOffer>;
+  %template(TaskDescriptionVector) std::vector<mesos::TaskDescription>;
+  %template(StringMap) std::map<std::string, std::string>;
+#endif /* SWIGPYTHON */
 
 /* Rename task_state enum so that the generated class is called TaskState */
 %rename(TaskState) task_state;
@@ -303,9 +424,6 @@
 /* Make it possible to inherit from Scheduler/Executor in target language */
 %feature("director") mesos::Scheduler;
 %feature("director") mesos::Executor;
-
-/* Declare template instantiations we will use */
-%template(StringMap) std::map<std::string, std::string>;
 
 %include <mesos_types.h>
 %include <mesos_types.hpp>

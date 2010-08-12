@@ -1,6 +1,8 @@
 import java.io.File;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import mesos.*;
 
 public class TestExceptionFramework {
@@ -48,9 +50,9 @@ public class TestExceptionFramework {
       if (launchedTasks < totalTasks) {
         SlaveOffer offer = offers.get(0);
         int taskId = launchedTasks++;
-        StringMap taskParams = new StringMap();
-        taskParams.set("cpus", "1");
-        taskParams.set("mem", "32");
+        Map<String, String> taskParams = new HashMap<String, String>();
+        taskParams.put("cpus", "1");
+        taskParams.put("mem", "32");
         System.out.println("Launching task " + taskId);
         tasks.add(new TaskDescription(launchedTasks,
                                       offer.getSlaveId(),
@@ -59,8 +61,8 @@ public class TestExceptionFramework {
                                       new byte[0]));
 	launchedTasks++;
       }
-      StringMap params = new StringMap();
-      params.set("timeout", "1");
+      Map<String, String> params = new HashMap<String, String>();
+      params.put("timeout", "1");
       d.replyToOffer(oid, tasks, params);
     }
 

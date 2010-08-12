@@ -1,6 +1,8 @@
 import java.io.File;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import mesos.*;
 
 public class TestFramework {
@@ -51,9 +53,9 @@ public class TestFramework {
       for (SlaveOffer offer: offers) {
         if (launchedTasks < totalTasks) {
           int taskId = launchedTasks++;
-          StringMap taskParams = new StringMap();
-          taskParams.set("cpus", "1");
-          taskParams.set("mem", "128");
+          Map<String, String> taskParams = new HashMap<String, String>();
+          taskParams.put("cpus", "1");
+          taskParams.put("mem", "128");
           System.out.println("Launching task " + taskId);
           tasks.add(new TaskDescription(taskId,
                                         offer.getSlaveId(),
@@ -62,8 +64,8 @@ public class TestFramework {
                                         new byte[0]));
         }
       }
-      StringMap params = new StringMap();
-      params.set("timeout", "1");
+      Map<String, String> params = new HashMap<String, String>();
+      params.put("timeout", "1");
       d.replyToOffer(oid, tasks, params);
     }
 
