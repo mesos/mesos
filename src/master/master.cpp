@@ -8,6 +8,7 @@
 #include "webui.hpp"
 
 using std::endl;
+using std::flush;
 using std::make_pair;
 using std::map;
 using std::max;
@@ -65,42 +66,57 @@ protected:
 
   void operator () ()
   {
-    int tick = 0;
-
     std::ofstream file ("/mnt/shares");
     if (!file.is_open())
       LOG(FATAL) << "Could not open /mnt/shares";
+    LOG(INFO) << "Logging framework shares to /mnt/shares";
+
+    double startTime = elapsed();
 
     while (true) {
-      pause(1);
+      pause(2);
 
       send(master, pack<M2M_GET_STATE>());
       receive();
       CHECK(msgid() == M2M_GET_STATE_REPLY);
       state::MasterState *state = unpack<M2M_GET_STATE_REPLY, 0>(body());
 
-      uint32_t total_cpus = 0;
-      uint32_t total_mem = 0;
+      time_t rawtime;
+      struct tm* timeinfo;
+      time(&rawtime);
+      timeinfo = localtime(&rawtime);
+      char timestr[32];
+      strftime(timestr, sizeof(timestr), "%Y-%m-%d %H:%M:%S", timeinfo);
+      double relativeTime = elapsed() - startTime;
+      
+      file << timestr << "\t" << relativeTime;
 
+      // Count up CPUs and memory in cluster
+      int total_cpus = 0;
+      int64_t total_mem = 0;
       foreach (state::Slave *s, state->slaves) {
         total_cpus += s->cpus;
         total_mem += s->mem;
       }
       
-      if (state->frameworks.empty()) {
-        file << "--------------------------------" << std::endl;
-      } else {
-        foreach (state::Framework *f, state->frameworks) {
-          double cpu_share = f->cpus / (double) total_cpus;
-          double mem_share = f->mem / (double) total_mem;
-          double max_share = max(cpu_share, mem_share);
-          file << tick << "#" << f->id << "#" << f->name << "#" 
-               << f->cpus << "#" << f->mem << "#"
-               << cpu_share << "#" << mem_share << "#" << max_share << endl;
-        }
+      // Put frameworks into a sorted map to sort by framework ID
+      map<FrameworkID, state::Framework*> frameworks;
+      foreach (state::Framework* f, state->frameworks) {
+        frameworks[f->id] = f;
       }
+
+      // Print them out
+      foreachpair (_, state::Framework* f, frameworks) {
+        int cpus = 0;
+        foreach (state::Task* t, f->tasks)
+          cpus += t->cpus;
+        double cpu_share = cpus / (double) total_cpus;
+        file << "\t" << cpu_share;
+      }
+
+      file << endl << flush;
+
       delete state;
-      tick++;
     }
     file.close();
   }
@@ -272,7 +288,7 @@ void Master::operator () ()
     LOG(FATAL) << "Unrecognized allocator type: " << allocatorType;
 
   link(spawn(new AllocatorTimer(self())));
-  //link(spawn(new SharesPrinter(self())));
+  link(spawn(new SharesPrinter(self())));
 
   while (true) {
     switch (receive()) {
