@@ -244,8 +244,10 @@ public class FrameworkScheduler extends Scheduler {
     String taskType = null;
     boolean haveMaps = canLaunchMap(host);
     boolean haveReduces = canLaunchReduce(host);
-    LOG.info("Looking at " + host + ": haveMaps=" + haveMaps + 
-        ", haveReduces=" + haveReduces);
+    if (LOG.isDebugEnabled()) {
+      LOG.debug("Looking at " + host + ": haveMaps=" + haveMaps + 
+          ", haveReduces=" + haveReduces);
+    }
     if (!haveMaps && !haveReduces) {
       return null;
     } else if (haveMaps && !haveReduces) {
