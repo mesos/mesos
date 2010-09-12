@@ -4,6 +4,8 @@ import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.LinkedList;
@@ -102,6 +104,8 @@ public class FrameworkScheduler extends Scheduler {
   private int cpusPerTask;
   private int memPerTask;
   private long localityWait;
+  private enum SchedulingMode { FIFO, FAIR};
+  private SchedulingMode schedulingMode;
   
   private Map<String, TaskTrackerInfo> ttInfos =
     new HashMap<String, TaskTrackerInfo>();
@@ -137,6 +141,15 @@ public class FrameworkScheduler extends Scheduler {
     localityWait = conf.getLong("mapred.mesos.localitywait", 5000);
     maxMapsPerNode = conf.getInt("mapred.tasktracker.map.tasks.maximum", 2);
     maxReducesPerNode = conf.getInt("mapred.tasktracker.reduce.tasks.maximum", 2);
+    String schedModeStr = conf.get("mapred.mesos.scheduling.mode", "fair");
+    if (schedModeStr.equals("fifo")) {
+      schedulingMode = SchedulingMode.FIFO;
+    } else if (schedModeStr.equals("fair")) {
+      schedulingMode = SchedulingMode.FAIR;
+    } else {
+      throw new RuntimeException(
+        "Unrecognized value for mapred.mesos.scheduling.mode: " + schedModeStr);
+    }
   }
 
   @Override
@@ -241,7 +254,9 @@ public class FrameworkScheduler extends Scheduler {
       taskType = "reduce";
     } else {
       float mapToReduceRatio = 1;
-      if (ttInfo.reduces.size() < ttInfo.maps.size() / mapToReduceRatio)
+      int totalMaps = assignedMaps + unassignedMaps;
+      int totalReduces = assignedReduces + unassignedReduces;
+      if (totalReduces * mapToReduceRatio < totalMaps)
         taskType = "reduce";
       else
         taskType = "map";
@@ -419,8 +434,6 @@ public class FrameworkScheduler extends Scheduler {
   public List<Task> assignTasks(TaskTrackerStatus tts) {
     synchronized (jobTracker) {      
       try {
-        Collection<JobInProgress> jobs = jobTracker.jobs.values();
-
         String host = tts.getHost();
         LOG.info("In FrameworkScheduler.assignTasks for " + host);
         
@@ -430,6 +443,13 @@ public class FrameworkScheduler extends Scheduler {
           return null;
         }
         
+        ArrayList<JobInProgress> jobs = new ArrayList<JobInProgress>();
+        for (JobInProgress job: jobTracker.jobs.values()) {
+          if (job.getStatus().getRunState() == JobStatus.RUNNING) {
+            jobs.add(job);
+          }
+        }
+
         int clusterSize = jobTracker.getClusterStatus().getTaskTrackers();
         int numHosts = jobTracker.getNumberOfUniqueHosts();
         
@@ -450,38 +470,44 @@ public class FrameworkScheduler extends Scheduler {
         Iterator<MesosTask> mapIter = assignableMaps.iterator();
         Iterator<MesosTask> reduceIter = assignableReduces.iterator();
         
-        // Go through jobs in FIFO order and look for tasks to launch
+        // Go through jobs in scheduling order and look for maps to launch
+        Collections.sort(jobs, ((schedulingMode == SchedulingMode.FIFO) ?
+          new FifoComparator() : new MapCountComparator()));
         for (JobInProgress job: jobs) {
-          if (job.getStatus().getRunState() == JobStatus.RUNNING) {
-            // If the node has unassigned maps, try to launch map tasks
-            while (mapIter.hasNext()) {
-              Task task = job.obtainNewMapTask(tts, clusterSize, numHosts);
-              if (task != null) {
-                MesosTask nt = mapIter.next();
-                nt.assign(task);
-                unassignedMaps--;
-                assignedMaps++;
-                hadoopIdToMesosTask.put(task.getTaskID(), nt);
-                assignedTasks.add(task);
-                task.extraData = "" + nt.mesosId;
-              } else {
-                break;
-              }
+          // If the node has unassigned maps, try to launch map tasks
+          while (mapIter.hasNext()) {
+            Task task = job.obtainNewMapTask(tts, clusterSize, numHosts);
+            if (task != null) {
+              MesosTask nt = mapIter.next();
+              nt.assign(task);
+              unassignedMaps--;
+              assignedMaps++;
+              hadoopIdToMesosTask.put(task.getTaskID(), nt);
+              assignedTasks.add(task);
+              task.extraData = "" + nt.mesosId;
+            } else {
+              break;
             }
-            // If the node has unassigned reduces, try to launch reduce tasks
-            while (reduceIter.hasNext()) {
-              Task task = job.obtainNewReduceTask(tts, clusterSize, numHosts);
-              if (task != null) {
-                MesosTask nt = reduceIter.next();
-                nt.assign(task);
-                unassignedReduces--;
-                assignedReduces++;
-                hadoopIdToMesosTask.put(task.getTaskID(), nt);
-                assignedTasks.add(task);
-                task.extraData = "" + nt.mesosId;
-              } else {
-                break;
-              }
+          }
+        }
+
+        // Go through jobs in scheduling order to launch reduces
+        Collections.sort(jobs, ((schedulingMode == SchedulingMode.FIFO) ?
+          new FifoComparator() : new ReduceCountComparator()));
+        for (JobInProgress job: jobs) {
+          // If the node has unassigned reduces, try to launch reduce tasks
+          while (reduceIter.hasNext()) {
+            Task task = job.obtainNewReduceTask(tts, clusterSize, numHosts);
+            if (task != null) {
+              MesosTask nt = reduceIter.next();
+              nt.assign(task);
+              unassignedReduces--;
+              assignedReduces++;
+              hadoopIdToMesosTask.put(task.getTaskID(), nt);
+              assignedTasks.add(task);
+              task.extraData = "" + nt.mesosId;
+            } else {
+              break;
             }
           }
         }
@@ -768,6 +794,46 @@ public class FrameworkScheduler extends Scheduler {
       }
       
       return false;
+    }
+  }
+
+  class FifoComparator implements Comparator<JobInProgress> {
+    public int compare(JobInProgress j1, JobInProgress j2) {
+      int res = j1.getPriority().compareTo(j2.getPriority());
+      if (res == 0) {
+        if (j1.getStartTime() < j2.getStartTime()) {
+          res = -1;
+        } else {
+          res = (j1.getStartTime() == j2.getStartTime() ? 0 : 1);
+        }
+      }
+      if (res == 0) {
+        // If there is a tie, break it by job ID to get a deterministic order
+        res = j1.getJobID().compareTo(j2.getJobID());
+      }
+      return res;
+    }
+  }
+
+  class MapCountComparator implements Comparator<JobInProgress> {
+    public int compare(JobInProgress j1, JobInProgress j2) {
+      int res = j1.runningMaps() - j2.runningMaps();
+      if (res == 0) {
+        // If there is a tie, break it by job ID to get a deterministic order
+        res = j1.getJobID().compareTo(j2.getJobID());
+      }
+      return res;
+    }
+  }
+
+  class ReduceCountComparator implements Comparator<JobInProgress> {
+    public int compare(JobInProgress j1, JobInProgress j2) {
+      int res = j1.runningReduces() - j2.runningReduces();
+      if (res == 0) {
+        // If there is a tie, break it by job ID to get a deterministic order
+        res = j1.getJobID().compareTo(j2.getJobID());
+      }
+      return res;
     }
   }
 }
