@@ -80,7 +80,9 @@ class ApacheWebFWScheduler(mesos.Scheduler):
     print "received status update from taskID " + str(status.taskId) + ", with state: " + str(status.state)
     reconfigured = False
     self.lock.acquire()
-    if status.taskId in self.servers.keys():
+    if not status.taskId in self.servers.keys():
+      print "This status was from a node where server wasn't (supposed to be) running"
+    else:
       if status.state == mesos.TASK_STARTING:
         print "Task " + str(status.taskId) + " reported that it is STARTING."
         del self.servers[status.taskId]
@@ -93,7 +95,6 @@ class ApacheWebFWScheduler(mesos.Scheduler):
         instance_id = self.host_map[host_name]
         print "Task's instance id is " + instance_id
         lbs = self.elb_conn.register_instances(LOAD_BALANCER_NAME, [instance_id])
-        #lbs = self.elb_conn.register_instances("my-load-balancer","i-5dd18037")
         print "Load balancer reported all backends as: " + str(lbs)
       if status.state == mesos.TASK_FINISHED:
         del self.servers[status.taskId]
@@ -109,6 +110,23 @@ class ApacheWebFWScheduler(mesos.Scheduler):
         del self.servers[status.taskId]
     self.lock.release()
     print "done in statusupdate"
+
+  def kill_backends(self, num):
+    print "in kill_backends, killing %i backends" % num
+    host_names, host_ids = [], []
+    for m,n in self.servers.items()[:num]:
+      host_ids.append(m)
+      host_names.append(n)
+    print "host_names is " + str(host_names)
+    instance_ids = [self.host_map[i] for i in host_names]
+    print "deregistering instance ids from elb: " + str(instance_ids)
+    lbs = self.elb_conn.deregister_instances(LOAD_BALANCER_NAME, instance_ids)
+    print "calling driver.kill_task on tasks: " + str(host_ids) 
+    [self.driver.killTask(i) for i in host_ids]
+    #The following (i.e. removing host from self.servers) will happen when the
+    #task's status is reported to the FW as KILLED
+    #print "removing task from servers list: " + str(host_ids) 
+    #[self.servers.pop(int(i)) for i in host_ids]
 
 #  def scaleUp(self):
 #    print "SCALING UP"
@@ -138,8 +156,8 @@ def updated_host_map():
 
 
 def monitor(sched):
-  print "in MONITOR()"
   while True:
+    print ">>>>>>> In monitor()"
     #ELB only reports "metrics" every minute at its most fine granularity
     time.sleep(2)
     print "done sleeping"
@@ -154,10 +172,17 @@ def monitor(sched):
         print "RequestCount was 0, so set sched.desired_servers to " + str(sched.desired_servers)
       else:
         #TODO(andyk): Probably want to weight this to smooth out ups and downs
-        new_num_servers = result[0]["Sum"]/TARGET_CONN_PER_MIN_PER_BACKEND
+        new_num_servers = int(result[0]["Sum"]/TARGET_CONN_PER_MIN_PER_BACKEND)
         sched.desired_servers = max(new_num_servers,1)
-        print "RequestCount was " + str(result[0]["Sum"]) + ", sched.desired_servers to " + str(sched.desired_servers)
-       
+        print "RequestCount was " + str(result[0]["Sum"]) + ", setting sched.desired_servers = " + str(sched.desired_servers) 
+      print "len(sched.servers) is " + str(len(sched.servers))
+      if sched.desired_servers < len(sched.servers):
+        print "time to kill some servers"
+        num_to_kill = len(sched.servers)-sched.desired_servers
+        print "removing %i backends" % num_to_kill
+        sched.kill_backends(num_to_kill)
+      print "<<<<<<<< done with monitor()"
+
 #        if int(data[33]) >= START_THRESHOLD:
 #          sched.scaleUp()
 #        elif int(data[4]) <= KILL_THRESHOLD:
