@@ -55,6 +55,7 @@ public class FrameworkScheduler extends Scheduler {
     
     void assign(Task task) {
       hadoopId = task.getTaskID();
+      LOG.info("Assiging Hadoop task " + hadoopId + " to Mesos task " + mesosId);
     }
   }
   
@@ -284,6 +285,8 @@ public class FrameworkScheduler extends Scheduler {
     Map<String, String> params = new HashMap<String, String>();
     params.put("cpus", "" + cpusPerTask);
     params.put("mem", "" + memPerTask);
+    LOG.info("Launching Mesos task " + mesosId + " as " + taskType +
+      " on slave " + slaveId);
     return new TaskDescription(mesosId, slaveId, name, params, new byte[0]);
   }
 
@@ -587,7 +590,7 @@ public class FrameworkScheduler extends Scheduler {
       }
     }
     for (MesosTask nt: toRemove) {
-      LOG.info("Asking executor to kill Mesos task " + nt.mesosId);
+      LOG.info("Asking executor to kill timed-out Mesos task " + nt.mesosId);
       askExecutorToUpdateStatus(nt, TaskState.TASK_KILLED);
       removeTask(nt);
     }

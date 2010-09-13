@@ -1,6 +1,7 @@
 package org.apache.hadoop.mapred;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
@@ -37,6 +38,8 @@ public class FrameworkExecutor extends Executor {
   private TaskTracker taskTracker;
 
   private Set<Integer> activeMesosTasks = new HashSet<Integer>();
+  private Map<Integer, Long> launchTimesOfUnassignedMesosTasks =
+    new HashMap<Integer, Long>();
 
   @Override
   public void init(ExecutorDriver d, ExecutorArgs args) {
@@ -69,6 +72,14 @@ public class FrameworkExecutor extends Executor {
           taskTracker.run();
         }
       }.start();
+      new Thread("Retire expired tasks") {
+        public void run() {
+          while (true) {
+            removeExpiredTasks();
+            try {Thread.sleep(2000);} catch(Exception e) {}
+          }
+        }
+      }.start();
     } catch (Exception e) {
       LOG.fatal("Failed to initialize FrameworkExecutor", e);
       System.exit(1);
@@ -79,6 +90,10 @@ public class FrameworkExecutor extends Executor {
   public void launchTask(ExecutorDriver d, TaskDescription task) {
     LOG.info("Asked to launch Mesos task " + task.getTaskId());
     activeMesosTasks.add(task.getTaskId());
+    synchronized (launchTimesOfUnassignedMesosTasks) {
+      launchTimesOfUnassignedMesosTasks.put(
+        task.getTaskId(), System.currentTimeMillis());
+    }
   }
   
   @Override
@@ -117,6 +132,10 @@ public class FrameworkExecutor extends Executor {
       // Parse Mesos ID from extraData
       int mesosId = Integer.parseInt(task.extraData);
       if (activeMesosTasks.contains(mesosId)) {
+        // Remove it from unassigned tasks
+        synchronized (launchTimesOfUnassignedMesosTasks) {
+          launchTimesOfUnassignedMesosTasks.remove(mesosId);
+        }
         // Check whether the task has finished (either successfully or not),
         // and report to Mesos if it has
         State state = status.getRunState();
@@ -143,5 +162,23 @@ public class FrameworkExecutor extends Executor {
   
   static FrameworkExecutor getInstance() {
     return instance;
+  }
+
+  void removeExpiredTasks() {
+    synchronized (launchTimesOfUnassignedMesosTasks) {
+      long now = System.currentTimeMillis();
+      ArrayList<Integer> toRemove = new ArrayList<Integer>();
+      for (Entry<Integer, Long> e: launchTimesOfUnassignedMesosTasks.entrySet()) {
+        if (e.getValue() < now - 30000) {
+          LOG.info("Reporting Mesos task " + e.getKey() + " as finished because it timed out");
+          driver.sendStatusUpdate(
+              new mesos.TaskStatus(e.getKey(), TaskState.TASK_FINISHED, new byte[0]));
+          toRemove.add(e.getKey());
+        }
+      }
+      for (Integer id: toRemove) {
+        launchTimesOfUnassignedMesosTasks.remove(id);
+      }
+    }
   }
 }
