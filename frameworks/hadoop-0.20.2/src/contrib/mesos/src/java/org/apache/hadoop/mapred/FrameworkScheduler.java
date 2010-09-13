@@ -437,7 +437,9 @@ public class FrameworkScheduler extends Scheduler {
     synchronized (jobTracker) {      
       try {
         String host = tts.getHost();
-        LOG.info("In FrameworkScheduler.assignTasks for " + host);
+        if (LOG.isDebugEnabled()) {
+          LOG.debug("In FrameworkScheduler.assignTasks for " + host);
+        }
         
         TaskTrackerInfo ttInfo = ttInfos.get(host);
         if (ttInfo == null) {
@@ -569,7 +571,7 @@ public class FrameworkScheduler extends Scheduler {
   public void killTimedOutTasks() {
     synchronized (jobTracker) {
       long curTime = System.currentTimeMillis();
-      long timeout = 2 * jobTracker.getNextHeartbeatInterval();
+      long timeout = 20000; //2 * jobTracker.getNextHeartbeatInterval();
       for (TaskTrackerInfo tt: ttInfos.values()) {
         killTimedOutTasks(tt.maps, curTime - timeout);
         killTimedOutTasks(tt.reduces, curTime - timeout);
@@ -585,6 +587,7 @@ public class FrameworkScheduler extends Scheduler {
       }
     }
     for (MesosTask nt: toRemove) {
+      LOG.info("Asking executor to kill Mesos task " + nt.mesosId);
       askExecutorToUpdateStatus(nt, TaskState.TASK_KILLED);
       removeTask(nt);
     }
