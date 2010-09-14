@@ -53,14 +53,18 @@ class ApacheWebFWScheduler(mesos.Scheduler):
     tasks = []
     for offer in slave_offers:
       if offer.host in self.servers.values():
-        print "Rejecting slot on host " + offer.host + " because we've launched a server on that machine already."
+        #print "Rejecting slot on host " + offer.host + " because we've launched a server on that machine already."
         #print "self.servers currently looks like: " + str(self.servers)
+        pass
       elif len(self.servers) >= self.desired_servers and len(self.servers) > 0:
-        print "Rejecting slot because we've launched enough tasks."
+        #print "Rejecting slot because we've launched enough tasks."
+        pass
       elif int(offer.params['mem']) < 1024:
-        print "Rejecting offer because it doesn't contain enough memory (it has " + offer.params['mem'] + " and we need 1024mb."
+        #print "Rejecting offer because it doesn't contain enough memory (it has " + offer.params['mem'] + " and we need 1024mb."
+        pass
       elif int(offer.params['cpus']) < 1:
-        print "Rejecting offer because it doesn't contain enough CPUs."
+        #print "Rejecting offer because it doesn't contain enough CPUs."
+        pass
       else:
         print "len(self.servers) = " + str(len(self.servers)) + ", self.desired_servers  = " + str(self.desired_servers) + ", len(self.servers) = " + str(len(self.servers))
         print "Offer is for " + offer.params['cpus'] + " CPUS and " + offer.params["mem"] + " MB on host " + offer.host
@@ -163,7 +167,8 @@ def monitor(sched):
     print "done sleeping"
     try:
       #looking for the RequestCount metric for our load balancer 
-      request_count = sched.metrics[13]
+      #request_count = sched.metrics[13]
+      request_count = [m for m in sched.metrics if str(m) == "Metric:RequestCount"][0]
       print request_count
       result = request_count.query(datetime.datetime.now()-datetime.timedelta(minutes=2),datetime.datetime.now(), 'Sum', 'Count', 60)
       print result
