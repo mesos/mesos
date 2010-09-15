@@ -74,7 +74,7 @@ const int32_t MAX_MEM = 1024 * 1024 * Megabyte;
 const double HEARTBEAT_INTERVAL = 2;
 
 // Acceptable time since we saw the last heartbeat (four heartbeats).
-const double HEARTBEAT_TIMEOUT = 15;
+const double HEARTBEAT_TIMEOUT = 30;
 
 // Time to wait for a framework to failover (TODO(benh): Make configurable)).
 const time_t FRAMEWORK_FAILOVER_TIMEOUT = 60;
