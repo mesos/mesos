@@ -169,7 +169,7 @@ public class FrameworkExecutor extends Executor {
       long now = System.currentTimeMillis();
       ArrayList<Integer> toRemove = new ArrayList<Integer>();
       for (Entry<Integer, Long> e: launchTimesOfUnassignedMesosTasks.entrySet()) {
-        if (e.getValue() < now - 30000) {
+        if (e.getValue() < now - 45000) {
           LOG.info("Reporting Mesos task " + e.getKey() + " as finished because it timed out");
           driver.sendStatusUpdate(
               new mesos.TaskStatus(e.getKey(), TaskState.TASK_FINISHED, new byte[0]));

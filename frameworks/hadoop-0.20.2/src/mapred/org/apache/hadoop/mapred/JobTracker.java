@@ -1743,7 +1743,7 @@ public class JobTracker implements MRConstants, InterTrackerProtocol,
   }
 
   private static String generateNewIdentifier() {
-    return getDateFormat().format(new Date());
+    return getDateFormat().format(new Date()) + "-" + ((int) (1000 * Math.random()));
   }
   
   static boolean validateIdentifier(String id) {
