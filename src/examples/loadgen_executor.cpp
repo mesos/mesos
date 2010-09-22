@@ -10,6 +10,10 @@ using namespace std;
 using namespace mesos;
 
 
+const int NUM_SEQUENTIAL = 400;
+const int STRIDE = 20;
+
+
 class MemHogExecutor;
 
 
@@ -141,12 +145,30 @@ void* runThread(void* threadArg)
   ThreadArg* arg = (ThreadArg*) threadArg;
   cout << "Running a worker thread..." << endl;
   int32_t count = 0;
-  uint32_t pos = arg->threadId;
+  uint32_t rngPos = arg->threadId;
+  int oldPct = 0;
+  int64_t x = 0;
   while (true) {
-    pos = nextRand(pos);
-    arg->mem[pos % arg->memToHog] = pos;
-    count++;
-    if (count == arg->numSteps) {
+    int32_t r1 = nextRand(rngPos);
+    int32_t r2 = nextRand(r1);
+    rngPos = r2;
+    int64_t arrayPos = (((int64_t) r1) << 32) | ((int64_t) r2);
+    for (int i = 0; i < NUM_SEQUENTIAL; i++) {
+      if (arrayPos < 0)
+        arrayPos = -arrayPos;
+      rngPos = nextRand(rngPos);
+      // For sequential only
+      x += STRIDE;
+      arrayPos = x < 0 ? -x : x;
+      arg->mem[arrayPos % arg->memToHog] = rngPos;
+    }
+    count += NUM_SEQUENTIAL;
+    int newPct = (int) ((100.0 * count) / arg->numSteps);
+    if (newPct > oldPct) {
+      cout << "Progress: " << newPct << "%" << endl;
+      oldPct = newPct;
+    }
+    if (count >= arg->numSteps) {
       // We're done!
       cout << "Ending a worker thread..." << endl;
       pthread_mutex_lock(arg->lock);
