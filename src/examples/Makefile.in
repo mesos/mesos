@@ -91,10 +91,12 @@ endif
 SCHED_EXES = $(BINDIR)/examples/test-framework		\
              $(BINDIR)/examples/cpp-test-framework	\
              $(BINDIR)/examples/memhog			\
+             $(BINDIR)/examples/loadgen			\
              $(BINDIR)/examples/scheduled-memhog
 
 EXEC_EXES = $(BINDIR)/examples/test-executor		\
             $(BINDIR)/examples/cpp-test-executor	\
+            $(BINDIR)/examples/loadgen-executor	        \
             $(BINDIR)/examples/memhog-executor
 
 EXAMPLES_EXES = $(SCHED_EXES) $(EXEC_EXES)
@@ -155,6 +157,12 @@ $(BINDIR)/examples/memhog: @srcdir@/memhog.cpp $(MESOS_SCHED_LIB)
 	$(CXX) $(CXXFLAGS) -o $@ $< $(MESOS_SCHED_LIB) $(LDFLAGS) $(LIBS)
 
 $(BINDIR)/examples/memhog-executor: @srcdir@/memhog_executor.cpp $(MESOS_EXEC_LIB)
+	$(CXX) $(CXXFLAGS) -o $@ $< $(MESOS_EXEC_LIB) $(LDFLAGS) $(LIBS)
+
+$(BINDIR)/examples/loadgen: @srcdir@/loadgen.cpp $(MESOS_SCHED_LIB)
+	$(CXX) $(CXXFLAGS) -o $@ $< $(MESOS_SCHED_LIB) $(LDFLAGS) $(LIBS)
+
+$(BINDIR)/examples/loadgen-executor: @srcdir@/loadgen_executor.cpp $(MESOS_EXEC_LIB)
 	$(CXX) $(CXXFLAGS) -o $@ $< $(MESOS_EXEC_LIB) $(LDFLAGS) $(LIBS)
 
 $(BINDIR)/examples/scheduled-memhog: @srcdir@/scheduled_memhog.cpp $(MESOS_SCHED_LIB)
