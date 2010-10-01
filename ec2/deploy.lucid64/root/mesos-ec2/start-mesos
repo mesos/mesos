@@ -13,7 +13,7 @@ else
   NUM_ZOOS=`cat zoo | wc -l`
 fi
 
-SSH_OPTS="-o StrictHostKeyChecking=no -o ConnectTimeout=2"
+SSH_OPTS="-o StrictHostKeyChecking=no -o ConnectTimeout=5"
 
 if [[ $NUM_ZOOS == 0 ]]; then
   master_arg="1@${ACTIVE_MASTER}:5050"

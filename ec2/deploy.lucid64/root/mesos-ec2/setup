@@ -38,7 +38,7 @@ HADOOP_HOME=/root/hadoop-0.20.2
 JAVA_HOME=/usr/lib/jvm/java-6-openjdk
 #JAVA_HOME=/usr/lib/jvm/java-6-sun #works for karmic, this is lucid
 
-SSH_OPTS="-o StrictHostKeyChecking=no -o ConnectTimeout=2"
+SSH_OPTS="-o StrictHostKeyChecking=no -o ConnectTimeout=5"
 
 if [[ `tty` == "not a tty" ]] ; then
     echo "Expecting a tty or pty! (use the ssh -t option)."
