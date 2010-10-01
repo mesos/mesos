@@ -783,3 +783,131 @@ TEST(MasterTest, SchedulerFailoverStatusUpdate)
 
   ProcessClock::resume();
 }
+
+
+// An executor used in the framework message test that just sends a reply
+// to each message received and logs the last message.
+class FrameworkMessageExecutor : public Executor
+{
+public:
+  bool messageReceived;
+  string messageData;
+  SlaveID mySlaveId;
+
+  FrameworkMessageExecutor(): messageReceived(false) {}
+
+  virtual ~FrameworkMessageExecutor() {}
+
+  virtual void init(ExecutorDriver* d, const ExecutorArgs& args) {
+    mySlaveId = args.slaveId;
+  }
+
+  virtual void frameworkMessage(ExecutorDriver* d, const FrameworkMessage& m) {
+    LOG(INFO) << "FrameworkMessageExecutor got a message";
+    messageReceived = true;
+    messageData = m.data;
+    // Send a message back to the scheduler, which will cause it to exit
+    FrameworkMessage reply(mySlaveId, 0, "reply");
+    d->sendFrameworkMessage(reply);
+    LOG(INFO) << "Sent the reply back";
+  }
+};
+
+
+// A scheduler used in the framework message test that launches a task, waits
+// for it to start, sends it a framework message, and waits for a reply.
+class FrameworkMessageScheduler : public Scheduler
+{
+public:
+  FrameworkID fid;
+  string errorMessage;
+  bool messageReceived;
+  string messageData;
+  SlaveID slaveIdOfTask;
+
+  FrameworkMessageScheduler() {}
+
+  virtual ~FrameworkMessageScheduler() {}
+
+  virtual ExecutorInfo getExecutorInfo(SchedulerDriver*) {
+    return ExecutorInfo("noexecutor", "");
+  }
+
+  virtual void registered(SchedulerDriver*, FrameworkID fid) {
+    LOG(INFO) << "FrameworkMessageScheduler registered";
+    this->fid = fid;
+  }
+
+  virtual void resourceOffer(SchedulerDriver* d,
+                             OfferID id,
+                             const vector<SlaveOffer>& offers) {
+    LOG(INFO) << "FrameworkMessageScheduler got a slot offer";
+    vector<TaskDescription> tasks;
+    ASSERT_TRUE(offers.size() == 1);
+    const SlaveOffer &offer = offers[0];
+    TaskDescription desc(0, offer.slaveId, "", offer.params, "");
+    tasks.push_back(desc);
+    slaveIdOfTask = offer.slaveId;
+    d->replyToOffer(id, tasks, map<string, string>());
+  }
+
+
+  virtual void statusUpdate(SchedulerDriver* d, const TaskStatus& status) {
+    EXPECT_EQ(TASK_RUNNING, status.state);
+    LOG(INFO) << "Task is running; sending it a framework message";
+    FrameworkMessage message(slaveIdOfTask, 0, "hello");
+    d->sendFrameworkMessage(message);
+  }
+
+
+  virtual void frameworkMessage(SchedulerDriver* d, const FrameworkMessage& m) {
+    LOG(INFO) << "FrameworkMessageScheduler got a message";
+    messageReceived = true;
+    messageData = m.data;
+    // Stop our driver because the test is complete
+    d->stop();
+  }
+
+  virtual void error(SchedulerDriver* d,
+                     int code,
+                     const std::string& message) {
+    errorMessage = message;
+    d->stop();
+  }
+};
+
+
+// Tests that framework messages are sent correctly both in both the
+// scheduler->executor direction and the executor->scheduler direction.
+TEST(MasterTest, FrameworkMessages)
+{
+  ASSERT_TRUE(GTEST_IS_THREADSAFE);
+
+  Master m;
+  PID master = Process::spawn(&m);
+
+  FrameworkMessageExecutor exec;
+  LocalIsolationModule isolationModule(&exec);
+
+  Slave s(Resources(2, 1 * Gigabyte), true, &isolationModule);
+  PID slave = Process::spawn(&s);
+
+  BasicMasterDetector detector(master, slave, true);
+
+  FrameworkMessageScheduler sched;
+  MesosSchedulerDriver driver(&sched, master);
+
+  driver.run();
+
+  EXPECT_EQ("", sched.errorMessage);
+  EXPECT_TRUE(exec.messageReceived);
+  EXPECT_EQ("hello", exec.messageData);
+  EXPECT_TRUE(sched.messageReceived);
+  EXPECT_EQ("reply", sched.messageData);
+
+  MesosProcess::post(slave, pack<S2S_SHUTDOWN>());
+  Process::wait(slave);
+
+  MesosProcess::post(master, pack<M2M_SHUTDOWN>());
+  Process::wait(master);
+}
