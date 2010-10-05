@@ -101,6 +101,11 @@ void Slave::registerOptions(Configurator* conf)
                           "framework executors from HDFS)\n"
                           "(default: look for HADOOP_HOME environment\n"
                           "variable or find hadoop on PATH)");
+  conf->addOption<bool>("switch_user", 
+                        "Whether to run tasks as the user who\n"
+                        "submitted them rather than the user running\n"
+                        "the slave (requires setuid permission)\n",
+                        true);
 }
 
 
@@ -284,7 +289,11 @@ void Slave::operator () ()
         FrameworkMessage message;
         tie(fid, message) = unpack<M2S_FRAMEWORK_MESSAGE>(body());
         if (Executor *ex = getExecutor(fid)) {
+          VLOG(1) << "Relaying framework message for framework " << fid;
           send(ex->pid, pack<S2E_FRAMEWORK_MESSAGE>(message));
+        } else {
+          VLOG(1) << "Dropping framework message for framework " << fid
+                  << " because its executor is not running";
         }
         // TODO(*): If executor is not started, queue framework message?
         // (It's probably okay to just drop it since frameworks can have
@@ -339,20 +348,28 @@ void Slave::operator () ()
         TaskState taskState;
         string data;
         tie(fid, tid, taskState, data) = unpack<E2S_STATUS_UPDATE>(body());
-        LOG(INFO) << "Got status update for task " << fid << ":" << tid;
-        if (taskState == TASK_FINISHED || taskState == TASK_FAILED ||
-            taskState == TASK_KILLED || taskState == TASK_LOST) {
-          LOG(INFO) << "Task " << fid << ":" << tid << " done";
-          if (Framework *fw = getFramework(fid)) {
-            fw->removeTask(tid);
-            isolationModule->resourcesChanged(fw);
-          }
-        }
 
-        // Reliably send message and save sequence number for canceling later.
-        int seq = rsend(master, pack<S2M_FT_STATUS_UPDATE>(id, fid, tid,
-                                                           taskState, data));
-        seqs[fid].insert(seq);
+        Framework *framework = getFramework(fid);
+        if (framework != NULL) {
+	  LOG(INFO) << "Got status update for task " << fid << ":" << tid;
+	  if (taskState == TASK_FINISHED || taskState == TASK_FAILED ||
+	      taskState == TASK_KILLED || taskState == TASK_LOST) {
+	    LOG(INFO) << "Task " << fid << ":" << tid << " done";
+
+            framework->removeTask(tid);
+            isolationModule->resourcesChanged(framework);
+          }
+
+	  // Reliably send message and save sequence number for
+	  // canceling later.
+	  int seq = rsend(master, framework->pid,
+			  pack<S2M_FT_STATUS_UPDATE>(id, fid, tid,
+						     taskState, data));
+	  seqs[fid].insert(seq);
+	} else {
+	  LOG(WARNING) << "Got status update for UNKNOWN task "
+		       << fid << ":" << tid;
+	}
         break;
       }
 
@@ -368,6 +385,8 @@ void Slave::operator () ()
 
           // Set slave ID in case framework omitted it.
           message.slaveId = this->id;
+          VLOG(1) << "Sending framework message to framework " << fid
+                  << " with PID " << framework->pid;
           send(framework->pid, pack<M2F_FRAMEWORK_MESSAGE>(message));
         }
         break;

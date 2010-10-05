@@ -155,7 +155,7 @@ void Master::registerOptions(Configurator* conf)
   conf->addOption<string>("allocator", 'a', "Allocation module name", "simple");
   conf->addOption<bool>("root_submissions",
                         "Can root submit frameworks?",
-                        false);
+                        true);
 }
 
 
@@ -306,7 +306,7 @@ void Master::operator () ()
         break;
       }
 
-      bool rootSubmissions = conf.get<bool>("root_submissions", false);
+      bool rootSubmissions = conf.get<bool>("root_submissions", true);
       if (framework->user == "root" && rootSubmissions == false) {
         LOG(INFO) << framework << " registering as root, but "
                   << "root submissions are disabled on this cluster";
@@ -775,7 +775,7 @@ OfferID Master::makeOffer(Framework *framework,
     params.set("mem", r.resources.mem);
     SlaveOffer offer(r.slave->id, r.slave->hostname, params.getMap());
     offers.push_back(offer);
-    pids[r.slave->id, r.slave->pid];
+    pids[r.slave->id] = r.slave->pid;
   }
   send(framework->pid, pack<M2F_SLOT_OFFER>(oid, offers, pids));
   return oid;

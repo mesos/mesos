@@ -77,14 +77,14 @@ protected:
 
       case PROCESS_TIMEOUT: {
         terminate = true;
-        VLOG(1) << "FT: faking M2F_STATUS_UPDATE due to ReplyToOffer timeout for tid:" << tid;
+        VLOG(1) << "No status updates received for tid:" << tid
+		<< ". Assuming task was lost.";
         send(parent, pack<M2F_STATUS_UPDATE>(tid, TASK_LOST, ""));
         break;
       }
 
       }
     }
-    VLOG(1) << "FT: Exiting reliable reply for tid:" << tid;
   }
 
 private:
@@ -178,7 +178,7 @@ protected:
 	PID masterPid;
 	tie(masterSeq, masterPid) = unpack<NEW_MASTER_DETECTED>(body());
 
-	LOG(INFO) << "New master at " << masterPid << " with ID:" << masterSeq;
+	VLOG(1) << "New master at " << masterPid << " with ID:" << masterSeq;
 
         redirect(master, masterPid);
 	master = masterPid;
@@ -253,10 +253,14 @@ protected:
       case F2F_FRAMEWORK_MESSAGE: {
         FrameworkMessage msg;
         tie(msg) = unpack<F2F_FRAMEWORK_MESSAGE>(body());
-        if (savedSlavePids.count(msg.slaveId) > 0)
+        VLOG(1) << "Asked to send framework message to slave " << msg.slaveId;
+        if (savedSlavePids.count(msg.slaveId) > 0) {
+          VLOG(1) << "Saved slave PID is " << savedSlavePids[msg.slaveId];
           send(savedSlavePids[msg.slaveId], pack<M2S_FRAMEWORK_MESSAGE>(fid, msg));
-        else
+        } else {
+          VLOG(1) << "No PID is saved for that slave; sending through master";
           send(master, pack<F2M_FRAMEWORK_MESSAGE>(fid, msg));
+        }
         break;
       }
 
@@ -283,10 +287,12 @@ protected:
 
 	tie(sid, fid, tid, state, data) = unpack<S2M_FT_STATUS_UPDATE>(body());
 
-        if (duplicate())
+        if (duplicate()) {
+          VLOG(1) << "Received a duplicate status update for tid " << tid
+		     << ", status = " << state;
           break;
+        }
         ack();
-        VLOG(1) << "FT: Received message with id: " << seq();
 
 	unordered_map <TaskID, RbReply *>::iterator it = rbReplies.find(tid);
 	if (it != rbReplies.end()) {
@@ -347,7 +353,7 @@ protected:
 
       case PROCESS_EXIT: {
 	// TODO(benh): Don't wait for a new master forever.
-	LOG(WARNING) << "Connection to master lost .. waiting for new master.";
+	VLOG(1) << "Connection to master lost .. waiting for new master.";
         break;
       }
 
