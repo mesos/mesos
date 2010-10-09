@@ -27,6 +27,8 @@ def parse_args():
       help="Number of slaves to launch (default: 1)")
   parser.add_option("-k", "--key-pair",
       help="Key pair to use on instances")
+  parser.add_option("-p", "--public-keys",
+      help="Additional public keys to be installed on the masters and the slaves")
   parser.add_option("-i", "--identity-file", 
       help="SSH private key file to use for logging into instances")
   parser.add_option("-t", "--instance-type", default="m1.large",
@@ -268,6 +270,19 @@ def setup_cluster(conn, master_res, slave_res, zoo_res, opts, deploy_ssh_key):
   print "Done!"
 
 
+def add_keys(conn, master_res, slave_res, opts):
+  print "Deploying an additional SSH public key"
+  public_key_fname = opts.public_keys
+  f = open(public_key_fname)
+  public_keys = "".join(f.readlines())
+  for i in master_res.instances:
+    master = i.public_dns_name
+    ssh(master, opts, "echo \"%s\" >> ~/.ssh/authorized_keys" % public_keys)
+  for i in slave_res.instances:
+    slave = i.public_dns_name
+    ssh(slave, opts, "echo \"%s\" >> ~/.ssh/authorized_keys" % public_keys)
+  print "Done!"
+
 # Wait for a whole cluster (masters, slaves and ZooKeeper) to start up
 def wait_for_cluster(conn, master_res, slave_res, zoo_res):
   print "Waiting for instances to start up..."
@@ -396,6 +411,11 @@ def main():
         print "Terminating zoo..."
         for inst in zoo_res.instances:
           inst.terminate()
+
+  elif action == "add-keys":
+    (master_res, slave_res, zoo_res) = get_existing_cluster(
+        conn, opts, cluster_name)
+    add_keys(conn, master_res, slave_res, opts)
 
   elif action == "login":
     (master_res, slave_res, zoo_res) = get_existing_cluster(
