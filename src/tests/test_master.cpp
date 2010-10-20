@@ -75,7 +75,7 @@ public:
 TEST(MasterTest, NoopFrameworkWithOneSlave)
 {
   ASSERT_TRUE(GTEST_IS_THREADSAFE);
-  PID master = local::launch(1, 2, 1 * Gigabyte, false, false);
+  PID master = local::launch(1, 2, 1 * Gigabyte, false, false, false);
   NoopScheduler sched(1);
   MesosSchedulerDriver driver(&sched, master);
   driver.run();
@@ -88,7 +88,7 @@ TEST(MasterTest, NoopFrameworkWithOneSlave)
 TEST(MasterTest, NoopFrameworkWithMultipleSlaves)
 {
   ASSERT_TRUE(GTEST_IS_THREADSAFE);
-  PID master = local::launch(10, 2, 1 * Gigabyte, false, false);
+  PID master = local::launch(10, 2, 1 * Gigabyte, false, false, false);
   NoopScheduler sched(10);
   MesosSchedulerDriver driver(&sched, master);
   driver.run();
@@ -132,7 +132,7 @@ public:
 TEST(MasterTest, DuplicateTaskIdsInResponse)
 {
   ASSERT_TRUE(GTEST_IS_THREADSAFE);
-  PID master = local::launch(1, 3, 3 * Gigabyte, false, false);
+  PID master = local::launch(1, 3, 3 * Gigabyte, false, false, false);
   vector<TaskDescription> tasks;
   map<string, string> params;
   params["cpus"] = "1";
@@ -151,7 +151,7 @@ TEST(MasterTest, DuplicateTaskIdsInResponse)
 TEST(MasterTest, TooMuchMemoryInTask)
 {
   ASSERT_TRUE(GTEST_IS_THREADSAFE);
-  PID master = local::launch(1, 3, 3 * Gigabyte, false, false);
+  PID master = local::launch(1, 3, 3 * Gigabyte, false, false, false);
   vector<TaskDescription> tasks;
   map<string, string> params;
   params["cpus"] = "1";
@@ -168,7 +168,7 @@ TEST(MasterTest, TooMuchMemoryInTask)
 TEST(MasterTest, TooMuchCpuInTask)
 {
   ASSERT_TRUE(GTEST_IS_THREADSAFE);
-  PID master = local::launch(1, 3, 3 * Gigabyte, false, false);
+  PID master = local::launch(1, 3, 3 * Gigabyte, false, false, false);
   vector<TaskDescription> tasks;
   map<string, string> params;
   params["cpus"] = "4";
@@ -185,7 +185,7 @@ TEST(MasterTest, TooMuchCpuInTask)
 TEST(MasterTest, TooLittleCpuInTask)
 {
   ASSERT_TRUE(GTEST_IS_THREADSAFE);
-  PID master = local::launch(1, 3, 3 * Gigabyte, false, false);
+  PID master = local::launch(1, 3, 3 * Gigabyte, false, false, false);
   vector<TaskDescription> tasks;
   map<string, string> params;
   params["cpus"] = "0";
@@ -202,7 +202,7 @@ TEST(MasterTest, TooLittleCpuInTask)
 TEST(MasterTest, TooLittleMemoryInTask)
 {
   ASSERT_TRUE(GTEST_IS_THREADSAFE);
-  PID master = local::launch(1, 3, 3 * Gigabyte, false, false);
+  PID master = local::launch(1, 3, 3 * Gigabyte, false, false, false);
   vector<TaskDescription> tasks;
   map<string, string> params;
   params["cpus"] = "1";
@@ -219,7 +219,7 @@ TEST(MasterTest, TooLittleMemoryInTask)
 TEST(MasterTest, TooMuchMemoryAcrossTasks)
 {
   ASSERT_TRUE(GTEST_IS_THREADSAFE);
-  PID master = local::launch(1, 3, 3 * Gigabyte, false, false);
+  PID master = local::launch(1, 3, 3 * Gigabyte, false, false, false);
   vector<TaskDescription> tasks;
   map<string, string> params;
   params["cpus"] = "1";
@@ -237,7 +237,7 @@ TEST(MasterTest, TooMuchMemoryAcrossTasks)
 TEST(MasterTest, TooMuchCpuAcrossTasks)
 {
   ASSERT_TRUE(GTEST_IS_THREADSAFE);
-  PID master = local::launch(1, 3, 3 * Gigabyte, false, false);
+  PID master = local::launch(1, 3, 3 * Gigabyte, false, false, false);
   vector<TaskDescription> tasks;
   map<string, string> params;
   params["cpus"] = "2";
@@ -255,7 +255,7 @@ TEST(MasterTest, TooMuchCpuAcrossTasks)
 TEST(MasterTest, ResourcesReofferedAfterReject)
 {
   ASSERT_TRUE(GTEST_IS_THREADSAFE);
-  PID master = local::launch(10, 2, 1 * Gigabyte, false, false);
+  PID master = local::launch(10, 2, 1 * Gigabyte, false, false, false);
 
   NoopScheduler sched1(10);
   MesosSchedulerDriver driver1(&sched1, master);
@@ -276,7 +276,7 @@ TEST(MasterTest, ResourcesReofferedAfterReject)
 TEST(MasterTest, ResourcesReofferedAfterBadResponse)
 {
   ASSERT_TRUE(GTEST_IS_THREADSAFE);
-  PID master = local::launch(1, 2, 1 * Gigabyte, false, false);
+  PID master = local::launch(1, 2, 1 * Gigabyte, false, false, false);
 
   vector<TaskDescription> tasks;
   map<string, string> params;
@@ -414,7 +414,7 @@ TEST(MasterTest, SchedulerFailover)
 {
   ASSERT_TRUE(GTEST_IS_THREADSAFE);
 
-  PID master = local::launch(1, 2, 1 * Gigabyte, false, false);
+  PID master = local::launch(1, 2, 1 * Gigabyte, false, false, false);
 
   FailoverScheduler failoverSched;
   FailingScheduler failingSched(&failoverSched, master);
@@ -548,7 +548,7 @@ TEST(MasterTest, SlavePartitioned)
 
   ProcessClock::pause();
 
-  PID master = local::launch(1, 2, 1 * Gigabyte, false, false);
+  PID master = local::launch(1, 2, 1 * Gigabyte, false, false, false);
 
   SlavePartitionedScheduler sched;
   MesosSchedulerDriver driver(&sched, master);
