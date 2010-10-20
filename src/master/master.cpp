@@ -2,6 +2,8 @@
 
 #include <glog/logging.h>
 
+#include "common/date_utils.hpp"
+
 #include "allocator.hpp"
 #include "allocator_factory.hpp"
 #include "master.hpp"
@@ -114,15 +116,14 @@ public:
 
 
 Master::Master()
-  : nextFrameworkId(0), nextSlaveId(0), nextSlotOfferId(0), masterId(0)
+  : nextFrameworkId(0), nextSlaveId(0), nextSlotOfferId(0)
 {
   allocatorType = "simple";
 }
 
 
 Master::Master(const Params& conf_)
-  : conf(conf_), nextFrameworkId(0), nextSlaveId(0), nextSlotOfferId(0),
-    masterId(0)
+  : conf(conf_), nextFrameworkId(0), nextSlaveId(0), nextSlotOfferId(0)
 {
   allocatorType = conf.get("allocator", "simple");
 }
@@ -256,14 +257,15 @@ void Master::operator () ()
 {
   LOG(INFO) << "Master started at mesos://" << self();
 
-  // Don't do anything until we get an identifier.
-  while (receive() != GOT_MASTER_ID)
+  // Don't do anything until we get a master ID.
+  while (receive() != GOT_MASTER_ID) {
     LOG(INFO) << "Oops! We're dropping a message since "
               << "we haven't received an identifier yet!";  
-  string id;
-  tie(id) = unpack<GOT_MASTER_ID>(body());
-  masterId = lexical_cast<long>(id);
-  LOG(INFO) << "Master ID:" << masterId;
+  }
+  string faultToleranceId;
+  tie(faultToleranceId) = unpack<GOT_MASTER_ID>(body());
+  masterId = DateUtils::currentDate() + "-" + faultToleranceId;
+  LOG(INFO) << "Master ID: " << masterId;
 
   // Create the allocator (we do this after the constructor because it
   // leaks 'this').
@@ -463,8 +465,7 @@ void Master::operator () ()
     }
 
     case S2M_REGISTER_SLAVE: {
-      string slaveId = lexical_cast<string>(masterId) + "-"
-        + lexical_cast<string>(nextSlaveId++);
+      string slaveId = masterId + "-" + lexical_cast<string>(nextSlaveId++);
       Slave *slave = new Slave(from(), slaveId, elapsed());
       tie(slave->hostname, slave->publicDns, slave->resources) =
         unpack<S2M_REGISTER_SLAVE>(body());
@@ -485,8 +486,7 @@ void Master::operator () ()
           slave->resources, tasks) = unpack<S2M_REREGISTER_SLAVE>(body());
 
       if (slave->id == "") {
-        slave->id = lexical_cast<string>(masterId) + "-"
-          + lexical_cast<string>(nextSlaveId++);
+        slave->id = masterId + "-" + lexical_cast<string>(nextSlaveId++);
         LOG(ERROR) << "Slave re-registered without a SlaveID, "
                    << "generating a new id for it.";
       }
@@ -762,8 +762,7 @@ void Master::operator () ()
 OfferID Master::makeOffer(Framework *framework,
                           const vector<SlaveResources>& resources)
 {
-  OfferID oid = lexical_cast<string>(masterId) + "-" 
-    + lexical_cast<string>(nextSlotOfferId++);
+  OfferID oid = masterId + "-" + lexical_cast<string>(nextSlotOfferId++);
 
   SlotOffer *offer = new SlotOffer(oid, framework->id, resources);
   slotOffers[offer->id] = offer;
@@ -1118,21 +1117,14 @@ Allocator* Master::createAllocator()
 }
 
 
-// Create a new framework ID. We format the ID as YYYYMMDDhhmm-master-fw,
-// where the first part is the submission date and submission time, master
-// is ID of the master (emphemeral ID from ZooKeeper if ZK is used), and
-// fw is the ID of the framework within the master (an increasing integer).
+// Create a new framework ID. We format the ID as MASTERID-FWID, where
+// MASTERID is the ID of the master (launch date plus fault tolerant ID)
+// and FWID is an increasing integer.
 FrameworkID Master::newFrameworkId()
 {
-  time_t rawtime;
-  struct tm* timeinfo;
-  time(&rawtime);
-  timeinfo = localtime(&rawtime);
-  char timestr[32];
-  strftime(timestr, sizeof(timestr), "%Y%m%d%H%M", timeinfo);
   int fwId = nextFrameworkId++;
   ostringstream oss;
-  oss << timestr << "-" << masterId << "-" << setw(4) << setfill('0') << fwId;
+  oss << masterId << "-" << setw(4) << setfill('0') << fwId;
   return oss.str();
 }
 
