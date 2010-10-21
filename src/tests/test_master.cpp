@@ -5,6 +5,8 @@
 #include <mesos_exec.hpp>
 #include <mesos_sched.hpp>
 
+#include "event_history/event_history.hpp"
+
 #include "local/local.hpp"
 
 #include "master/master.hpp"
@@ -21,12 +23,12 @@ using boost::lexical_cast;
 using namespace mesos;
 using namespace mesos::internal;
 
+using mesos::internal::eventhistory::EventLogger;
 using mesos::internal::master::Master;
 using mesos::internal::slave::Slave;
 using mesos::internal::slave::Framework;
 using mesos::internal::slave::IsolationModule;
 using mesos::internal::slave::ProcessBasedIsolationModule;
-
 
 class NoopScheduler : public Scheduler
 {
@@ -331,7 +333,8 @@ TEST(MasterTest, SlaveLost)
 {
   ASSERT_TRUE(GTEST_IS_THREADSAFE);
 
-  Master m;
+  EventLogger el;
+  Master m(&el);
   PID master = Process::spawn(&m);
 
   ProcessBasedIsolationModule isolationModule;
@@ -484,7 +487,8 @@ TEST(MasterTest, OfferRescinded)
   OfferReplyMessageFilter filter;
   Process::filter(&filter);
 
-  Master m;
+  EventLogger el;
+  Master m(&el);
   PID master = Process::spawn(&m);
 
   ProcessBasedIsolationModule isolationModule;
@@ -663,7 +667,8 @@ TEST(MasterTest, TaskRunning)
 {
   ASSERT_TRUE(GTEST_IS_THREADSAFE);
 
-  Master m;
+  EventLogger el;
+  Master m(&el);
   PID master = Process::spawn(&m);
 
   TaskRunningExecutor exec;
@@ -744,7 +749,8 @@ TEST(MasterTest, SchedulerFailoverStatusUpdate)
 
   ProcessClock::pause();
 
-  Master m;
+  EventLogger el;
+  Master m(&el);
   PID master = Process::spawn(&m);
 
   TaskRunningExecutor exec;
@@ -883,7 +889,8 @@ TEST(MasterTest, FrameworkMessages)
 {
   ASSERT_TRUE(GTEST_IS_THREADSAFE);
 
-  Master m;
+  EventLogger el;
+  Master m(&el);
   PID master = Process::spawn(&m);
 
   FrameworkMessageExecutor exec;
@@ -973,7 +980,8 @@ TEST(MasterTest, SchedulerFailoverFrameworkMessage)
 {
   ASSERT_TRUE(GTEST_IS_THREADSAFE);
 
-  Master m;
+  EventLogger el;
+  Master m(&el);
   PID master = Process::spawn(&m);
 
   SchedulerFailoverFrameworkMessageExecutor exec;

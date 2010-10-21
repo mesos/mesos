@@ -33,6 +33,8 @@
 
 #include "detector/detector.hpp"
 
+#include "event_history/event_history.hpp"
+
 #include "messaging/messages.hpp"
 
 
@@ -50,6 +52,7 @@ using boost::unordered_set;
 
 using namespace mesos;
 using namespace mesos::internal;
+using mesos::internal::eventhistory::EventLogger;
 
 
 // Maximum number of slot offers to have outstanding for each framework.
@@ -238,7 +241,7 @@ struct Slave
   SlaveID id;
   bool active; // Turns false when slave is being removed
   string hostname;
-  string publicDns;
+  string webUIUrl;
   double connectTime;
   double lastHeartbeat;
   
@@ -310,6 +313,7 @@ class Master : public MesosProcess
 {
 protected:
   Params conf;
+  EventLogger* evLogger;
 
   unordered_map<FrameworkID, Framework *> frameworks;
   unordered_map<SlaveID, Slave *> slaves;
@@ -329,9 +333,9 @@ protected:
                     // will be this master's ZooKeeper ephemeral id
 
 public:
-  Master();
+  Master(EventLogger* evLogger);
 
-  Master(const Params& conf);
+  Master(const Params& conf, EventLogger* evLogger);
   
   ~Master();
 
