@@ -59,8 +59,11 @@ void registerOptions(Configurator* conf)
 }
 
 
-PID launch(int numSlaves, int32_t cpus, int64_t mem,
-	   bool initLogging, bool quiet)
+PID launch(int numSlaves,
+           int32_t cpus,
+           int64_t mem,
+           bool initLogging,
+           bool quiet)
 {
   Params conf;
   conf.set("slaves", numSlaves);

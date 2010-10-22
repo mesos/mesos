@@ -329,8 +329,9 @@ protected:
   string allocatorType;
   Allocator *allocator;
 
-  int64_t masterId; // Used to differentiate masters in fault tolerant mode;
-                    // will be this master's ZooKeeper ephemeral id
+  string masterId; // Contains the date the master was launched and its fault
+                   // tolerance ID (e.g. ephemeral ID returned from ZooKeeper).
+                   // Used in framework and slave IDs created by this master.
 
 public:
   Master(EventLogger* evLogger);
@@ -404,6 +405,8 @@ protected:
   virtual Allocator* createAllocator();
 
   FrameworkID newFrameworkId();
+
+  string currentDate();
 };
 
 
