@@ -31,12 +31,12 @@ if [ "x$MESOS_URL" == "x" ]; then
   MESOS_URL="mesos://1@$FIRST_MASTER:5050"
 fi
 
-# Options for SSH
-SSH_OPTS="-o StrictHostKeyChecking=no -o ConnectTimeout=2"
+# Read the deploy_with_sudo config setting to determine whether to run
+# slave daemons as sudo.
+DEPLOY_WITH_SUDO=`$MESOS_HOME/bin/mesos-getconf deploy_with_sudo`
 
-# Set LIBPROCESS_IP to change the address to which the master and slaves bind
-# if the default address chosen by the system is not the right one. We include
-# two examples below that try to resolve the IP from the node's hostname.
-#LIBPROCESS_IP="hostname -i" #works on older versions of hostname, not on OS X
-#FULL_IP="hostname --all-ip-addresses" # newer versions of hostname only
-#export LIBPROCESS_IP=`echo $FULL_IP|sed 's/\([^ ]*\) .*/\1/'`
+# Read any user-configurable environment variables set in the deploy-env.sh file
+# in MESOS_HOME/conf, such as SSH options.
+if [ -e $MESOS_HOME/conf/deploy-env.sh ]; then
+  . $MESOS_HOME/conf/deploy-env.sh
+fi
