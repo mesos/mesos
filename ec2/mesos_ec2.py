@@ -267,6 +267,7 @@ def setup_cluster(conn, master_res, slave_res, zoo_res, opts, deploy_ssh_key):
   print "Running setup on master..."
   ssh(master, opts, "chmod u+x mesos-ec2/setup")
   ssh(master, opts, "mesos-ec2/setup %s %s %s" % (opts.os, opts.download, opts.branch))
+  ssh(master, opts, 'export MESOS_HOME=~/mesos/')
   print "Done!"
 
 
