@@ -7,7 +7,7 @@
 
 #include "common/date_utils.hpp"
 
-#include "event_history/event_history.hpp"
+#include "event_history/event_logger.hpp"
 
 #include "local/local.hpp"
 
