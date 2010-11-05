@@ -1,9 +1,9 @@
-#include <boost/lexical_cast.hpp>
-
 #include <gmock/gmock.h>
 
 #include <mesos_exec.hpp>
 #include <mesos_sched.hpp>
+
+#include <boost/lexical_cast.hpp>
 
 #include "local/local.hpp"
 
@@ -13,8 +13,11 @@
 #include "slave/process_based_isolation_module.hpp"
 #include "slave/slave.hpp"
 
+#include "testing_gmock.hpp"
+
 using namespace mesos;
 using namespace mesos::internal;
+using namespace mesos::internal::test;
 
 using boost::lexical_cast;
 
@@ -25,6 +28,7 @@ using mesos::internal::slave::IsolationModule;
 using mesos::internal::slave::ProcessBasedIsolationModule;
 
 using std::string;
+using std::map;
 using std::vector;
 
 using testing::_;
@@ -39,80 +43,6 @@ using testing::Return;
 using testing::SaveArg;
 using testing::Sequence;
 using testing::StrEq;
-
-
-class MockScheduler : public Scheduler
-{
-public:
-  MOCK_METHOD1(getFrameworkName, std::string(SchedulerDriver*));
-  MOCK_METHOD1(getExecutorInfo, ExecutorInfo(SchedulerDriver*));
-  MOCK_METHOD2(registered, void(SchedulerDriver*, FrameworkID));
-  MOCK_METHOD3(resourceOffer, void(SchedulerDriver*, OfferID,
-                                   const std::vector<SlaveOffer>&));
-  MOCK_METHOD2(offerRescinded, void(SchedulerDriver*, OfferID));
-  MOCK_METHOD2(statusUpdate, void(SchedulerDriver*, const TaskStatus&));
-  MOCK_METHOD2(frameworkMessage, void(SchedulerDriver*,
-                                      const FrameworkMessage&));
-  MOCK_METHOD2(slaveLost, void(SchedulerDriver*, SlaveID));
-  MOCK_METHOD3(error, void(SchedulerDriver*, int, const std::string&));
-};
-
-
-class MockExecutor : public Executor
-{
-public:
-  MOCK_METHOD2(init, void(ExecutorDriver*, const ExecutorArgs&));
-  MOCK_METHOD2(launchTask, void(ExecutorDriver*, const TaskDescription&));
-  MOCK_METHOD2(killTask, void(ExecutorDriver*, TaskID));
-  MOCK_METHOD2(frameworkMessage, void(ExecutorDriver*, const FrameworkMessage&));
-  MOCK_METHOD1(shutdown, void(ExecutorDriver*));
-  MOCK_METHOD3(error, void(ExecutorDriver*, int, const std::string&));
-};
-
-
-class MockFilter : public MessageFilter
-{
- public:
-  MOCK_METHOD1(filter, bool(struct msg *));
-};
-
-
-struct trigger
-{
-  trigger() : value(false) {}
-  bool value;
-};
-
-
-MATCHER_P3(MsgMatcher, id, from, to, "")
-{
-  return (testing::Matcher<MSGID>(id).Matches(arg->id) &&
-          testing::Matcher<PID>(from).Matches(arg->from) &&
-          testing::Matcher<PID>(to).Matches(arg->to));
-}
-
-
-ACTION_P(Trigger, trigger) { trigger->value = true; }
-
-
-#define EXPECT_MSG(filter, id, from, to)                \
-  EXPECT_CALL(filter, filter(MsgMatcher(id, from, to)))
-
-
-#define WAIT_UNTIL(trigger)                                             \
-  do {                                                                  \
-    int sleeps = 0;                                                     \
-    do {                                                                \
-      __sync_synchronize();                                             \
-      if (trigger.value)                                                \
-        break;                                                          \
-      usleep(10);                                                       \
-      if (sleeps++ >= 100000) {                                         \
-        ADD_FAILURE();                                                  \
-        break;                                                          \
-      }                                                                 \
-    } while (true);                                                     \
-  } while (false)
 
 
 class LocalIsolationModule : public IsolationModule
@@ -154,7 +84,7 @@ public:
 };
 
 
-TEST(MasterTest, ResourceOfferForMultipleSlaves)
+TEST(MasterTest, ResourceOfferWithMultipleSlaves)
 {
   ASSERT_TRUE(GTEST_IS_THREADSAFE);
 
@@ -186,7 +116,9 @@ TEST(MasterTest, ResourceOfferForMultipleSlaves)
 
   WAIT_UNTIL(resourceOfferCall);
 
-  ASSERT_GE(10, offers.size());
+  EXPECT_NE(0, offers.size());
+  EXPECT_GE(10, offers.size());
+
   EXPECT_EQ("2", offers[0].params["cpus"]);
   EXPECT_EQ("1024", offers[0].params["mem"]);
 
@@ -194,161 +126,6 @@ TEST(MasterTest, ResourceOfferForMultipleSlaves)
   driver.join();
 
   local::shutdown();
-}
-
-
-class ReplyToOfferErrorTest : public testing::Test
-{
-protected:
-  ReplyToOfferErrorTest() : driver(NULL)
-  {
-    PID master = local::launch(1, 3, 3 * Gigabyte, false, false);
-    driver = new MesosSchedulerDriver(&sched, master);
-  }
-
-  virtual ~ReplyToOfferErrorTest()
-  {
-    delete driver;
-  }
-
-  virtual void SetUp()
-  {
-    ASSERT_TRUE(GTEST_IS_THREADSAFE);
-
-    trigger resourceOfferCall;
-
-    EXPECT_CALL(sched, getFrameworkName(driver))
-      .WillOnce(Return(""));
-
-    EXPECT_CALL(sched, getExecutorInfo(driver))
-      .WillOnce(Return(ExecutorInfo("noexecutor", "")));
-
-    EXPECT_CALL(sched, registered(driver, _))
-      .Times(1);
-
-    EXPECT_CALL(sched, resourceOffer(driver, _, ElementsAre(_)))
-      .WillOnce(DoAll(SaveArg<1>(&offerId), SaveArg<2>(&offers),
-                      Trigger(&resourceOfferCall)));
-
-    driver->start();
-
-    WAIT_UNTIL(resourceOfferCall);
-
-    ASSERT_GE(1, offers.size());
-    EXPECT_EQ("3", offers[0].params["cpus"]);
-    EXPECT_EQ("3072", offers[0].params["mem"]);
-  }
-
-  virtual void TearDown()
-  {
-    ASSERT_NE("", message);
-
-    trigger errorCall;
-
-    EXPECT_CALL(sched, error(driver, _, message))
-      .WillOnce(Trigger(&errorCall));
-
-    EXPECT_CALL(sched, offerRescinded(driver, offerId))
-      .Times(AtMost(1));
-
-    driver->replyToOffer(offerId, tasks, map<string, string>());
-
-    WAIT_UNTIL(errorCall);
-
-    driver->stop();
-    driver->join();
-
-    local::shutdown();
-  }
-
-  MockScheduler sched;
-  MesosSchedulerDriver *driver;
-
-  OfferID offerId;
-  vector<SlaveOffer> offers;
-
-  map<string, string> params;
-  vector<TaskDescription> tasks;
-  string message;
-};
-
-
-TEST_F(ReplyToOfferErrorTest, DuplicateTaskIdsInResponse)
-{
-  params["cpus"] = "1";
-  params["mem"] = lexical_cast<string>(1 * Gigabyte);
-
-  tasks.push_back(TaskDescription(1, offers[0].slaveId, "", params, bytes()));
-  tasks.push_back(TaskDescription(2, offers[0].slaveId, "", params, bytes()));
-  tasks.push_back(TaskDescription(1, offers[0].slaveId, "", params, bytes()));
-
-  message = "Duplicate task ID: 1";
-}
-
-
-TEST_F(ReplyToOfferErrorTest, TooMuchMemoryInTask)
-{
-  params["cpus"] = "1";
-  params["mem"] = lexical_cast<string>(4 * Gigabyte);
-
-  tasks.push_back(TaskDescription(1, offers[0].slaveId, "", params, bytes()));
-
-  message = "Too many resources accepted";
-}
-
-
-TEST_F(ReplyToOfferErrorTest, TooMuchCpuInTask)
-{
-  params["cpus"] = "4";
-  params["mem"] = lexical_cast<string>(1 * Gigabyte);
-
-  tasks.push_back(TaskDescription(1, offers[0].slaveId, "", params, bytes()));
-  message = "Too many resources accepted";
-}
-
-
-TEST_F(ReplyToOfferErrorTest, TooLittleCpuInTask)
-{
-  params["cpus"] = "0";
-  params["mem"] = lexical_cast<string>(1 * Gigabyte);
-
-  tasks.push_back(TaskDescription(1, offers[0].slaveId, "", params, bytes()));
-  message = "Invalid task size: <0 CPUs, 1024 MEM>";
-}
-
-
-TEST_F(ReplyToOfferErrorTest, TooLittleMemoryInTask)
-{
-  params["cpus"] = "1";
-  params["mem"] = "1";
-
-  tasks.push_back(TaskDescription(1, offers[0].slaveId, "", params, bytes()));
-
-  message = "Invalid task size: <1 CPUs, 1 MEM>";
-}
-
-
-TEST_F(ReplyToOfferErrorTest, TooMuchMemoryAcrossTasks)
-{
-  params["cpus"] = "1";
-  params["mem"] = lexical_cast<string>(2 * Gigabyte);
-
-  tasks.push_back(TaskDescription(1, offers[0].slaveId, "", params, bytes()));
-  tasks.push_back(TaskDescription(2, offers[0].slaveId, "", params, bytes()));
-
-  message = "Too many resources accepted";
-}
-
-
-TEST_F(ReplyToOfferErrorTest, TooMuchCpuAcrossTasks)
-{
-  params["cpus"] = "2";
-  params["mem"] = lexical_cast<string>(1 * Gigabyte);
-
-  tasks.push_back(TaskDescription(1, offers[0].slaveId, "", params, bytes()));
-  tasks.push_back(TaskDescription(2, offers[0].slaveId, "", params, bytes()));
-
-  message = "Too many resources accepted";
 }
 
 
@@ -448,7 +225,7 @@ TEST(MasterTest, ResourcesReofferedAfterBadResponse)
 
   WAIT_UNTIL(sched1ResourceOfferCall);
 
-  ASSERT_GE(1, offers.size());
+  EXPECT_EQ(1, offers.size());
 
   map<string, string> params;
   params["cpus"] = "0";
@@ -541,7 +318,7 @@ TEST(MasterTest, SlaveLost)
 
   WAIT_UNTIL(resourceOfferCall);
 
-  ASSERT_GE(1, offers.size());
+  EXPECT_EQ(1, offers.size());
 
   trigger offerRescindedCall, slaveLostCall;
 
@@ -754,7 +531,7 @@ TEST(MasterTest, TaskRunning)
 
   WAIT_UNTIL(resourceOfferCall);
 
-  ASSERT_GE(1, offers.size());
+  EXPECT_EQ(1, offers.size());
 
   vector<TaskDescription> tasks;
   tasks.push_back(TaskDescription(1, offers[0].slaveId, "", offers[0].params, ""));
@@ -850,7 +627,7 @@ TEST(MasterTest, SchedulerFailoverStatusUpdate)
 
   WAIT_UNTIL(resourceOfferCall);
 
-  ASSERT_GE(1, offers.size());
+  EXPECT_EQ(1, offers.size());
 
   vector<TaskDescription> tasks;
   tasks.push_back(TaskDescription(1, offers[0].slaveId, "", offers[0].params, ""));
@@ -905,6 +682,8 @@ TEST(MasterTest, SchedulerFailoverStatusUpdate)
 
   ProcessClock::resume();
 }
+
+
 
 
 TEST(MasterTest, FrameworkMessages)
@@ -979,7 +758,7 @@ TEST(MasterTest, FrameworkMessages)
 
   WAIT_UNTIL(resourceOfferCall);
 
-  ASSERT_GE(1, offers.size());
+  EXPECT_EQ(1, offers.size());
 
   vector<TaskDescription> tasks;
   tasks.push_back(TaskDescription(1, offers[0].slaveId, "", offers[0].params, ""));
@@ -1013,3 +792,5 @@ TEST(MasterTest, FrameworkMessages)
   MesosProcess::post(master, pack<M2M_SHUTDOWN>());
   Process::wait(master);
 }
+
+
