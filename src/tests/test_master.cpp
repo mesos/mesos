@@ -225,7 +225,7 @@ TEST(MasterTest, ResourcesReofferedAfterBadResponse)
 
   WAIT_UNTIL(sched1ResourceOfferCall);
 
-  EXPECT_EQ(1, offers.size());
+  EXPECT_NE(0, offers.size());
 
   map<string, string> params;
   params["cpus"] = "0";
@@ -318,7 +318,7 @@ TEST(MasterTest, SlaveLost)
 
   WAIT_UNTIL(resourceOfferCall);
 
-  EXPECT_EQ(1, offers.size());
+  EXPECT_NE(0, offers.size());
 
   trigger offerRescindedCall, slaveLostCall;
 
@@ -531,7 +531,7 @@ TEST(MasterTest, TaskRunning)
 
   WAIT_UNTIL(resourceOfferCall);
 
-  EXPECT_EQ(1, offers.size());
+  EXPECT_NE(0, offers.size());
 
   vector<TaskDescription> tasks;
   tasks.push_back(TaskDescription(1, offers[0].slaveId, "", offers[0].params, ""));
@@ -596,7 +596,7 @@ TEST(MasterTest, SchedulerFailoverStatusUpdate)
   OfferID offerId;
   vector<SlaveOffer> offers;
 
-  trigger resourceOfferCall;
+  trigger resourceOfferCall, statusUpdateMsg;
 
   EXPECT_CALL(failingSched, getFrameworkName(&failingDriver))
     .WillOnce(Return(""));
@@ -611,13 +611,11 @@ TEST(MasterTest, SchedulerFailoverStatusUpdate)
     .WillOnce(DoAll(SaveArg<1>(&offerId), SaveArg<2>(&offers),
                     Trigger(&resourceOfferCall)));
 
-  EXPECT_CALL(failingSched, error(&failingDriver, _, "Framework failover"))
-    .Times(1);
-
   EXPECT_CALL(failingSched, statusUpdate(&failingDriver, _))
     .Times(0);
 
-  trigger statusUpdateMsg;
+  EXPECT_CALL(failingSched, error(&failingDriver, _, "Framework failover"))
+    .Times(1);
 
   EXPECT_MSG(filter, Eq(S2M_FT_STATUS_UPDATE), _, Ne(master))
     .WillOnce(DoAll(Trigger(&statusUpdateMsg), Return(true)))
@@ -627,7 +625,7 @@ TEST(MasterTest, SchedulerFailoverStatusUpdate)
 
   WAIT_UNTIL(resourceOfferCall);
 
-  EXPECT_EQ(1, offers.size());
+  EXPECT_NE(0, offers.size());
 
   vector<TaskDescription> tasks;
   tasks.push_back(TaskDescription(1, offers[0].slaveId, "", offers[0].params, ""));
@@ -684,9 +682,7 @@ TEST(MasterTest, SchedulerFailoverStatusUpdate)
 }
 
 
-
-
-TEST(MasterTest, FrameworkMessages)
+TEST(MasterTest, FrameworkMessage)
 {
   ASSERT_TRUE(GTEST_IS_THREADSAFE);
 
@@ -758,7 +754,7 @@ TEST(MasterTest, FrameworkMessages)
 
   WAIT_UNTIL(resourceOfferCall);
 
-  EXPECT_EQ(1, offers.size());
+  EXPECT_NE(0, offers.size());
 
   vector<TaskDescription> tasks;
   tasks.push_back(TaskDescription(1, offers[0].slaveId, "", offers[0].params, ""));
@@ -794,3 +790,111 @@ TEST(MasterTest, FrameworkMessages)
 }
 
 
+TEST(MasterTest, SchedulerFailoverFrameworkMessage)
+{
+  ASSERT_TRUE(GTEST_IS_THREADSAFE);
+
+  MockExecutor exec;
+
+  ExecutorDriver *execDriver;
+
+  EXPECT_CALL(exec, init(_, _))
+    .WillOnce(SaveArg<0>(&execDriver));
+
+  EXPECT_CALL(exec, launchTask(_, _))
+    .Times(1);
+
+  EXPECT_CALL(exec, shutdown(_))
+    .Times(1);
+
+  LocalIsolationModule isolationModule(&exec);
+
+  Master m;
+  PID master = Process::spawn(&m);
+
+  Slave s(Resources(2, 1 * Gigabyte), true, &isolationModule);
+  PID slave = Process::spawn(&s);
+
+  BasicMasterDetector detector(master, slave, true);
+
+  MockScheduler sched1;
+  MesosSchedulerDriver driver1(&sched1, master);
+
+  FrameworkID frameworkId;
+  OfferID offerId;
+  vector<SlaveOffer> offers;
+  TaskStatus status;
+
+  trigger sched1ResourceOfferCall, sched1StatusUpdateCall;
+
+  EXPECT_CALL(sched1, getFrameworkName(&driver1))
+    .WillOnce(Return(""));
+
+  EXPECT_CALL(sched1, getExecutorInfo(&driver1))
+    .WillOnce(Return(ExecutorInfo("noexecutor", "")));
+
+  EXPECT_CALL(sched1, registered(&driver1, _))
+    .WillOnce(SaveArg<1>(&frameworkId));
+
+  EXPECT_CALL(sched1, statusUpdate(&driver1, _))
+    .WillOnce(DoAll(SaveArg<1>(&status), Trigger(&sched1StatusUpdateCall)));
+
+  EXPECT_CALL(sched1, resourceOffer(&driver1, _, ElementsAre(_)))
+    .WillOnce(DoAll(SaveArg<1>(&offerId), SaveArg<2>(&offers),
+                    Trigger(&sched1ResourceOfferCall)));
+
+  EXPECT_CALL(sched1, error(&driver1, _, "Framework failover"))
+    .Times(1);
+
+  driver1.start();
+
+  WAIT_UNTIL(sched1ResourceOfferCall);
+
+  EXPECT_NE(0, offers.size());
+
+  vector<TaskDescription> tasks;
+  tasks.push_back(TaskDescription(1, offers[0].slaveId, "", offers[0].params, ""));
+
+  driver1.replyToOffer(offerId, tasks, map<string, string>());
+
+  WAIT_UNTIL(sched1StatusUpdateCall);
+
+  EXPECT_EQ(TASK_RUNNING, status.state);
+
+  MockScheduler sched2;
+  MesosSchedulerDriver driver2(&sched2, master, frameworkId);
+
+  trigger sched2RegisteredCall, sched2FrameworkMessageCall;
+
+  EXPECT_CALL(sched2, getFrameworkName(&driver2))
+    .WillOnce(Return(""));
+
+  EXPECT_CALL(sched2, getExecutorInfo(&driver2))
+    .WillOnce(Return(ExecutorInfo("noexecutor", "")));
+
+  EXPECT_CALL(sched2, registered(&driver2, frameworkId))
+    .WillOnce(Trigger(&sched2RegisteredCall));
+
+  EXPECT_CALL(sched2, frameworkMessage(&driver2, _))
+    .WillOnce(Trigger(&sched2FrameworkMessageCall));
+
+  driver2.start();
+
+  WAIT_UNTIL(sched2RegisteredCall);
+
+  execDriver->sendFrameworkMessage(FrameworkMessage());
+
+  WAIT_UNTIL(sched2FrameworkMessageCall);
+
+  driver1.stop();
+  driver2.stop();
+
+  driver1.join();
+  driver2.join();
+
+  MesosProcess::post(slave, pack<S2S_SHUTDOWN>());
+  Process::wait(slave);
+
+  MesosProcess::post(master, pack<M2M_SHUTDOWN>());
+  Process::wait(master);
+}

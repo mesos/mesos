@@ -104,8 +104,11 @@ void Slave::registerOptions(Configurator* conf)
   conf->addOption<bool>("switch_user", 
                         "Whether to run tasks as the user who\n"
                         "submitted them rather than the user running\n"
-                        "the slave (requires setuid permission)\n",
+                        "the slave (requires setuid permission)",
                         true);
+   conf->addOption<string>("frameworks_home",
+                           "Directory prepended to relative executor\n"
+                           "paths (default: MESOS_HOME/frameworks)");
 }
 
 
@@ -269,8 +272,6 @@ void Slave::operator () ()
           fw->removeTask(tid);
           isolationModule->resourcesChanged(fw);
         }
-        // Report to master that the task is killed
-        send(master, pack<S2M_STATUS_UPDATE>(id, fid, tid, TASK_KILLED, ""));
         break;
       }
 
@@ -377,9 +378,13 @@ void Slave::operator () ()
         FrameworkID fid;
         FrameworkMessage message;
         tie(fid, message) = unpack<E2S_FRAMEWORK_MESSAGE>(body());
+
         Framework *framework = getFramework(fid);
         if (framework != NULL) {
-          // Set slave ID in case framework omitted it
+	  LOG(INFO) << "Sending message for framework " << fid
+		    << " to " << framework->pid;
+
+          // Set slave ID in case framework omitted it.
           message.slaveId = this->id;
           VLOG(1) << "Sending framework message to framework " << fid
                   << " with PID " << framework->pid;

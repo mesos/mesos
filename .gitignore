@@ -29,8 +29,8 @@ mesos_wrap.cpp
 mesos_wrap.h
 bin/master
 bin/slaves
-src/config.hpp
-!src/config.hpp.in
+src/config/config.hpp
+!src/config/config.hpp.in
 src/swig/java/mesos.jar
 src/webui/master/swig/master.py
 src/webui/master/swig/master_wrap.cpp
@@ -56,7 +56,7 @@ third_party/glog-0.3.1/stacktrace_unittest
 third_party/glog-0.3.1/stl_logging_unittest
 third_party/glog-0.3.1/symbolize_unittest
 third_party/glog-0.3.1/utilities_unittest
-third_party/libprocess/third_party/libev/stamp-h1
+third_party/libprocess/third_party/libev-3.8/stamp-h1
 third_party/glog-0.3.1/src/config.h
 third_party/gtest-1.5.0/configure
 third_party/gtest-1.5.0/build-aux/config.h

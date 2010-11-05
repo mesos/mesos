@@ -19,6 +19,7 @@ LIBS = @LIBS@
 OS_NAME = @OS_NAME@
 
 JAVA_HOME = @JAVA_HOME@
+JAVA_HEADERS = @JAVA_HEADERS@
 
 PYTHON_HEADERS = @PYTHON_HEADERS@
 PYTHON_LDFLAGS = @PYTHON_LDFLAGS@
@@ -123,7 +124,7 @@ SWIG_WEBUI_OBJ = $(MASTER_SWIG_WEBUI_OBJ) $(SLAVE_SWIG_WEBUI_OBJ)
 COMMON_OBJ = common/fatal.o messaging/messages.o common/lock.o		\
 	     detector/detector.o common/params.o			\
 	     detector/url_processor.o configurator/configurator.o	\
-	     common/string_utils.o common/logging.o
+	     common/string_utils.o common/logging.o common/date_utils.o
 
 ifeq ($(WITH_ZOOKEEPER),1)
   COMMON_OBJ += detector/zookeeper.o
@@ -201,7 +202,7 @@ WEBUI_FILES = $(BINDIR)/webui/bottle-0.8.3		\
               $(BINDIR)/webui/static/stylesheet.css
 
 # We copy template config files into the conf directory.
-CONF_FILES = $(CONFDIR)/mesos.conf
+CONF_FILES = $(CONFDIR)/mesos.conf $(CONFDIR)/deploy-env.sh
 
 # We copy all the deploy scripts into the bin directory.
 DEPLOY_FILES = $(DEPLOYDIR)/deploy-to-slaves             \
@@ -312,7 +313,7 @@ ifdef JAVA_HOME
 	rm -f swig/java/mesos/*
 	mkdir -p swig/java/mesos
 	$(SWIG) -c++ -java -I@top_srcdir@/include -o swig/java/mesos_wrap.cpp -outdir swig/java/mesos -package mesos @srcdir@/swig/mesos.i
-	$(CXX) $(CXXFLAGS) -I$(JAVA_HOME)/include -I$(JAVA_HOME)/include/$(OS_NAME) -shared -o $@ swig/java/mesos_wrap.cpp $(MESOS_SCHED_LIB) $(MESOS_EXEC_LIB) $(LDFLAGS) $(LIBS)
+	$(CXX) $(CXXFLAGS) -I$(JAVA_HOME)/include -I$(JAVA_HEADERS) -shared -o $@ swig/java/mesos_wrap.cpp $(MESOS_SCHED_LIB) $(MESOS_EXEC_LIB) $(LDFLAGS) $(LIBS)
 endif
 
 $(MESOS_PYTHON_LIB): @srcdir@/swig/mesos.i $(MESOS_SCHED_LIB) $(MESOS_EXEC_LIB) | $(LIBDIR)/python
@@ -331,8 +332,11 @@ endif
 $(DEPLOY_FILES): $(DEPLOYDIR)/%: @srcdir@/deploy/% | $(DEPLOYDIR)
 	cp -r $< $@
 
-$(CONFDIR)/mesos.conf: @srcdir@/conf/mesos.conf.template | $(CONFDIR)
-	cp -r $< $@
+$(CONFDIR)/mesos.conf: | @srcdir@/conf/mesos.conf.template $(CONFDIR)
+	cp -r @srcdir@/conf/mesos.conf.template $@
+
+$(CONFDIR)/deploy-env.sh: | @srcdir@/conf/deploy-env.sh.template $(CONFDIR)
+	cp -r @srcdir@/conf/deploy-env.sh.template $@
 
 test: all
 	$(MAKE) -C tests test
@@ -378,7 +382,6 @@ clean:
 	rm -f webui/slave/swig/slave.py
 	rm -f $(BINDIR)/webui/master/swig/master.py
 	rm -f $(BINDIR)/webui/master/swig/master.pc
-	rm -f $(CONF_FILES)
 	rm -f $(DEPLOY_FILES)
 	rm -f TAGS
 

@@ -114,6 +114,7 @@ ExecutorLauncher* ProcessBasedIsolationModule::createExecutorLauncher(
                               fw->user,
                               slave->getUniqueWorkDirectory(fw->id),
                               slave->self(),
+                              slave->getConf().get("frameworks_home", ""),
                               slave->getConf().get("home", ""),
                               slave->getConf().get("hadoop_home", ""),
                               !slave->local,

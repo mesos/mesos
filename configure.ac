@@ -22,7 +22,13 @@ ac_configure_args=`echo $ac_configure_args | \
                    sed -e "s/CXXFLAGS=/CXXFLAGS=-O2 -fno-strict-aliasing /"`
 ac_configure_args="$ac_configure_args --enable-shared=no --with-pic"
 
-AC_CONFIG_FILES([Makefile src/Makefile src/examples/Makefile src/tests/Makefile src/config/config.hpp])
+AC_CONFIG_FILES([Makefile
+                 src/Makefile
+                 src/examples/Makefile
+                 src/examples/java/Makefile
+                 src/examples/python/Makefile
+                 src/tests/Makefile
+                 src/config/config.hpp])
 AC_CONFIG_SUBDIRS([third_party/libprocess])
 AC_CONFIG_SUBDIRS([third_party/glog-0.3.1])
 AC_CONFIG_SUBDIRS([third_party/gmock-1.5.0])
@@ -68,6 +74,21 @@ case "${target_os}" in
 # Export OS name to Makefiles
 AC_SUBST(OS_NAME)
 
+JAVA_HEADERS=""
+AC_ARG_WITH([java-headers],
+  AC_HELP_STRING([--with-java-headers=DIR],
+                 [find Java headers in DIR (if different from JAVA_HOME/include)]),
+	         [case "$with_java_headers" in
+		    yes) 
+                      AC_MSG_ERROR([
+*** --with-java-headers requires an argument]) ;;
+		    *)
+                      JAVA_HEADERS="$withval"
+                      ;;
+	          esac],
+	         [])
+AC_SUBST(JAVA_HEADERS)
+
 JAVA_HOME=""
 HAS_JAVA="0"
 AC_ARG_WITH([java-home],
@@ -80,6 +101,9 @@ AC_ARG_WITH([java-home],
 		    *)
                       JAVA_HOME="$withval"
                       HAS_JAVA="1"
+                      if test -z "$JAVA_HEADERS"; then
+                        JAVA_HEADERS="$JAVA_HOME/include/$OS_NAME"
+                      fi
                       ;;
 	          esac],
 	         [])

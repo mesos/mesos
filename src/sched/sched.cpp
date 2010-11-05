@@ -150,7 +150,7 @@ protected:
 
     const string user(passwd->pw_name);
 
-    while(true) {
+    while (true) {
       // Rather than send a message to this process when it is time to
       // terminate, we set a flag that gets re-read. Sending a message
       // requires some sort of matching or priority reads that
@@ -171,7 +171,7 @@ protected:
       // send a message rather than have a timeout (see the comment
       // above for why sending a message will still require us to use
       // the terminate flag).
-      switch(receive(2)) {
+      switch (receive(2)) {
 
       case NEW_MASTER_DETECTED: {
 	string masterSeq;
@@ -217,8 +217,12 @@ protected:
         
 	// Save all the slave PIDs that are part of this ofer so later
 	// we can send framework messages directly.
-        foreachpair (const SlaveID &slaveId, const PID &pid, pids)
-	  savedOffers[oid][slaveId] = pid;
+        foreachpair (const SlaveID &slaveId, const PID &pid, pids) {
+          if (pid == PID())
+            VLOG(1) << "Received " << pid << " for slave " << slaveId;
+
+          savedOffers[oid][slaveId] = pid;
+        }
 
         invoke(bind(&Scheduler::resourceOffer, sched, driver, oid, ref(offs)));
         break;
@@ -254,7 +258,8 @@ protected:
         FrameworkMessage msg;
         tie(msg) = unpack<F2F_FRAMEWORK_MESSAGE>(body());
         VLOG(1) << "Asked to send framework message to slave " << msg.slaveId;
-        if (savedSlavePids.count(msg.slaveId) > 0) {
+        if (savedSlavePids.count(msg.slaveId) > 0 &&
+            savedSlavePids[msg.slaveId] != PID()) {
           VLOG(1) << "Saved slave PID is " << savedSlavePids[msg.slaveId];
           send(savedSlavePids[msg.slaveId], pack<M2S_FRAMEWORK_MESSAGE>(fid, msg));
         } else {

@@ -26,8 +26,15 @@ public class TestExceptionFramework {
     @Override
     public ExecutorInfo getExecutorInfo(SchedulerDriver d) {
       try {
+        // Get the location where test exception framework is installed, so
+        // that we can give a path to our executor. Our wrapper script
+        // (test_exception_framework) sets this in env. variable FRAMEWORK_DIR.
+        String frameworkDir = System.getenv("FRAMEWORK_DIR");
+        if (frameworkDir == null) {
+          throw new Exception("FRAMEWORK_DIR environment variable is not set");
+        }
         return new ExecutorInfo(
-            new File("./test_executor").getCanonicalPath(),
+            new File(frameworkDir, "test_executor").getCanonicalPath(),
             new byte[0]);
       } catch (Exception e) {
         e.printStackTrace();
@@ -86,9 +93,5 @@ public class TestExceptionFramework {
 
   public static void main(String[] args) throws Exception {
     new MesosSchedulerDriver(new MyScheduler(), args[0]).run();
-    // TODO: Java should just exit here, and it does so on Linux, but
-    // it doesn't on OS X. We should figure out why. It may have to do
-    // with the libprocess threads being around and not being marked
-    // as daemon threads by the JVM.
   }
 }

@@ -1278,6 +1278,11 @@ void initialize()
   if (set_nbio(s) < 0)
     fatalerror("failed to initialize (set_nbio)");
 
+  /* Allow socket reuse. */
+  int on = 1;
+  if (setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on)) < 0)
+    fatalerror("failed to initialize (setsockopt(SO_REUSEADDR) failed)");
+
   /* Set up socket. */
   struct sockaddr_in addr;
   memset(&addr, 0, sizeof(addr));
@@ -2486,6 +2491,9 @@ void Process::enqueue(struct msg *msg)
 {
   assert(msg != NULL);
 
+  // TODO(benh): Put filter inside lock statement below so that we can
+  // guarantee the order of the messages seen by a filter are the same
+  // as the order of messages seen by the process.
   synchronized(filterer) {
     if (filterer != NULL) {
       if (filterer->filter(msg)) {
@@ -2567,6 +2575,9 @@ void Process::inject(const PID &from, MSGID id, const char *data, size_t length)
   if (length > 0)
     memcpy((char *) msg + sizeof(struct msg), data, length);
 
+  // TODO(benh): Put filter inside lock statement below so that we can
+  // guarantee the order of the messages seen by a filter are the same
+  // as the order of messages seen by the process.
   synchronized(filterer) {
     if (filterer != NULL) {
       if (filterer->filter(msg)) {
