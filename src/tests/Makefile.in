@@ -30,7 +30,7 @@ ZOOKEEPER = third_party/zookeeper-3.3.1/src/c
 CFLAGS += -g
 CXXFLAGS += -g
 
-# Add source dir and build dir to CFLAGS and CXXFLAGS.
+# Add 'src' source dir and build dir to CFLAGS and CXXFLAGS.
 CFLAGS += -I@srcdir@/.. -I..
 CXXFLAGS += -I@srcdir@/.. -I..
 
@@ -83,12 +83,12 @@ endif
 SCHED_LIB = $(LIBDIR)/libmesos_sched.a
 EXEC_LIB = $(LIBDIR)/libmesos_exec.a
 
-TESTS_OBJ = main.o test_master.o test_resources.o external_test.o	\
-	    test_sample_frameworks.o testing_utils.o			\
-	    test_configurator.o test_string_utils.o			\
-	    test_lxc_isolation.o
+TESTS_OBJ = main.o utils.o master_test.o errors_test.o			\
+	    resources_test.o external_test.o sample_frameworks_test.o	\
+	    configurator_test.o string_utils_test.o			\
+	    lxc_isolation_test.o
 
-ALLTESTS_EXE = $(BINDIR)/tests/alltests
+ALLTESTS_EXE = $(BINDIR)/tests/all-tests
 
 EXTERNAL_SCRIPTS =							\
   $(BINDIR)/tests/external/LxcIsolation/HoldMoreMemThanRequested.sh	\
@@ -114,7 +114,7 @@ DIRECTORIES = $(BINDIR)/tests                                   \
 default: all
 
 -include $(patsubst %.o, %.d, $(TESTS_OBJ))
--include $(patsubst %, %.d, alltests)
+-include $(patsubst %, %.d, $(ALLTESTS_EXE))
 
 $(DIRECTORIES): %:
 	mkdir -p $@
