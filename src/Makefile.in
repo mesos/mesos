@@ -346,8 +346,8 @@ $(DEPLOY_FILES): $(DEPLOYDIR)/%: @srcdir@/deploy/% | $(DEPLOYDIR)
 $(CONFDIR)/mesos.conf: | @srcdir@/conf/mesos.conf.template $(CONFDIR)
 	cp -r @srcdir@/conf/mesos.conf.template $@
 
-$(CONFDIR)/deploy-env.sh: | ./conf/deploy-env.sh.template $(CONFDIR)
-	cp -r ./conf/deploy-env.sh.template $@
+$(CONFDIR)/deploy-env.sh: | @srcdir@/conf/deploy-env.sh.template $(CONFDIR)
+	cp -r @srcdir@/conf/deploy-env.sh.template $@
 
 test: all
 	$(MAKE) -C tests test
