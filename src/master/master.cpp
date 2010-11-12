@@ -348,10 +348,16 @@ void Master::operator () ()
       LOG(INFO) << "Re-registering framework " << fid << " at " << from();
 
       if (frameworks.count(fid) > 0) {
-        // A framework with this ID is already connected to the master, so
-        // this is hopefully a scheduler failover. Check that that this is
-        // the case (i.e. generation == 0 for the new scheduler), and report
-        // an error if it isn't.
+        // A framework with this ID is already connected to us, so this is
+        // hopefully a scheduler failover. Check that that this is the case
+        // using the "generation" of the scheduler. This allows us to detect
+        // a scheduler that got partitioned but didn't die (in ZooKeeper
+        // speak this means didn't lose their session) and then eventually
+        // tried to connect to this master even though another instance of
+        // their scheduler has reconnected. This might not be an issue in
+        // the future when the master/allocator launches the scheduler and
+        // restarts it when necessary, and thus always knows which scheduler
+        // is the correct one.
         if (generation == 0) {
           LOG(INFO) << "Framework " << fid << " failed over";
           replaceScheduler(frameworks[fid], from());
