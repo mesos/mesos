@@ -35,43 +35,43 @@ ifeq ($(WITH_INCLUDED_ZOOKEEPER),1)
 endif
 
 install:
-	if test ! -d $(DESTDIR)/$(MESOS_HOME)/bin; \
-		then mkdir -p $(DESTDIR)/$(MESOS_HOME)/bin; \
+	if test ! -d $(DESTDIR)$(MESOS_HOME)/bin; \
+		then mkdir -p $(DESTDIR)$(MESOS_HOME)/bin; \
 	fi
-	if test ! -d $(DESTDIR)/$(MESOS_HOME)/lib; \
-		then mkdir -p $(DESTDIR)/$(MESOS_HOME)/lib; \
+	if test ! -d $(DESTDIR)$(MESOS_HOME)/lib; \
+		then mkdir -p $(DESTDIR)$(MESOS_HOME)/lib; \
 	fi
-	if test ! -d $(DESTDIR)/$(MESOS_HOME)/lib/java; \
-		then mkdir -p $(DESTDIR)/$(MESOS_HOME)/lib/java; \
+	if test ! -d $(DESTDIR)$(MESOS_HOME)/lib/java; \
+		then mkdir -p $(DESTDIR)$(MESOS_HOME)/lib/java; \
 	fi
-	if test ! -d $(DESTDIR)/$(MESOS_HOME)/lib/python; \
-		then mkdir -p $(DESTDIR)/$(MESOS_HOME)/lib/python; \
+	if test ! -d $(DESTDIR)$(MESOS_HOME)/lib/python; \
+		then mkdir -p $(DESTDIR)$(MESOS_HOME)/lib/python; \
 	fi
-	if test ! -d $(DESTDIR)/$(MESOS_HOME)/conf; \
-		then mkdir -p $(DESTDIR)/$(MESOS_HOME)/conf; \
+	if test ! -d $(DESTDIR)$(MESOS_HOME)/conf; \
+		then mkdir -p $(DESTDIR)$(MESOS_HOME)/conf; \
 	fi
-	if test ! -d $(DESTDIR)/$(MESOS_HOME)/deploy; \
-		then mkdir -p $(DESTDIR)/$(MESOS_HOME)/deploy; \
+	if test ! -d $(DESTDIR)$(MESOS_HOME)/deploy; \
+		then mkdir -p $(DESTDIR)$(MESOS_HOME)/deploy; \
 	fi
-	install -m 755 $(BINDIR)/mesos-master $(DESTDIR)/$(MESOS_HOME)/bin
-	install -m 755 $(BINDIR)/mesos-slave $(DESTDIR)/$(MESOS_HOME)/bin
-	install -m 755 $(BINDIR)/mesos-local $(DESTDIR)/$(MESOS_HOME)/bin
-	install -m 755 $(BINDIR)/mesos-launcher $(DESTDIR)/$(MESOS_HOME)/bin
-	install -m 755 $(BINDIR)/mesos-getconf $(DESTDIR)/$(MESOS_HOME)/bin
-	rsync -avz $(BINDIR)/webui $(DESTDIR)/$(MESOS_HOME)/bin
-	rsync -avz $(DEPLOYDIR) $(DESTDIR)/$(MESOS_HOME)
-	install -m 755 $(LIBDIR)/libmesos_exec.a $(DESTDIR)/$(MESOS_HOME)/lib
-	install -m 755 $(LIBDIR)/libmesos_sched.a $(DESTDIR)/$(MESOS_HOME)/lib
+	install -m 755 $(BINDIR)/mesos-master $(DESTDIR)$(MESOS_HOME)/bin
+	install -m 755 $(BINDIR)/mesos-slave $(DESTDIR)$(MESOS_HOME)/bin
+	install -m 755 $(BINDIR)/mesos-local $(DESTDIR)$(MESOS_HOME)/bin
+	install -m 755 $(BINDIR)/mesos-launcher $(DESTDIR)$(MESOS_HOME)/bin
+	install -m 755 $(BINDIR)/mesos-getconf $(DESTDIR)$(MESOS_HOME)/bin
+	rsync -avz $(BINDIR)/webui $(DESTDIR)$(MESOS_HOME)/bin
+	rsync -avz $(DEPLOYDIR) $(DESTDIR)$(MESOS_HOME)
+	install -m 755 $(LIBDIR)/libmesos_exec.a $(DESTDIR)$(MESOS_HOME)/lib
+	install -m 755 $(LIBDIR)/libmesos_sched.a $(DESTDIR)$(MESOS_HOME)/lib
 ifeq ($(OS_NAME),darwin)
-	install -m 755 $(LIBDIR)/libmesos.dylib $(DESTDIR)/$(MESOS_HOME)/lib
-	install -m 755 $(LIBDIR)/java/libmesos.dylib $(DESTDIR)/$(MESOS_HOME)/lib/java
+	install -m 755 $(LIBDIR)/libmesos.dylib $(DESTDIR)$(MESOS_HOME)/lib
+	install -m 755 $(LIBDIR)/java/libmesos.dylib $(DESTDIR)$(MESOS_HOME)/lib/java
 else
-	install -m 755 $(LIBDIR)/libmesos.so $(DESTDIR)/$(MESOS_HOME)/lib
-	install -m 755 $(LIBDIR)/java/libmesos.so $(DESTDIR)/$(MESOS_HOME)/lib/java
+	install -m 755 $(LIBDIR)/libmesos.so $(DESTDIR)$(MESOS_HOME)/lib
+	install -m 755 $(LIBDIR)/java/libmesos.so $(DESTDIR)$(MESOS_HOME)/lib/java
 endif
-	install -m 755 $(LIBDIR)/java/mesos.jar $(DESTDIR)/$(MESOS_HOME)/lib/java
-	install -m 755 $(LIBDIR)/python/_mesos.so $(DESTDIR)/$(MESOS_HOME)/lib/python
-	install -m 755 $(LIBDIR)/python/mesos.py $(DESTDIR)/$(MESOS_HOME)/lib/python
+	install -m 755 $(LIBDIR)/java/mesos.jar $(DESTDIR)$(MESOS_HOME)/lib/java
+	install -m 755 $(LIBDIR)/python/_mesos.so $(DESTDIR)$(MESOS_HOME)/lib/python
+	install -m 755 $(LIBDIR)/python/mesos.py $(DESTDIR)$(MESOS_HOME)/lib/python
 
 uninstall:
 	$(error unimplemented)
