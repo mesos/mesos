@@ -498,6 +498,8 @@ void MesosSchedulerDriver::init(Scheduler* _sched,
   pthread_mutex_init(&mutex, &attr);
   pthread_mutexattr_destroy(&attr);
   pthread_cond_init(&cond, 0);
+
+  // TODO(benh): Initialize glog.
 }
 
 
