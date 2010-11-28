@@ -104,8 +104,11 @@ void Slave::registerOptions(Configurator* conf)
   conf->addOption<bool>("switch_user", 
                         "Whether to run tasks as the user who\n"
                         "submitted them rather than the user running\n"
-                        "the slave (requires setuid permission)\n",
+                        "the slave (requires setuid permission)",
                         true);
+   conf->addOption<string>("frameworks_home",
+                           "Directory prepended to relative executor\n"
+                           "paths (default: MESOS_HOME/frameworks)");
 }
 
 

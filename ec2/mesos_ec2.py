@@ -25,6 +25,8 @@ def parse_args():
                     help="Show this help message and exit")
   parser.add_option("-s", "--slaves", type="int", default=1,
       help="Number of slaves to launch (default: 1)")
+  parser.add_option("-w", "--wait", type="int", default=60,
+      help="Number of seconds to wait for cluster to come up (default: 60)")
   parser.add_option("-k", "--key-pair",
       help="Key pair to use on instances")
   parser.add_option("-i", "--identity-file", 
@@ -134,6 +136,8 @@ def launch_cluster(conn, opts, cluster_name):
     master_group.authorize('tcp', 8080, 8081, '0.0.0.0/0')
     master_group.authorize('tcp', 50030, 50030, '0.0.0.0/0')
     master_group.authorize('tcp', 50070, 50070, '0.0.0.0/0')
+    master_group.authorize('tcp', 60070, 60070, '0.0.0.0/0')
+    master_group.authorize('tcp', 38090, 38090, '0.0.0.0/0')
   if slave_group.rules == []: # Group was just now created
     slave_group.authorize(src_group=master_group)
     slave_group.authorize(src_group=slave_group)
@@ -142,6 +146,8 @@ def launch_cluster(conn, opts, cluster_name):
     slave_group.authorize('tcp', 8080, 8081, '0.0.0.0/0')
     slave_group.authorize('tcp', 50060, 50060, '0.0.0.0/0')
     slave_group.authorize('tcp', 50075, 50075, '0.0.0.0/0')
+    slave_group.authorize('tcp', 60060, 60060, '0.0.0.0/0')
+    slave_group.authorize('tcp', 60075, 60075, '0.0.0.0/0')
   if zoo_group.rules == []: # Group was just now created
     zoo_group.authorize(src_group=master_group)
     zoo_group.authorize(src_group=slave_group)
@@ -269,15 +275,15 @@ def setup_cluster(conn, master_res, slave_res, zoo_res, opts, deploy_ssh_key):
 
 
 # Wait for a whole cluster (masters, slaves and ZooKeeper) to start up
-def wait_for_cluster(conn, master_res, slave_res, zoo_res):
+def wait_for_cluster(conn, wait_secs, master_res, slave_res, zoo_res):
   print "Waiting for instances to start up..."
   time.sleep(5)
   wait_for_instances(conn, master_res)
   wait_for_instances(conn, slave_res)
   if zoo_res != None:
     wait_for_instances(conn, zoo_res)
-  print "Waiting 40 more seconds..."
-  time.sleep(40)
+  print "Waiting %d more seconds..." % wait_secs
+  time.sleep(wait_secs)
 
 
 # Get number of local disks available for a given EC2 instance type.
@@ -299,11 +305,11 @@ def deploy_files(conn, root_dir, opts, master_res, slave_res, zoo_res):
   active_master = master_res.instances[0].public_dns_name
 
   num_disks = get_num_disks(opts.instance_type)
-  hdfs_data_dirs = "/mnt/hdfs/dfs/data"
+  hdfs_data_dirs = "/mnt/ephemeral-hdfs/data"
   mapred_local_dirs = "/mnt/hadoop/mrlocal"
   if num_disks > 1:
     for i in range(2, num_disks + 1):
-      hdfs_data_dirs += ",/mnt%d/hdfs/dfs/data" % i
+      hdfs_data_dirs += ",/mnt%d/ephemeral-hdfs/data" % i
       mapred_local_dirs += ",/mnt%d/hadoop/mrlocal" % i
 
   if zoo_res != None:
@@ -376,7 +382,7 @@ def main():
     else:
       (master_res, slave_res, zoo_res) = launch_cluster(
           conn, opts, cluster_name)
-      wait_for_cluster(conn, master_res, slave_res, zoo_res)
+      wait_for_cluster(conn, opts.wait, master_res, slave_res, zoo_res)
     setup_cluster(conn, master_res, slave_res, zoo_res, opts, True)
 
   elif action == "destroy":
@@ -451,7 +457,7 @@ def main():
       for inst in zoo_res.instances:
         if inst.state not in ["shutting-down", "terminated"]:
           inst.start()
-    wait_for_cluster(conn, master_res, slave_res, zoo_res)
+    wait_for_cluster(conn, opts.wait, master_res, slave_res, zoo_res)
     setup_cluster(conn, master_res, slave_res, zoo_res, opts, False)
 
   elif action == "shutdown":
