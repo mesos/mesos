@@ -424,7 +424,7 @@ TEST(MasterTest, SlavePartitioned)
 {
   ASSERT_TRUE(GTEST_IS_THREADSAFE);
 
-  ProcessClock::pause();
+  Clock::pause();
 
   MockFilter filter;
   Process::filter(&filter);
@@ -462,7 +462,7 @@ TEST(MasterTest, SlavePartitioned)
 
   driver.start();
 
-  ProcessClock::advance(master::HEARTBEAT_TIMEOUT);
+  Clock::advance(master::HEARTBEAT_TIMEOUT);
 
   WAIT_UNTIL(slaveLostCall);
 
@@ -473,7 +473,7 @@ TEST(MasterTest, SlavePartitioned)
 
   Process::filter(NULL);
 
-  ProcessClock::resume();
+  Clock::resume();
 }
 
 
@@ -557,7 +557,7 @@ TEST(MasterTest, SchedulerFailoverStatusUpdate)
 {
   ASSERT_TRUE(GTEST_IS_THREADSAFE);
 
-  ProcessClock::pause();
+  Clock::pause();
 
   MockFilter filter;
   Process::filter(&filter);
@@ -660,7 +660,7 @@ TEST(MasterTest, SchedulerFailoverStatusUpdate)
 
   WAIT_UNTIL(registeredCall);
 
-  ProcessClock::advance(RELIABLE_TIMEOUT);
+  Clock::advance(RELIABLE_TIMEOUT);
 
   WAIT_UNTIL(statusUpdateCall);
 
@@ -678,7 +678,7 @@ TEST(MasterTest, SchedulerFailoverStatusUpdate)
 
   Process::filter(NULL);
 
-  ProcessClock::resume();
+  Clock::resume();
 }
 
 
