@@ -34,11 +34,6 @@
 
 #include "slave/slave.hpp"
 
-#define REPLY_TIMEOUT 20
-
-using std::cerr;
-using std::cout;
-using std::endl;
 using std::map;
 using std::string;
 using std::vector;
@@ -57,72 +52,58 @@ using mesos::internal::slave::Slave;
 namespace mesos { namespace internal {
 
 
-class RbReply : public MesosProcess
-{    
+// Unfortunately, when we reply to an offer right now the message
+// might not make it to the master, or even all the way to the
+// slave. So, we preemptively assume the task has been lost if we
+// don't here from it after some timeout (see below). TODO(benh):
+// Eventually, what we would like to do is actually query this state
+// in the master, or possibly even re-launch the task.
+
+#define STATUS_UPDATE_TIMEOUT 20
+
+class StatusUpdateTimer : public MesosProcess
+{
 public:
-  RbReply(const PID &_p, const TaskID &_tid) : 
-    parent(_p), tid(_tid), terminate(false) {}
+  StatusUpdateTimer(const PID &_sched, const TaskID &_tid)
+    : sched(_sched), tid(_tid), terminate(false) {}
   
 protected:
-  void operator () ()
+  virtual void operator () ()
   {
-    link(parent);
-    while(!terminate) {
-
-      switch(receive(REPLY_TIMEOUT)) {
-      case F2F_TASK_RUNNING_STATUS: {
-        terminate = true;
-        break;
-      }
-
-      case PROCESS_TIMEOUT: {
-        terminate = true;
-        VLOG(1) << "No status updates received for tid:" << tid
-		<< ". Assuming task was lost.";
-        send(parent, pack<M2F_STATUS_UPDATE>(tid, TASK_LOST, ""));
-        break;
-      }
-
+    link(sched);
+    while (!terminate) {
+      switch (receive(STATUS_UPDATE_TIMEOUT)) {
+        case PROCESS_TIMEOUT: {
+          terminate = true;
+          VLOG(1) << "No status updates received for task id:" << tid
+                  << " after " << STATUS_UPDATE_TIMEOUT
+                  << ", assuming task was lost";
+          send(sched, pack<M2F_STATUS_UPDATE>(tid, TASK_LOST, ""));
+          break;
+        }
+        default: {
+          terminate = true;
+          break;
+        }
       }
     }
   }
 
 private:
-  bool terminate;
-  const PID parent;
+  const PID sched;
   const TaskID tid;
+  bool terminate;
 };
 
 
-/**
- * TODO(benh): Update this comment.
- * Scheduler process, responsible for interacting with the master
- * and responding to Mesos API calls from schedulers. In order to
- * allow a message to be sent back to the master we allow friend
- * functions to invoke 'send'. Therefore, care must be done to insure
- * any synchronization necessary is performed.
- */
+// The scheduler process (below) is responsible for interacting with
+// the master and responding to Mesos API calls from scheduler
+// drivers. In order to allow a message to be sent back to the master
+// we allow friend functions to invoke 'send', 'post', etc. Therefore,
+// we must make sure that any necessary synchronization is performed.
+
 class SchedulerProcess : public MesosProcess
 {
-public:
-  friend class mesos::MesosSchedulerDriver;
-
-private:
-  MesosSchedulerDriver* driver;
-  Scheduler* sched;
-  FrameworkID fid;
-  string frameworkName;
-  ExecutorInfo execInfo;
-  int32_t generation;
-  PID master;
-
-  volatile bool terminate;
-
-  unordered_map<OfferID, unordered_map<SlaveID, PID> > savedOffers;
-  unordered_map<SlaveID, PID> savedSlavePids;
-
-  unordered_map<TaskID, RbReply *> rbReplies;
-
 public:
   SchedulerProcess(MesosSchedulerDriver* _driver,
                    Scheduler* _sched,
@@ -138,7 +119,15 @@ public:
       master(PID()),
       terminate(false) {}
 
-  ~SchedulerProcess() {}
+  ~SchedulerProcess()
+  {
+    // Cleanup any remaining timers.
+    foreachpair (TaskID tid, StatusUpdateTimer* timer, timers) {
+      send(timer->self(), MESOS_MSGID);
+      wait(timer->self());
+      delete timer;
+    }
+  }
 
 protected:
   void operator () ()
@@ -171,7 +160,7 @@ protected:
       // send a message rather than have a timeout (see the comment
       // above for why sending a message will still require us to use
       // the terminate flag).
-      switch (receive(2)) {
+      switch (serve(2)) {
 
       case NEW_MASTER_DETECTED: {
 	string masterSeq;
@@ -228,88 +217,11 @@ protected:
         break;
       }
 
-      case F2F_SLOT_OFFER_REPLY: {
-        OfferID oid;
-        vector<TaskDescription> tasks;
-        Params params;
-        tie(oid, tasks, params) = unpack<F2F_SLOT_OFFER_REPLY>(body());
-
-	// Keep only the slave PIDs where we run tasks so we can send
-	// framework messages directly.
-        foreach(const TaskDescription &task, tasks) {
-          savedSlavePids[task.slaveId] = savedOffers[oid][task.slaveId];
-        }
-
-	// Remove the offer since we saved all the PIDs we might use.
-        savedOffers.erase(oid);
-
-	foreach(const TaskDescription &task, tasks) {
-	  RbReply *rr = new RbReply(self(), task.taskId);
-	  rbReplies[task.taskId] = rr;
-	  // TODO(benh): Link?
-	  spawn(rr);
-	}
-        
-        send(master, pack<F2M_SLOT_OFFER_REPLY>(fid, oid, tasks, params));
-        break;
-      }
-
-      case F2F_FRAMEWORK_MESSAGE: {
-        FrameworkMessage msg;
-        tie(msg) = unpack<F2F_FRAMEWORK_MESSAGE>(body());
-        VLOG(1) << "Asked to send framework message to slave " << msg.slaveId;
-        if (savedSlavePids.count(msg.slaveId) > 0 &&
-            savedSlavePids[msg.slaveId] != PID()) {
-          VLOG(1) << "Saved slave PID is " << savedSlavePids[msg.slaveId];
-          send(savedSlavePids[msg.slaveId], pack<M2S_FRAMEWORK_MESSAGE>(fid, msg));
-        } else {
-          VLOG(1) << "No PID is saved for that slave; sending through master";
-          send(master, pack<F2M_FRAMEWORK_MESSAGE>(fid, msg));
-        }
-        break;
-      }
-
       case M2F_RESCIND_OFFER: {
         OfferID oid;
         tie(oid) = unpack<M2F_RESCIND_OFFER>(body());
         savedOffers.erase(oid);
         invoke(bind(&Scheduler::offerRescinded, sched, driver, oid));
-        break;
-      }
-
-	// TODO(benh): Fix forwarding issues.
-//       case M2F_FT_STATUS_UPDATE: {
-//         TaskID tid;
-//         TaskState state;
-//         string data;
-//         unpack<M2F_FT_STATUS_UPDATE>(tid, state, data);
-      case S2M_FT_STATUS_UPDATE: {
-	SlaveID sid;
-	FrameworkID fid;
-	TaskID tid;
-	TaskState state;
-	string data;
-
-	tie(sid, fid, tid, state, data) = unpack<S2M_FT_STATUS_UPDATE>(body());
-
-        if (duplicate()) {
-          VLOG(1) << "Received a duplicate status update for tid " << tid
-		     << ", status = " << state;
-          break;
-        }
-        ack();
-
-	unordered_map <TaskID, RbReply *>::iterator it = rbReplies.find(tid);
-	if (it != rbReplies.end()) {
-	  RbReply *rr = it->second;
-	  send(rr->self(), pack<F2F_TASK_RUNNING_STATUS>());
-	  wait(rr->self());
-	  rbReplies.erase(tid);
-	  delete rr;
-	}
-
-        TaskStatus status(tid, state, data);
-        invoke(bind(&Scheduler::statusUpdate, sched, driver, ref(status)));
         break;
       }
 
@@ -319,14 +231,22 @@ protected:
         string data;
         tie(tid, state, data) = unpack<M2F_STATUS_UPDATE>(body());
 
-	unordered_map <TaskID, RbReply *>::iterator it = rbReplies.find(tid);
-	if (it != rbReplies.end()) {
-	  RbReply *rr = it->second;
-	  send(rr->self(), pack<F2F_TASK_RUNNING_STATUS>());
-	  wait(rr->self());
-	  rbReplies.erase(tid);
-	  delete rr;
-	}
+        if (duplicate()) {
+          VLOG(1) << "Received a duplicate status update for tid " << tid
+		     << ", status = " << state;
+          break;
+        }
+
+        ack();
+
+        // Stop any status update timers we might have had running.
+        if (timers.count(tid) > 0) {
+          StatusUpdateTimer* timer = timers[tid];
+          timers.erase(tid);
+          send(timer->self(), MESOS_MSGID);
+          wait(timer->self());
+          delete timer;
+        }
 
         TaskStatus status(tid, state, data);
         invoke(bind(&Scheduler::statusUpdate, sched, driver, ref(status)));
@@ -376,6 +296,78 @@ protected:
       }
     }
   }
+
+  void stop()
+  {
+    send(master, pack<F2M_UNREGISTER_FRAMEWORK>(fid));
+  }
+
+  void killTask(TaskID tid)
+  {
+    send(master, pack<F2M_KILL_TASK>(fid, tid));
+  }
+
+  void replyToOffer(OfferID offerId,
+                    const vector<TaskDescription>& tasks,
+                    const map<std::string, std::string>& params)
+  {
+    // Keep only the slave PIDs where we run tasks so we can send
+    // framework messages directly.
+    foreach(const TaskDescription &task, tasks) {
+      savedSlavePids[task.slaveId] = savedOffers[offerId][task.slaveId];
+    }
+
+    // Remove the offer since we saved all the PIDs we might use.
+    savedOffers.erase(offerId);
+
+    // Create timers to ensure we get status updates for these tasks.
+    foreach (const TaskDescription& task, tasks) {
+      StatusUpdateTimer *timer = new StatusUpdateTimer(self(), task.taskId);
+      timers[task.taskId] = timer;
+      spawn(timer);
+    }
+
+    send(master,
+         pack<F2M_SLOT_OFFER_REPLY>(fid, offerId, tasks, Params(params)));
+  }
+
+  void reviveOffers()
+  {
+    send(master, pack<F2M_REVIVE_OFFERS>(fid));
+  }
+
+  void sendFrameworkMessage(const FrameworkMessage& message)
+  {
+    VLOG(1) << "Asked to send framework message to slave " << message.slaveId;
+    if (savedSlavePids.count(message.slaveId) > 0 &&
+        savedSlavePids[message.slaveId] != PID()) {
+      VLOG(1) << "Saved slave PID is " << savedSlavePids[message.slaveId];
+      send(savedSlavePids[message.slaveId],
+           pack<M2S_FRAMEWORK_MESSAGE>(fid, message));
+    } else {
+      VLOG(1) << "No PID is saved for that slave; sending through master";
+      send(master, pack<F2M_FRAMEWORK_MESSAGE>(fid, message));
+    }
+  }
+
+private:
+  friend class mesos::MesosSchedulerDriver;
+
+  MesosSchedulerDriver* driver;
+  Scheduler* sched;
+  FrameworkID fid;
+  string frameworkName;
+  ExecutorInfo execInfo;
+  int32_t generation;
+  PID master;
+
+  volatile bool terminate;
+
+  unordered_map<OfferID, unordered_map<SlaveID, PID> > savedOffers;
+  unordered_map<SlaveID, PID> savedSlavePids;
+
+  // Timers to ensure we get a status update for each task we launch.
+  unordered_map<TaskID, StatusUpdateTimer *> timers;
 };
 
 }} /* namespace mesos { namespace internal { */
@@ -498,6 +490,8 @@ void MesosSchedulerDriver::init(Scheduler* _sched,
   pthread_mutex_init(&mutex, &attr);
   pthread_mutexattr_destroy(&attr);
   pthread_cond_init(&cond, 0);
+
+  // TODO(benh): Initialize glog.
 }
 
 
@@ -579,9 +573,7 @@ int MesosSchedulerDriver::stop()
     return -1;
   }
 
-  // TODO(benh): Do a Process::post instead?
-  process->send(process->master,
-                pack<F2M_UNREGISTER_FRAMEWORK>(process->fid));
+  Process::dispatch(process, &SchedulerProcess::stop);
 
   process->terminate = true;
 
@@ -619,10 +611,7 @@ int MesosSchedulerDriver::killTask(TaskID tid)
     return -1;
   }
 
-  // TODO(benh): Do a Process::post instead?
-
-  process->send(process->master,
-                pack<F2M_KILL_TASK>(process->fid, tid));
+  Process::dispatch(process, &SchedulerProcess::killTask, tid);
 
   return 0;
 }
@@ -639,10 +628,8 @@ int MesosSchedulerDriver::replyToOffer(OfferID offerId,
     return -1;
   }
 
-  // TODO(benh): Do a Process::post instead?
-  
-  process->send(process->self(),
-                pack<F2F_SLOT_OFFER_REPLY>(offerId, tasks, Params(params)));
+  Process::dispatch(process, &SchedulerProcess::replyToOffer,
+                    offerId, tasks, params);
 
   return 0;
 }
@@ -657,16 +644,13 @@ int MesosSchedulerDriver::reviveOffers()
     return -1;
   }
 
-  // TODO(benh): Do a Process::post instead?
-
-  process->send(process->master,
-                pack<F2M_REVIVE_OFFERS>(process->fid));
+  Process::dispatch(process, &SchedulerProcess::reviveOffers);
 
   return 0;
 }
 
 
-int MesosSchedulerDriver::sendFrameworkMessage(const FrameworkMessage &message)
+int MesosSchedulerDriver::sendFrameworkMessage(const FrameworkMessage& message)
 {
   Lock lock(&mutex);
 
@@ -675,9 +659,7 @@ int MesosSchedulerDriver::sendFrameworkMessage(const FrameworkMessage &message)
     return -1;
   }
 
-  // TODO(benh): Do a Process::post instead?
-
-  process->send(process->self(), pack<F2F_FRAMEWORK_MESSAGE>(message));
+  Process::dispatch(process, &SchedulerProcess::sendFrameworkMessage, message);
 
   return 0;
 }
