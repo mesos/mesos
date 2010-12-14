@@ -6,7 +6,6 @@
 
 #include <algorithm>
 #include <fstream>
-#include <map>
 #include <set>
 #include <sstream>
 #include <stdexcept>
@@ -25,9 +24,7 @@
 
 #include "common/fatal.hpp"
 #include "common/foreach.hpp"
-#include "common/params.hpp"
-#include "common/resources.hpp"
-#include "common/task.hpp"
+#include "common/type_utils.hpp"
 
 #include "configurator/configurator.hpp"
 
@@ -41,17 +38,17 @@ namespace mesos { namespace internal { namespace master {
 using namespace mesos;
 using namespace mesos::internal;
 
+using boost::unordered_map;
+using boost::unordered_set;
+
+using foreach::_;
+
 using std::make_pair;
 using std::map;
 using std::pair;
 using std::set;
 using std::string;
 using std::vector;
-
-using boost::unordered_map;
-using boost::unordered_set;
-
-using foreach::_;
 
 
 // Maximum number of slot offers to have outstanding for each framework.
@@ -88,30 +85,32 @@ class Allocator;
 
 class FrameworkFailoverTimer : public MesosProcess
 {
-private:
-  const PID master;
-  const FrameworkID fid;
+public:
+  FrameworkFailoverTimer(const PID &_master, const FrameworkID& _frameworkId)
+    : master(_master), frameworkId(_frameworkId) {}
 
 protected:
-  void operator () ()
+  virtual void operator () ()
   {
     link(master);
     do {
       switch (receive(FRAMEWORK_FAILOVER_TIMEOUT)) {
-      case PROCESS_TIMEOUT:
-        send(master, pack<M2M_FRAMEWORK_EXPIRED>(fid));
-	return;
-      case PROCESS_EXIT:
-	return;
-      case M2M_SHUTDOWN:
-	return;
+        case PROCESS_TIMEOUT: {
+          Message<M2M_FRAMEWORK_EXPIRED> msg;
+          msg.mutable_framework_id()->set_value(frameworkId.value());
+          send(master, msg);
+          return;
+        }
+        case PROCESS_EXIT:
+        case M2M_SHUTDOWN:
+          return;
       }
     } while (true);
   }
 
-public:
-  FrameworkFailoverTimer(const PID &_master, FrameworkID _fid)
-    : master(_master), fid(_fid) {}
+private:
+  const PID master;
+  const FrameworkID frameworkId;
 };
 
 
@@ -130,27 +129,28 @@ struct SlaveResources
 // A resource offer.
 struct SlotOffer
 {
-  OfferID id;
+  OfferID offerId;
   FrameworkID frameworkId;
   vector<SlaveResources> resources;
-  
-  SlotOffer(OfferID i, FrameworkID f, const vector<SlaveResources>& r)
-    : id(i), frameworkId(f), resources(r) {}
+
+  SlotOffer(const OfferID& _offerId,
+            const FrameworkID& _frameworkId,
+            const vector<SlaveResources>& _resources)
+    : offerId(_offerId), frameworkId(_frameworkId), resources(_resources) {}
 };
 
 // An connected framework.
 struct Framework
 {
+  FrameworkInfo info;
+  FrameworkID frameworkId;
   PID pid;
-  FrameworkID id;
+
   bool active; // Turns false when framework is being removed
-  string name;
-  string user;
-  ExecutorInfo executorInfo;
   double connectTime;
 
   unordered_map<TaskID, Task *> tasks;
-  unordered_set<SlotOffer *> slotOffers; // Active offers given to this framework
+  unordered_set<SlotOffer *> slotOffers; // Active offers for framework.
 
   Resources resources; // Total resources owned by framework (tasks + offers)
   
@@ -161,23 +161,24 @@ struct Framework
   // A failover timer if the connection to this framework is lost.
   FrameworkFailoverTimer *failoverTimer;
 
-  Framework(const PID &_pid, FrameworkID _id, double time)
-    : pid(_pid), id(_id), active(true), connectTime(time),
-      failoverTimer(NULL) {}
+  Framework(const FrameworkInfo& _info, const FrameworkID& _frameworkId,
+            const PID& _pid, double time)
+    : info(_info), frameworkId(_frameworkId), pid(_pid), active(true),
+      connectTime(time), failoverTimer(NULL) {}
 
   ~Framework()
   {
     if (failoverTimer != NULL) {
-      MesosProcess::post(failoverTimer->self(), pack<M2M_SHUTDOWN>());
+      MesosProcess::post(failoverTimer->self(), M2M_SHUTDOWN);
       Process::wait(failoverTimer->self());
       delete failoverTimer;
       failoverTimer = NULL;
     }
   }
   
-  Task * lookupTask(TaskID tid)
+  Task * lookupTask(const TaskID& taskId)
   {
-    unordered_map<TaskID, Task *>::iterator it = tasks.find(tid);
+    unordered_map<TaskID, Task *>::iterator it = tasks.find(taskId);
     if (it != tasks.end())
       return it->second;
     else
@@ -186,22 +187,22 @@ struct Framework
   
   void addTask(Task *task)
   {
-    CHECK(tasks.count(task->id) == 0);
-    tasks[task->id] = task;
-    this->resources += task->resources;
+    CHECK(tasks.count(task->task_id()) == 0);
+    tasks[task->task_id()] = task;
+    this->resources += task->resources();
   }
   
-  void removeTask(TaskID tid)
+  void removeTask(const TaskID& taskId)
   {
-    CHECK(tasks.find(tid) != tasks.end());
-    unordered_map<TaskID, Task *>::iterator it = tasks.find(tid);
-    this->resources -= it->second->resources;
-    tasks.erase(it);
+    CHECK(tasks.count(taskId) > 0);
+    Task* task = tasks[taskId];
+    this->resources -= task->resources();
+    tasks.erase(taskId);
   }
   
   void addOffer(SlotOffer *offer)
   {
-    CHECK(slotOffers.find(offer) == slotOffers.end());
+    CHECK(slotOffers.count(offer) == 0);
     slotOffers.insert(offer);
     foreach (SlaveResources &r, offer->resources)
       this->resources += r.resources;
@@ -235,32 +236,32 @@ struct Framework
 
 // A connected slave.
 struct Slave
-{  
+{
+  SlaveInfo info;
+  SlaveID slaveId;
   PID pid;
-  SlaveID id;
+
   bool active; // Turns false when slave is being removed
-  string hostname;
-  string publicDns;
   double connectTime;
   double lastHeartbeat;
   
-  Resources resources;        // Total resources on slave
   Resources resourcesOffered; // Resources currently in offers
   Resources resourcesInUse;   // Resources currently used by tasks
 
   unordered_map<pair<FrameworkID, TaskID>, Task *> tasks;
-  unordered_set<SlotOffer *> slotOffers; // Active offers of slots on this slave
+  unordered_set<SlotOffer *> slotOffers; // Active offers on this slave.
   
-  Slave(const PID &_pid, SlaveID _id, double time)
-    : pid(_pid), id(_id), active(true)
-  {
-    connectTime = lastHeartbeat = time;
-  }
+  Slave(const SlaveInfo& _info, const SlaveID& _slaveId,
+        const PID& _pid, double time)
+    : info(_info), slaveId(_slaveId), pid(_pid), active(true),
+      connectTime(time), lastHeartbeat(time) {}
 
-  Task * lookupTask(FrameworkID fid, TaskID tid)
+  ~Slave() {}
+
+  Task * lookupTask(const FrameworkID& frameworkId, const TaskID& taskId)
   {
     foreachpair (_, Task *task, tasks)
-      if (task->frameworkId == fid && task->id == tid)
+      if (task->framework_id() == frameworkId && task->task_id() == taskId)
         return task;
 
     return NULL;
@@ -268,21 +269,21 @@ struct Slave
 
   void addTask(Task *task)
   {
-    CHECK(tasks.find(make_pair(task->frameworkId, task->id)) == tasks.end());
-    tasks[make_pair(task->frameworkId, task->id)] = task;
-    resourcesInUse += task->resources;
+    CHECK(tasks.count(make_pair(task->framework_id(), task->task_id())) == 0);
+    tasks[make_pair(task->framework_id(), task->task_id())] = task;
+    resourcesInUse += task->resources();
   }
   
   void removeTask(Task *task)
   {
-    CHECK(tasks.find(make_pair(task->frameworkId, task->id)) != tasks.end());
-    tasks.erase(make_pair(task->frameworkId, task->id));
-    resourcesInUse -= task->resources;
+    CHECK(tasks.count(make_pair(task->framework_id(), task->task_id())) > 0);
+    tasks.erase(make_pair(task->framework_id(), task->task_id()));
+    resourcesInUse -= task->resources();
   }
   
   Resources resourcesFree()
   {
-    return resources - (resourcesOffered + resourcesInUse);
+    return info.resources() - (resourcesOffered + resourcesInUse);
   }
 };
 
@@ -310,31 +311,10 @@ enum TaskRemovalReason
 
 class Master : public MesosProcess
 {
-protected:
-  Params conf;
-
-  unordered_map<FrameworkID, Framework *> frameworks;
-  unordered_map<SlaveID, Slave *> slaves;
-  unordered_map<OfferID, SlotOffer *> slotOffers;
-
-  unordered_map<PID, FrameworkID> pidToFid;
-  unordered_map<PID, SlaveID> pidToSid;
-
-  int64_t nextFrameworkId; // Used to give each framework a unique ID.
-  int64_t nextSlaveId;     // Used to give each slave a unique ID.
-  int64_t nextSlotOfferId; // Used to give each slot offer a unique ID.
-
-  string allocatorType;
-  Allocator *allocator;
-
-  string masterId; // Contains the date the master was launched and its fault
-                   // tolerance ID (e.g. ephemeral ID returned from ZooKeeper).
-                   // Used in framework and slave IDs created by this master.
-
 public:
   Master();
 
-  Master(const Params& conf);
+  Master(const Configuration& conf);
   
   ~Master();
 
@@ -349,11 +329,11 @@ public:
   
   void killTask(Task *task);
   
-  Framework * lookupFramework(FrameworkID fid);
+  Framework * lookupFramework(const FrameworkID& frameworkId);
 
-  Slave * lookupSlave(SlaveID sid);
+  Slave * lookupSlave(const SlaveID& slaveId);
 
-  SlotOffer * lookupSlotOffer(OfferID soid);
+  SlotOffer * lookupSlotOffer(const OfferID& offerId);
 
   // Return connected frameworks that are not in the process of being removed
   vector<Framework *> getActiveFrameworks();
@@ -361,16 +341,17 @@ public:
   // Return connected slaves that are not in the process of being removed
   vector<Slave *> getActiveSlaves();
 
-  const Params& getConf();
+  const Configuration& getConfiguration();
 
 protected:
-  void operator () ();
+  virtual void operator () ();
 
   // Process a resource offer reply (for a non-cancelled offer) by launching
   // the desired tasks (if the offer contains a valid set of tasks) and
   // reporting any unused resources to the allocator
   void processOfferReply(SlotOffer *offer,
-      const vector<TaskDescription>& tasks, const Params& params);
+                         const vector<TaskDescription>& tasks,
+                         const Params& params);
 
   // Launch a task described in a slot offer response
   void launchTask(Framework *framework, const TaskDescription& task);
@@ -405,8 +386,30 @@ protected:
   virtual Allocator* createAllocator();
 
   FrameworkID newFrameworkId();
+  OfferID newOfferId();
+  SlaveID newSlaveId();
 
-  string currentDate();
+private:
+  Configuration conf;
+
+  unordered_map<FrameworkID, Framework *> frameworks;
+  unordered_map<SlaveID, Slave *> slaves;
+  unordered_map<OfferID, SlotOffer *> slotOffers;
+
+  unordered_map<PID, FrameworkID> pidToFrameworkId;
+  unordered_map<PID, SlaveID> pidToSlaveId;
+
+  int64_t nextFrameworkId; // Used to give each framework a unique ID.
+  int64_t nextOfferId;     // Used to give each slot offer a unique ID.
+  int64_t nextSlaveId;     // Used to give each slave a unique ID.
+
+  string allocatorType;
+  Allocator *allocator;
+
+  string masterId; // Contains the date the master was launched and
+                   // some ephemeral token (e.g. returned from
+                   // ZooKeeper). Used in framework and slave IDs
+                   // created by this master.
 };
 
 
@@ -414,30 +417,24 @@ protected:
 
 inline std::ostream& operator << (std::ostream& stream, const SlotOffer *o)
 {
-  stream << "offer " << o->id;
+  stream << "offer " << o->offerId;
   return stream;
 }
 
 
 inline std::ostream& operator << (std::ostream& stream, const Slave *s)
 {
-  stream << "slave " << s->id;
+  stream << "slave " << s->slaveId;
   return stream;
 }
 
 
 inline std::ostream& operator << (std::ostream& stream, const Framework *f)
 {
-  stream << "framework " << f->id;
+  stream << "framework " << f->frameworkId;
   return stream;
 }
 
-
-inline std::ostream& operator << (std::ostream& stream, const Task *t)
-{
-  stream << "task " << t->frameworkId << ":" << t->id;
-  return stream;
-}
 
 }}} /* namespace */
 

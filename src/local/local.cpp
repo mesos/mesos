@@ -15,15 +15,15 @@
 #include "slave/process_based_isolation_module.hpp"
 #include "slave/slave.hpp"
 
-using std::map;
-using std::vector;
+using namespace mesos::internal;
 
 using mesos::internal::master::Master;
 using mesos::internal::slave::Slave;
 using mesos::internal::slave::IsolationModule;
 using mesos::internal::slave::ProcessBasedIsolationModule;
 
-using namespace mesos::internal;
+using std::map;
+using std::vector;
 
 
 namespace {
@@ -60,7 +60,7 @@ PID launch(int numSlaves,
            bool initLogging,
            bool quiet)
 {
-  Params conf;
+  Configuration conf;
   conf.set("slaves", numSlaves);
   conf.set("cpus", cpus);
   conf.set("mem", mem);
@@ -69,7 +69,7 @@ PID launch(int numSlaves,
 }
 
 
-PID launch(const Params& conf, bool initLogging)
+PID launch(const Configuration& conf, bool initLogging)
 {
   int numSlaves = conf.get<int>("slaves", 1);
   bool quiet = conf.get<bool>("quiet", false);
@@ -106,7 +106,7 @@ PID launch(const Params& conf, bool initLogging)
 
 void shutdown()
 {
-  MesosProcess::post(master->self(), pack<M2M_SHUTDOWN>());
+  MesosProcess::post(master->self(), M2M_SHUTDOWN);
   Process::wait(master->self());
   delete master;
   master = NULL;
@@ -118,7 +118,7 @@ void shutdown()
   // we have stopped the slave.
 
   foreachpair (IsolationModule *isolationModule, Slave *slave, slaves) {
-    MesosProcess::post(slave->self(), pack<S2S_SHUTDOWN>());
+    MesosProcess::post(slave->self(), S2S_SHUTDOWN);
     Process::wait(slave->self());
     delete isolationModule;
     delete slave;
