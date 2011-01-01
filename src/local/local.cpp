@@ -106,28 +106,30 @@ PID launch(const Configuration& conf, bool initLogging)
 
 void shutdown()
 {
-  MesosProcess::post(master->self(), M2M_SHUTDOWN);
-  Process::wait(master->self());
-  delete master;
-  master = NULL;
+  if (master != NULL) {
+    MesosProcess::post(master->self(), M2M_SHUTDOWN);
+    Process::wait(master->self());
+    delete master;
+    master = NULL;
 
-  // TODO(benh): Ugh! Because the isolation module calls back into the
-  // slave (not the best design) we can't delete the slave until we
-  // have deleted the isolation module. But since the slave calls into
-  // the isolation module, we can't delete the isolation module until
-  // we have stopped the slave.
+    // TODO(benh): Ugh! Because the isolation module calls back into the
+    // slave (not the best design) we can't delete the slave until we
+    // have deleted the isolation module. But since the slave calls into
+    // the isolation module, we can't delete the isolation module until
+    // we have stopped the slave.
 
-  foreachpair (IsolationModule *isolationModule, Slave *slave, slaves) {
-    MesosProcess::post(slave->self(), S2S_SHUTDOWN);
-    Process::wait(slave->self());
-    delete isolationModule;
-    delete slave;
+    foreachpair (IsolationModule *isolationModule, Slave *slave, slaves) {
+      MesosProcess::post(slave->self(), S2S_SHUTDOWN);
+      Process::wait(slave->self());
+      delete isolationModule;
+      delete slave;
+    }
+
+    slaves.clear();
+
+    delete detector;
+    detector = NULL;
   }
-
-  slaves.clear();
-
-  delete detector;
-  detector = NULL;
 }
 
 }}} /* namespace mesos { namespace internal { namespace local { */
