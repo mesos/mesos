@@ -428,7 +428,7 @@ TEST(MasterTest, SlavePartitioned)
 {
   ASSERT_TRUE(GTEST_IS_THREADSAFE);
 
-  ProcessClock::pause();
+  Clock::pause();
 
   MockFilter filter;
   Process::filter(&filter);
@@ -466,7 +466,7 @@ TEST(MasterTest, SlavePartitioned)
 
   driver.start();
 
-  ProcessClock::advance(master::HEARTBEAT_TIMEOUT);
+  Clock::advance(master::HEARTBEAT_TIMEOUT);
 
   WAIT_UNTIL(slaveLostCall);
 
@@ -477,7 +477,7 @@ TEST(MasterTest, SlavePartitioned)
 
   Process::filter(NULL);
 
-  ProcessClock::resume();
+  Clock::resume();
 }
 
 
@@ -562,7 +562,7 @@ TEST(MasterTest, SchedulerFailoverStatusUpdate)
 {
   ASSERT_TRUE(GTEST_IS_THREADSAFE);
 
-  ProcessClock::pause();
+  Clock::pause();
 
   MockFilter filter;
   Process::filter(&filter);
@@ -623,7 +623,7 @@ TEST(MasterTest, SchedulerFailoverStatusUpdate)
   EXPECT_CALL(sched1, error(&driver1, _, "Framework failover"))
     .Times(1);
 
-  EXPECT_MSG(filter, Eq(S2M_FT_STATUS_UPDATE), _, Ne(master))
+  EXPECT_MSG(filter, Eq(M2F_STATUS_UPDATE), _, Ne(master))
     .WillOnce(DoAll(Trigger(&statusUpdateMsg), Return(true)))
     .RetiresOnSaturation();
 
@@ -666,7 +666,7 @@ TEST(MasterTest, SchedulerFailoverStatusUpdate)
 
   WAIT_UNTIL(registeredCall);
 
-  ProcessClock::advance(RELIABLE_TIMEOUT);
+  Clock::advance(RELIABLE_TIMEOUT);
 
   WAIT_UNTIL(statusUpdateCall);
 
@@ -684,7 +684,7 @@ TEST(MasterTest, SchedulerFailoverStatusUpdate)
 
   Process::filter(NULL);
 
-  ProcessClock::resume();
+  Clock::resume();
 }
 
 

@@ -395,7 +395,9 @@ protected:
 
   void addFramework(Framework *framework);
 
-  void replaceFramework(Framework *old, Framework *current);
+  // Replace the scheduler for a framework with a new process ID, in the
+  // event of a scheduler failover.
+  void failoverFramework(Framework *framework, const PID &newPid);
 
   // Kill all of a framework's tasks, delete the framework object, and
   // reschedule slot offers for slots that were assigned to this framework
