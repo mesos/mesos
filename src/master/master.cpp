@@ -10,6 +10,7 @@
 #include "webui.hpp"
 
 using std::endl;
+using std::flush;
 using std::make_pair;
 using std::map;
 using std::max;
@@ -64,14 +65,13 @@ class SharesPrinter : public MesosProcess
 {
 protected:
   PID master;
+  string logFile;
 
   void operator () ()
   {
-    int tick = 0;
-
-    std::ofstream file ("/mnt/shares");
+    std::ofstream file(logFile.c_str());
     if (!file.is_open())
-      LOG(FATAL) << "Could not open /mnt/shares";
+      LOG(FATAL) << "Could not open " << logFile;
 
     while (true) {
       pause(1);
@@ -79,36 +79,40 @@ protected:
       send(master, pack<M2M_GET_STATE>());
       receive();
       CHECK(msgid() == M2M_GET_STATE_REPLY);
-      state::MasterState *state = unpack<M2M_GET_STATE_REPLY, 0>(body());
+      state::MasterState* state = unpack<M2M_GET_STATE_REPLY, 0>(body());
 
       uint32_t total_cpus = 0;
       uint32_t total_mem = 0;
 
-      foreach (state::Slave *s, state->slaves) {
+      foreach (state::Slave* s, state->slaves) {
         total_cpus += s->cpus;
         total_mem += s->mem;
       }
+
+      time_t rawtime;
+      struct tm* timeinfo;
+      time(&rawtime);
+      timeinfo = localtime(&rawtime);
+      char date[32];
+      strftime(date, sizeof(date), "%Y-%m-%d %H:%M:%s", timeinfo);
       
-      if (state->frameworks.empty()) {
-        file << "--------------------------------" << std::endl;
-      } else {
-        foreach (state::Framework *f, state->frameworks) {
-          double cpu_share = f->cpus / (double) total_cpus;
-          double mem_share = f->mem / (double) total_mem;
-          double max_share = max(cpu_share, mem_share);
-          file << tick << "#" << f->id << "#" << f->name << "#" 
-               << f->cpus << "#" << f->mem << "#"
-               << cpu_share << "#" << mem_share << "#" << max_share << endl;
-        }
+      foreach (state::Framework* f, state->frameworks) {
+        double cpu_share = f->cpus / (double) total_cpus;
+        double mem_share = f->mem / (double) total_mem;
+        double dom_share = max(cpu_share, mem_share);
+        file << date << "\t" << f->id << "\t" << f->name << "\t"
+             << f->cpus << "\t" << f->mem << "\t" << cpu_share << "\t"
+             << mem_share << "\t" << dom_share << "\t" << endl << flush;
       }
       delete state;
-      tick++;
     }
     file.close();
   }
 
 public:
-  SharesPrinter(const PID &_master) : master(_master) {}
+  SharesPrinter(const PID&_master, const string& _logFile)
+    : master(_master), logFile(_logFile) {}
+
   ~SharesPrinter() {}
 };
 
@@ -274,7 +278,9 @@ void Master::operator () ()
     LOG(FATAL) << "Unrecognized allocator type: " << allocatorType;
 
   link(spawn(new AllocatorTimer(self())));
-  //link(spawn(new SharesPrinter(self())));
+
+  string sharesLog = conf.get("shares_log", "/tmp/mesos-shares");
+  link(spawn(new SharesPrinter(self(), sharesLog)));
 
   while (true) {
     switch (receive()) {
