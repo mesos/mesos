@@ -66,6 +66,7 @@ class SharesPrinter : public MesosProcess
 protected:
   PID master;
   string logFile;
+  int interval;
 
   void operator () ()
   {
@@ -73,8 +74,10 @@ protected:
     if (!file.is_open())
       LOG(FATAL) << "Could not open " << logFile;
 
+    file << flush;
+
     while (true) {
-      pause(1);
+      pause(interval);
 
       send(master, pack<M2M_GET_STATE>());
       receive();
@@ -92,15 +95,13 @@ protected:
       time_t rawtime;
       struct tm* timeinfo;
       time(&rawtime);
-      timeinfo = localtime(&rawtime);
-      char date[32];
-      strftime(date, sizeof(date), "%Y-%m-%d %H:%M:%s", timeinfo);
+      int64_t millis = ((int64_t) rawtime) * 1000;
       
       foreach (state::Framework* f, state->frameworks) {
         double cpu_share = f->cpus / (double) total_cpus;
         double mem_share = f->mem / (double) total_mem;
         double dom_share = max(cpu_share, mem_share);
-        file << date << "\t" << f->id << "\t" << f->name << "\t"
+        file << millis << "\t" << f->id << "\t" << f->name << "\t"
              << f->cpus << "\t" << f->mem << "\t" << cpu_share << "\t"
              << mem_share << "\t" << dom_share << "\t" << endl << flush;
       }
@@ -110,8 +111,8 @@ protected:
   }
 
 public:
-  SharesPrinter(const PID&_master, const string& _logFile)
-    : master(_master), logFile(_logFile) {}
+  SharesPrinter(const PID&_master, const string& _logFile, int _interval)
+    : master(_master), logFile(_logFile), interval(_interval) {}
 
   ~SharesPrinter() {}
 };
@@ -280,7 +281,8 @@ void Master::operator () ()
   link(spawn(new AllocatorTimer(self())));
 
   string sharesLog = conf.get("shares_log", "/tmp/mesos-shares");
-  link(spawn(new SharesPrinter(self(), sharesLog)));
+  int sharesInterval = conf.get<int>("shares_interval", 2);
+  link(spawn(new SharesPrinter(self(), sharesLog, sharesInterval)));
 
   while (true) {
     switch (receive()) {
