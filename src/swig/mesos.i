@@ -543,6 +543,17 @@ jenv->ExceptionDescribe();
   %template(SlaveOfferVector) std::vector<mesos::SlaveOffer>;
   %template(TaskDescriptionVector) std::vector<mesos::TaskDescription>;
   %template(StringMap) std::map<std::string, std::string>;
+
+  %feature("director:except") {
+    if( $error != NULL ) {
+      PyObject *ptype, *pvalue, *ptraceback;
+      PyErr_Fetch( &ptype, &pvalue, &ptraceback );
+      PyErr_Restore( ptype, pvalue, ptraceback );
+      PyErr_Print();
+      Py_Exit(1);
+    }
+  }
+
 #endif /* SWIGPYTHON */
 
 /* Rename task_state enum so that the generated class is called TaskState */
