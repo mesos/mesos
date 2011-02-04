@@ -30,6 +30,8 @@ WEBUI_CFLAGS = @WEBUI_CFLAGS@
 WEBUI_CXXFLAGS = @WEBUI_CXXFLAGS@
 WEBUI_LDFLAGS = @WEBUI_LDFLAGS@
 
+WITH_INCLUDED_SQLITE = @WITH_INCLUDED_ZOOKEEPER@
+
 WITH_ZOOKEEPER = @WITH_ZOOKEEPER@
 
 WITH_INCLUDED_ZOOKEEPER = @WITH_INCLUDED_ZOOKEEPER@
@@ -72,9 +74,11 @@ LDFLAGS += -L@top_builddir@/$(LIBEV)/.libs
 CXXFLAGS += -I@top_srcdir@/$(GLOG)/src -I@top_builddir@/$(GLOG)/src
 LDFLAGS += -L@top_builddir@/$(GLOG)/.libs
 
-# Add sqlite to include and lib paths.
-CXXFLAGS += -I@top_srcdir@/$(SQLITE)/src -I@top_builddir@/$(SQLITE)/src
-LDFLAGS += -L@top_builddir@/$(SQLITE)/.libs
+# Add sqlite to include and lib paths if necessary.
+ifeq ($(WITH_INCLUDED_SQLITE),1)
+  CXXFLAGS += -I@top_srcdir@/$(SQLITE)/src -I@top_builddir@/$(SQLITE)/src
+  LDFLAGS += -L@top_builddir@/$(SQLITE)/.libs
+endif
 
 # Add included ZooKeeper to include and lib paths if necessary.
 ifeq ($(WITH_INCLUDED_ZOOKEEPER),1)
@@ -98,7 +102,12 @@ CXXFLAGS += -DBUILD_USER="\"$$USER\""
 LDFLAGS += -L$(LIBEV)/.libs
 
 # Add glog, libev, libprocess, pthread, and dl to LIBS.
-LIBS += -lglog -lprocess -lev -lpthread -ldl -lsqlite3
+LIBS += -lglog -lprocess -lev -lpthread -ldl
+
+# Add sqlite if necessary.
+ifeq ($(WITH_INCLUDED_SQLITE),1)
+  LIBS += -lsqlite3
+endif
 
 # Add ZooKeeper if necessary.
 ifeq ($(WITH_ZOOKEEPER),1)
@@ -128,8 +137,11 @@ WEBUI_OBJ = $(MASTER_WEBUI_OBJ) $(SLAVE_WEBUI_OBJ)
 SWIG_WEBUI_OBJ = $(MASTER_SWIG_WEBUI_OBJ) $(SLAVE_SWIG_WEBUI_OBJ)
 
 EVENT_HISTORY_OBJ = event_history/event_logger.o \
-	            event_history/file_event_writer.o \
-	            event_history/sqlite_event_writer.o
+	            event_history/file_event_writer.o
+
+ifeq ($(WITH_INCLUDED_SQLITE),1)
+  EVENT_HISTORY_OBJ += event_history/sqlite_event_writer.o
+endif
 
 COMMON_OBJ = common/fatal.o messaging/messages.o common/lock.o		\
 	     detector/detector.o common/params.o			\
