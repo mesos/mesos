@@ -10,7 +10,7 @@ namespace mesos { namespace internal { namespace local {
 
 // Register the options recognized by the local runner (a combination of
 // master and slave options) with a configurator.
-void registerOptions(Configurator* conf);
+void registerOptions(Configurator* configurator);
 
 // Launch a local cluster with a given number of slaves and given numbers
 // of CPUs and memory per slave. Additionally one can also toggle whether
@@ -22,7 +22,7 @@ PID launch(int numSlaves,
            bool quiet);
 
 // Launch a local cluster with a given configuration.
-PID launch(const Params& conf, bool initLogging);
+PID launch(const Configuration& conf, bool initLogging);
 
 void shutdown();
 

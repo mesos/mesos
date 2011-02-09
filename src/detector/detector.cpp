@@ -34,6 +34,33 @@ using boost::lexical_cast;
 
 
 #ifdef WITH_ZOOKEEPER
+class ZooKeeperReconnectTimer : public Process
+{
+public:
+  ZooKeeperReconnectTimer(const PID &_pid) : pid(_pid) {}
+
+protected:
+  virtual void operator () ()
+  {
+    switch (receive(120)) {
+      case PROCESS_TIMEOUT: {
+	LOG(ERROR) << "Have not heard back from ZooKeeper after trying to "
+		   << "(automagically) reconnect";
+	MesosProcess::post(pid, MASTER_DETECTION_FAILURE);
+	break; 
+      }
+
+      default: {
+	break;
+      }
+    }
+  }
+
+private:
+  const PID pid;
+};
+
+
 class ZooKeeperMasterDetector : public MasterDetector, public Watcher
 {
 public:
@@ -109,6 +136,9 @@ private:
 
   std::string currentMasterSeq;
   PID currentMasterPID;
+
+  // Reconnect timer.
+  ZooKeeperReconnectTimer *timer;
 };
 #endif /* #ifdef WITH_ZOOKEEPER */
 
@@ -185,11 +215,19 @@ void MasterDetector::destroy(MasterDetector *detector)
 BasicMasterDetector::BasicMasterDetector(const PID &_master)
   : master(_master)
 {
-  // Send a master id.
-  MesosProcess::post(master, pack<GOT_MASTER_ID>("0"));
+  // Send a master token.
+  {
+    Message<GOT_MASTER_TOKEN> msg;
+    msg.set_token("0");
+    MesosProcess::post(master, msg);
+  }
 
   // Elect the master.
-  MesosProcess::post(master, pack<NEW_MASTER_DETECTED>("0", master));
+  {
+    Message<NEW_MASTER_DETECTED> msg;
+    msg.set_pid(master);
+    MesosProcess::post(master, msg);
+  }
 }
 
 
@@ -199,15 +237,25 @@ BasicMasterDetector::BasicMasterDetector(const PID &_master,
   : master(_master)
 {
   if (elect) {
-    // Send a master id.
-    MesosProcess::post(master, pack<GOT_MASTER_ID>("0"));
+    // Send a master token.
+    {
+      Message<GOT_MASTER_TOKEN> msg;
+      msg.set_token("0");
+      MesosProcess::post(master, msg);
+    }
 
     // Elect the master.
-    MesosProcess::post(master, pack<NEW_MASTER_DETECTED>("0", master));
+    {
+      Message<NEW_MASTER_DETECTED> msg;
+      msg.set_pid(master);
+      MesosProcess::post(master, msg);
+    }
   }
 
   // Tell the pid about the master.
-  MesosProcess::post(pid, pack<NEW_MASTER_DETECTED>("0", master));
+  Message<NEW_MASTER_DETECTED> msg;
+  msg.set_pid(master);
+  MesosProcess::post(pid, msg);
 }
 
 
@@ -217,16 +265,27 @@ BasicMasterDetector::BasicMasterDetector(const PID &_master,
   : master(_master)
 {
   if (elect) {
-    // Send a master id.
-    MesosProcess::post(master, pack<GOT_MASTER_ID>("0"));
+    // Send a master token.
+    {
+      Message<GOT_MASTER_TOKEN> msg;
+      msg.set_token("0");
+      MesosProcess::post(master, msg);
+    }
 
     // Elect the master.
-    MesosProcess::post(master, pack<NEW_MASTER_DETECTED>("0", master));
+    {
+      Message<NEW_MASTER_DETECTED> msg;
+      msg.set_pid(master);
+      MesosProcess::post(master, msg);
+    }
   }
 
   // Tell each pid about the master.
-  foreach (const PID &pid, pids)
-    MesosProcess::post(pid, pack<NEW_MASTER_DETECTED>("0", master));
+  foreach (const PID &pid, pids) {
+    Message<NEW_MASTER_DETECTED> msg;
+    msg.set_pid(master);
+    MesosProcess::post(pid, msg);
+  }
 }
 
 
@@ -252,7 +311,7 @@ ZooKeeperMasterDetector::ZooKeeperMasterDetector(const string &_servers,
 						 bool _contend,
 						 bool quiet)
   : servers(_servers), znode(_znode), pid(_pid),
-    contend(_contend), reconnect(false)
+    contend(_contend), reconnect(false), timer(NULL)
 {
   // Set verbosity level for underlying ZooKeeper library logging.
   // TODO(benh): Put this in the C++ API.
@@ -265,6 +324,14 @@ ZooKeeperMasterDetector::ZooKeeperMasterDetector(const string &_servers,
 
 ZooKeeperMasterDetector::~ZooKeeperMasterDetector()
 {
+  // Kill the timer (if running), and then the actual ZooKeeper instance.
+  if (timer != NULL) {
+    Process::post(timer->self(), PROCESS_MSGID);
+    Process::wait(timer->self());
+    delete timer;
+    timer = NULL;
+  }
+
   if (zk != NULL) {
     delete zk;
     zk = NULL;
@@ -323,13 +390,25 @@ void ZooKeeperMasterDetector::process(ZooKeeper *zk, int type, int state,
 	setId(result);
 	LOG(INFO) << "Created ephemeral/sequence:" << getId();
 
-        MesosProcess::post(pid, pack<GOT_MASTER_ID>(getId()));
+        Message<GOT_MASTER_TOKEN> msg;
+        msg.set_token(getId());
+        MesosProcess::post(pid, msg);
       }
 
       // Now determine who the master is (it may be us).
       detectMaster();
     } else {
       // Reconnected.
+      LOG(INFO) << "Reconnected to Zookeeper ...";
+
+      // Kill the reconnect timer.
+      if (timer != NULL) {
+	Process::post(timer->self(), PROCESS_MSGID);
+	Process::wait(timer->self());
+	delete timer;
+	timer = NULL;
+      }
+
       if (contend) {
 	// Contending for master, confirm our ephemeral sequence znode exists.
 	ret = zk->get(znode + "/" + mySeq, false, &result, NULL);
@@ -347,9 +426,10 @@ void ZooKeeperMasterDetector::process(ZooKeeper *zk, int type, int state,
 		zk->error(ret), servers.c_str());
 
 	// We are still the master!
-	LOG(INFO) << "Reconnected to Zookeeper, still acting as master.";
+	LOG(INFO) << "Still acting as master";
       } else {
 	// Reconnected, but maybe the master changed?
+	LOG(INFO) << "Not sure if still master";
 	detectMaster();
       }
 
@@ -363,7 +443,14 @@ void ZooKeeperMasterDetector::process(ZooKeeper *zk, int type, int state,
     // The client library automatically reconnects, taking into
     // account failed servers in the connection string,
     // appropriately handling the "herd effect", etc.
-    LOG(INFO) << "Lost Zookeeper connection. Retrying (automagically).";
+    LOG(INFO) << "Lost Zookeeper connection, retrying (automagically)";
+
+    // Create a reconnect timer so that we commit suicide if we
+    // haven't heard back from ZooKeeper after a certain period of
+    // time.
+    timer = new ZooKeeperReconnectTimer(pid);
+    Process::spawn(timer);
+
     reconnect = true;
   } else {
     LOG(INFO) << "Unimplemented watch event: (state is "
@@ -397,9 +484,9 @@ void ZooKeeperMasterDetector::detectMaster()
   int ret = zk->getChildren(znode, true, &results);
 
   if (ret != ZOK)
-    LOG(ERROR) << "failed to get masters: " << zk->error(ret);
+    LOG(ERROR) << "Failed to get masters: " << zk->error(ret);
   else
-    LOG(INFO) << "found " << results.size() << " registered masters";
+    LOG(INFO) << "Found " << results.size() << " registered masters";
 
   string masterSeq;
   long min = LONG_MAX;
@@ -413,18 +500,20 @@ void ZooKeeperMasterDetector::detectMaster()
 
   // No master present (lost or possibly hasn't come up yet).
   if (masterSeq.empty()) {
-    MesosProcess::post(pid, pack<NO_MASTER_DETECTED>());
+    MesosProcess::post(pid, NO_MASTER_DETECTED);
   } else if (masterSeq != currentMasterSeq) {
     currentMasterSeq = masterSeq;
     currentMasterPID = lookupMasterPID(masterSeq); 
 
     // While trying to get the master PID, master might have crashed,
     // so PID might be empty.
-    if (currentMasterPID == PID())
-      MesosProcess::post(pid, pack<NO_MASTER_DETECTED>());
-    else
-      MesosProcess::post(pid, pack<NEW_MASTER_DETECTED>(currentMasterSeq,
-                                                        currentMasterPID));
+    if (currentMasterPID == PID()) {
+      MesosProcess::post(pid, NO_MASTER_DETECTED);
+    } else {
+      Message<NEW_MASTER_DETECTED> msg;
+      msg.set_pid(currentMasterPID);
+      MesosProcess::post(pid, msg);
+    }
   }
 }
 
@@ -439,9 +528,9 @@ PID ZooKeeperMasterDetector::lookupMasterPID(const string &seq) const
   ret = zk->get(znode + "/" + seq, false, &result, NULL);
 
   if (ret != ZOK)
-    LOG(ERROR) << "failed to fetch new master pid: " << zk->error(ret);
+    LOG(ERROR) << "Failed to fetch new master pid: " << zk->error(ret);
   else
-    LOG(INFO) << "got new master pid: " << result;
+    LOG(INFO) << "Got new master pid: " << result;
 
   // TODO(benh): Automatic cast!
   return PID(result);

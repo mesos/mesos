@@ -2,6 +2,8 @@
 
 SHELL = '/bin/sh'
 
+SRCDIR = @srcdir@
+INCLUDEDIR = @top_builddir@/include
 BINDIR = @top_builddir@/bin
 LIBDIR = @top_builddir@/lib
 
@@ -18,12 +20,11 @@ WITH_ZOOKEEPER = @WITH_ZOOKEEPER@
 WITH_INCLUDED_ZOOKEEPER = @WITH_INCLUDED_ZOOKEEPER@
 
 LIBPROCESS = third_party/libprocess
-
 LIBEV = $(LIBPROCESS)/third_party/libev-3.8
-
+BOOST = third_party/boost-1.37.0
+PROTOBUF = third_party/protobuf-2.3.0
 GLOG = third_party/glog-0.3.1
 GMOCK = third_party/gmock-1.5.0
-
 ZOOKEEPER = third_party/zookeeper-3.3.1/src/c
 
 # Ensure that we get better debugging info.
@@ -34,13 +35,17 @@ CXXFLAGS += -g
 CFLAGS += -I@srcdir@/.. -I..
 CXXFLAGS += -I@srcdir@/.. -I..
 
-# Add include to CFLAGS and CXXFLAGS.
-CFLAGS += -I@top_srcdir@/include
-CXXFLAGS += -I@top_srcdir@/include
+# Add include and build include to CFLAGS and CXXFLAGS.
+CFLAGS += -I@top_srcdir@/include -I$(INCLUDEDIR)
+CXXFLAGS += -I@top_srcdir@/include -I$(INCLUDEDIR)
 
 # Add boost to CFLAGS and CXXFLAGS.
-CFLAGS += -I@top_srcdir@/third_party/boost-1.37.0
-CXXFLAGS += -I@top_srcdir@/third_party/boost-1.37.0
+CFLAGS += -I@top_srcdir@/$(BOOST)
+CXXFLAGS += -I@top_srcdir@/$(BOOST)
+
+# Add protobuf to include and lib paths.
+CXXFLAGS += -I@top_srcdir@/$(PROTOBUF)/src
+LDFLAGS += -L@top_builddir@/$(PROTOBUF)/src/.libs
 
 # Add libprocess to CFLAGS, CXXFLAGS, and LDFLAGS.
 CFLAGS += -I@top_srcdir@/$(LIBPROCESS)
@@ -72,8 +77,8 @@ CXXFLAGS += -DBUILD_DATE="\"$$(date '+%Y-%m-%d %H:%M:%S')\""
 CFLAGS += -DBUILD_USER="\"$$USER\""
 CXXFLAGS += -DBUILD_USER="\"$$USER\""
 
-# Add glog, gmock, gtest, libev, libprocess, pthread, and dl to LIBS.
-LIBS += -lglog -lgmock -lgtest -lprocess -lev -lpthread -ldl
+# Add protobuf, glog, gmock, gtest, libev, libprocess, pthread, and dl to LIBS.
+LIBS += -lprotobuf -lglog -lgmock -lgtest -lprocess -lev -lpthread -ldl
 
 # Add ZooKeeper if necessary.
 ifeq ($(WITH_ZOOKEEPER),1)

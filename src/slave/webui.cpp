@@ -6,6 +6,9 @@
 #include "state.hpp"
 #include "webui.hpp"
 
+#include "configurator/configuration.hpp"
+
+
 #ifdef MESOS_WEBUI
 
 #include <Python.h>
@@ -50,19 +53,19 @@ void *runSlaveWebUI(void *)
 }
 
 
-void startSlaveWebUI(const PID &slave, const Params &params)
+void startSlaveWebUI(const PID &slave, const Configuration &conf)
 {
   // TODO(*): See the note in master/webui.cpp about having to
   // determine default values. These should be set by now and can just
   // be used! For example, what happens when the slave code changes
   // their default location for the work directory, it might not get
   // changed here!
-  webuiPort = params.get("webui_port", "8081");
-  logDir = params.get("log_dir", FLAGS_log_dir);
-  if (params.contains("work_dir")) {
-    workDir = params.get("work_dir", "");
-  } else if (params.contains("home")) {
-    workDir = params.get("home", "") + "/work";
+  webuiPort = conf.get("webui_port", "8081");
+  logDir = conf.get("log_dir", FLAGS_log_dir);
+  if (conf.contains("work_dir")) {
+    workDir = conf.get("work_dir", "");
+  } else if (conf.contains("home")) {
+    workDir = conf.get("home", "") + "/work";
   } else {
     workDir = "work";
   }
@@ -87,12 +90,16 @@ public:
   StateGetter() {}
   ~StateGetter() {}
 
-  void operator () ()
+  virtual void operator () ()
   {
-    send(::slave, pack<S2S_GET_STATE>());
+    send(::slave, S2S_GET_STATE);
     receive();
     CHECK(msgid() == S2S_GET_STATE_REPLY);
-    slaveState = unpack<S2S_GET_STATE_REPLY, 0>(body());
+
+    const Message<S2S_GET_STATE_REPLY>& msg = message();
+
+    slaveState =
+      *(state::SlaveState **) msg.pointer().data();
   }
 };
 
