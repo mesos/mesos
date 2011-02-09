@@ -360,6 +360,7 @@ python: $(MESOS_PYTHON_LIB) $(MESOS_PYTHON_FILE) $(MESOS_PYTHON_PROTOBUFS)
 
 $(MESOS_PYTHON_LIB_OBJ): %.o: $(SRCDIR)/%.cpp
 ifdef PYTHON_HEADERS
+	mkdir -p python/native
 	$(CXX) -c $(CXXFLAGS) -Ipython/native -I$(PYTHON_HEADERS) -o $@ $<
 endif
 
@@ -368,7 +369,7 @@ ifdef PYTHON_HEADERS
 	$(CXX) $(CXXFLAGS) -shared -o $@ $(MESOS_PYTHON_LIB_OBJ) $(MESOS_SCHED_LIB) $(MESOS_EXEC_LIB) $(LDFLAGS) $(PYTHON_LDFLAGS) $(LIBS)
 endif
 
-$(MESOS_PYTHON_FILE): python/src/mesos.py
+$(MESOS_PYTHON_FILE): $(SRCDIR)/python/src/mesos.py
 ifdef PYTHON_HEADERS
 	cp $< $@
 endif
