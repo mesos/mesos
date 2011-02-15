@@ -149,7 +149,7 @@ void Slave::operator () ()
   LOG(INFO) << "Slave started at " << self();
 
   // Get our hostname
-  char buf[HOST_NAME_MAX];
+  char buf[512];
   gethostname(buf, sizeof(buf));
   hostent *he = gethostbyname2(buf, AF_INET);
   string hostname = he->h_name;
