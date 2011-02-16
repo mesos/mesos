@@ -165,7 +165,7 @@ void Slave::operator () ()
   while (true) {
     switch (receive(1)) {
       case NEW_MASTER_DETECTED: {
-        const Message<NEW_MASTER_DETECTED>& msg = message();
+        const MSG<NEW_MASTER_DETECTED>& msg = message();
 
 	LOG(INFO) << "New master at " << msg.pid();
 
@@ -174,12 +174,12 @@ void Slave::operator () ()
 
 	if (slaveId == "") {
 	  // Slave started before master.
-          Message<S2M_REGISTER_SLAVE> out;
+          MSG<S2M_REGISTER_SLAVE> out;
           out.mutable_slave()->MergeFrom(slave);
 	  send(master, out);
 	} else {
 	  // Re-registering, so send tasks running.
-          Message<S2M_REREGISTER_SLAVE> out;
+          MSG<S2M_REREGISTER_SLAVE> out;
           out.mutable_slave_id()->MergeFrom(slaveId);
           out.mutable_slave()->MergeFrom(slave);
 
@@ -207,7 +207,7 @@ void Slave::operator () ()
       }
 
       case M2S_REGISTER_REPLY: {
-        const Message<M2S_REGISTER_REPLY>& msg = message();
+        const MSG<M2S_REGISTER_REPLY>& msg = message();
         slaveId = msg.slave_id();
 
         LOG(INFO) << "Registered with master; given slave ID " << slaveId;
@@ -218,7 +218,7 @@ void Slave::operator () ()
       }
       
       case M2S_REREGISTER_REPLY: {
-        const Message<M2S_REREGISTER_REPLY>& msg = message();
+        const MSG<M2S_REREGISTER_REPLY>& msg = message();
 
         LOG(INFO) << "Re-registered with master";
 
@@ -238,7 +238,7 @@ void Slave::operator () ()
       }
       
       case M2S_RUN_TASK: {
-        const Message<M2S_RUN_TASK>& msg = message();
+        const MSG<M2S_RUN_TASK>& msg = message();
 
         const TaskDescription& task = msg.task();
 
@@ -266,7 +266,7 @@ void Slave::operator () ()
             // Add the task to the executor.
             executor->addTask(task);
 
-            Message<S2E_RUN_TASK> out;
+            MSG<S2E_RUN_TASK> out;
             out.mutable_framework()->MergeFrom(framework->info);
             out.mutable_framework_id()->MergeFrom(framework->frameworkId);
             out.set_pid(framework->pid);
@@ -292,7 +292,7 @@ void Slave::operator () ()
       }
 
       case M2S_KILL_TASK: {
-        const Message<M2S_KILL_TASK>& msg = message();
+        const MSG<M2S_KILL_TASK>& msg = message();
 
         LOG(INFO) << "Asked to kill task " << msg.task_id()
                   << " of framework " << msg.framework_id();
@@ -308,7 +308,7 @@ void Slave::operator () ()
             executor->removeTask(msg.task_id());
             isolationModule->resourcesChanged(framework, executor);
 
-            Message<S2M_STATUS_UPDATE> out;
+            MSG<S2M_STATUS_UPDATE> out;
             out.mutable_framework_id()->MergeFrom(msg.framework_id());
             TaskStatus *status = out.mutable_status();
             status->mutable_task_id()->MergeFrom(msg.task_id());
@@ -321,7 +321,7 @@ void Slave::operator () ()
           } else {
             // Otherwise, send a message to the executor and wait for
             // it to send us a status update.
-            Message<S2E_KILL_TASK> out;
+            MSG<S2E_KILL_TASK> out;
             out.mutable_framework_id()->MergeFrom(msg.framework_id());
             out.mutable_task_id()->MergeFrom(msg.task_id());
             send(executor->pid, out);
@@ -331,7 +331,7 @@ void Slave::operator () ()
                        << " of framework " << msg.framework_id()
                        << " because no such framework is running";
 
-          Message<S2M_STATUS_UPDATE> out;
+          MSG<S2M_STATUS_UPDATE> out;
           out.mutable_framework_id()->MergeFrom(msg.framework_id());
           TaskStatus *status = out.mutable_status();
           status->mutable_task_id()->MergeFrom(msg.task_id());
@@ -346,7 +346,7 @@ void Slave::operator () ()
       }
 
       case M2S_KILL_FRAMEWORK: {
-        const Message<M2S_KILL_FRAMEWORK>&msg = message();
+        const MSG<M2S_KILL_FRAMEWORK>&msg = message();
 
         LOG(INFO) << "Asked to kill framework " << msg.framework_id();
 
@@ -357,7 +357,7 @@ void Slave::operator () ()
       }
 
       case M2S_FRAMEWORK_MESSAGE: {
-        const Message<M2S_FRAMEWORK_MESSAGE>&msg = message();
+        const MSG<M2S_FRAMEWORK_MESSAGE>&msg = message();
 
         Framework* framework = getFramework(msg.framework_id());
         if (framework != NULL) {
@@ -365,20 +365,20 @@ void Slave::operator () ()
 
           Executor* executor = framework->getExecutor(message.executor_id());
           if (executor == NULL) {
-            LOG(WARNING) << "Dropping message for executor "
-                         << message.executor_id() << " of framework "
+            LOG(WARNING) << "Dropping message for executor '"
+                         << message.executor_id() << "' of framework "
                          << msg.framework_id()
                          << " because executor does not exist";
           } else if (!executor->pid) {
             // TODO(*): If executor is not started, queue framework message?
             // (It's probably okay to just drop it since frameworks can have
             // the executor send a message to the master to say when it's ready.)
-            LOG(WARNING) << "Dropping message for executor "
-                         << message.executor_id() << " of framework "
+            LOG(WARNING) << "Dropping message for executor '"
+                         << message.executor_id() << "' of framework "
                          << msg.framework_id()
                          << " because executor is not running";
           } else {
-            Message<S2E_FRAMEWORK_MESSAGE> out;
+            MSG<S2E_FRAMEWORK_MESSAGE> out;
             out.mutable_framework_id()->MergeFrom(msg.framework_id());
             out.mutable_message()->MergeFrom(message);
             send(executor->pid, out);
@@ -392,7 +392,7 @@ void Slave::operator () ()
       }
 
       case M2S_UPDATE_FRAMEWORK: {
-        const Message<M2S_UPDATE_FRAMEWORK>&msg = message();
+        const MSG<M2S_UPDATE_FRAMEWORK>&msg = message();
 
         Framework *framework = getFramework(msg.framework_id());
         if (framework != NULL) {
@@ -404,7 +404,7 @@ void Slave::operator () ()
       }
 
       case M2S_STATUS_UPDATE_ACK: {
-        const Message<M2S_STATUS_UPDATE_ACK>& msg = message();
+        const MSG<M2S_STATUS_UPDATE_ACK>& msg = message();
 
         Framework* framework = getFramework(msg.framework_id());
         if (framework != NULL) {
@@ -422,10 +422,10 @@ void Slave::operator () ()
       }
 
       case E2S_REGISTER_EXECUTOR: {
-        const Message<E2S_REGISTER_EXECUTOR>& msg = message();
+        const MSG<E2S_REGISTER_EXECUTOR>& msg = message();
 
-        LOG(INFO) << "Got registration for executor "
-                  << msg.executor_id() << " of framework "
+        LOG(INFO) << "Got registration for executor '"
+                  << msg.executor_id() << "' of framework "
                   << msg.framework_id();
 
         Framework* framework = getFramework(msg.framework_id());
@@ -434,12 +434,12 @@ void Slave::operator () ()
 
           // Check the status of the executor.
           if (executor == NULL) {
-            LOG(WARNING) << "Not expecting executor " << msg.executor_id()
-                         << " of framework " << msg.framework_id();
+            LOG(WARNING) << "Not expecting executor '" << msg.executor_id()
+                         << "' of framework " << msg.framework_id();
             send(from(), S2E_KILL_EXECUTOR);
           } else if (executor->pid != PID()) {
-            LOG(WARNING) << "Not good, executor " << msg.executor_id()
-                         << " of framework " << msg.framework_id()
+            LOG(WARNING) << "Not good, executor '" << msg.executor_id()
+                         << "' of framework " << msg.framework_id()
                          << " is already running";
             send(from(), S2E_KILL_EXECUTOR);
           } else {
@@ -450,7 +450,7 @@ void Slave::operator () ()
             isolationModule->resourcesChanged(framework, executor);
 
             // Tell executor it's registered and give it any queued tasks.
-            Message<S2E_REGISTER_REPLY> out;
+            MSG<S2E_REGISTER_REPLY> out;
             ExecutorArgs* args = out.mutable_args();
             args->mutable_framework_id()->MergeFrom(framework->frameworkId);
             args->set_name(framework->info.name());
@@ -474,7 +474,7 @@ void Slave::operator () ()
       }
 
       case E2S_STATUS_UPDATE: {
-        const Message<E2S_STATUS_UPDATE>& msg = message();
+        const MSG<E2S_STATUS_UPDATE>& msg = message();
 
         const TaskStatus& status = msg.status();
 
@@ -496,7 +496,7 @@ void Slave::operator () ()
             }
 
             // Send message and record the status for possible resending.
-            Message<S2M_STATUS_UPDATE> out;
+            MSG<S2M_STATUS_UPDATE> out;
             out.mutable_framework_id()->MergeFrom(msg.framework_id());
             out.mutable_status()->MergeFrom(status);
             send(master, out);
@@ -515,7 +515,7 @@ void Slave::operator () ()
       }
 
       case E2S_FRAMEWORK_MESSAGE: {
-        const Message<E2S_FRAMEWORK_MESSAGE>& msg = message();
+        const MSG<E2S_FRAMEWORK_MESSAGE>& msg = message();
 
         const FrameworkMessage& message = msg.message();
 
@@ -526,7 +526,7 @@ void Slave::operator () ()
 		    << " to " << framework->pid;
 
           // TODO(benh): This is weird, sending an M2F message.
-          Message<M2F_FRAMEWORK_MESSAGE> out;
+          MSG<M2F_FRAMEWORK_MESSAGE> out;
           out.mutable_framework_id()->MergeFrom(msg.framework_id());
           out.mutable_message()->MergeFrom(message);
           out.mutable_message()->mutable_slave_id()->MergeFrom(slaveId);
@@ -537,7 +537,7 @@ void Slave::operator () ()
 
       case S2S_GET_STATE: {
         state::SlaveState *state = getState();
-        Message<S2S_GET_STATE_REPLY> out;
+        MSG<S2S_GET_STATE_REPLY> out;
         out.set_pointer((char *) &state, sizeof(state));
         send(from(), out);
         break;
@@ -579,7 +579,7 @@ void Slave::operator () ()
                 LOG(WARNING) << "Resending status update"
                              << " for task " << status.task_id()
                              << " of framework " << framework->frameworkId;
-                Message<S2M_STATUS_UPDATE> out;
+                MSG<S2M_STATUS_UPDATE> out;
                 out.mutable_framework_id()->MergeFrom(framework->frameworkId);
                 out.mutable_status()->MergeFrom(status);
                 send(master, out);
@@ -623,7 +623,7 @@ void Slave::sendQueuedTasks(Framework* framework, Executor* executor)
     // Add the task to the executor.
     executor->addTask(task);
 
-    Message<S2E_RUN_TASK> out;
+    MSG<S2E_RUN_TASK> out;
     out.mutable_framework()->MergeFrom(framework->info);
     out.mutable_framework_id()->MergeFrom(framework->frameworkId);
     out.set_pid(framework->pid);
@@ -643,8 +643,8 @@ void Slave::killFramework(Framework *framework, bool killExecutors)
   // Shutdown all executors of this framework.
   foreachpaircopy (const ExecutorID& executorId, Executor* executor, framework->executors) {
     if (killExecutors) {
-      LOG(INFO) << "Killing executor " << executorId
-                << " of framework " << framework->frameworkId;
+      LOG(INFO) << "Killing executor '" << executorId
+                << "' of framework " << framework->frameworkId;
 
       send(executor->pid, S2E_KILL_EXECUTOR);
 
@@ -673,11 +673,11 @@ void Slave::executorExited(const FrameworkID& frameworkId, const ExecutorID& exe
   if (framework != NULL) {
     Executor* executor = framework->getExecutor(executorId);
     if (executor != NULL) {
-      LOG(INFO) << "Exited executor " << executorId
-                << " of framework " << frameworkId
+      LOG(INFO) << "Exited executor '" << executorId
+                << "' of framework " << frameworkId
                 << " with status " << status;
 
-      Message<S2M_EXITED_EXECUTOR> out;
+      MSG<S2M_EXITED_EXECUTOR> out;
       out.mutable_slave_id()->MergeFrom(slaveId);
       out.mutable_framework_id()->MergeFrom(frameworkId);
       out.mutable_executor_id()->MergeFrom(executorId);
@@ -692,13 +692,13 @@ void Slave::executorExited(const FrameworkID& frameworkId, const ExecutorID& exe
         killFramework(framework);
       }
     } else {
-      LOG(WARNING) << "UNKNOWN executor " << executorId
-                   << " of framework " << frameworkId
+      LOG(WARNING) << "UNKNOWN executor '" << executorId
+                   << "' of framework " << frameworkId
                    << " has exited with status " << status;
     }
   } else {
-    LOG(WARNING) << "UNKNOWN executor " << executorId
-                 << " of UNKNOWN framework " << frameworkId
+    LOG(WARNING) << "UNKNOWN executor '" << executorId
+                 << "' of UNKNOWN framework " << frameworkId
                  << " has exited with status " << status;
   }
 };
