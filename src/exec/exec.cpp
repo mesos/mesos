@@ -1,6 +1,7 @@
 #include <signal.h>
 
-#include <cerrno>
+#include <glog/logging.h>
+
 #include <iostream>
 #include <string>
 #include <sstream>
@@ -25,129 +26,133 @@ using boost::bind;
 using boost::cref;
 using boost::unordered_map;
 
-using std::cerr;
-using std::endl;
+using process::UPID;
+
 using std::string;
 
 
 namespace mesos { namespace internal {
 
-class ExecutorProcess : public MesosProcess
+class ExecutorProcess : public MesosProcess<ExecutorProcess>
 {
 public:
-  ExecutorProcess(const PID& _slave, MesosExecutorDriver* _driver,
+  ExecutorProcess(const UPID& _slave, MesosExecutorDriver* _driver,
                   Executor* _executor, const FrameworkID& _frameworkId,
                   const ExecutorID& _executorId, bool _local)
     : slave(_slave), driver(_driver), executor(_executor),
       frameworkId(_frameworkId), executorId(_executorId),
-      local(_local), terminate(false) {}
+      local(_local), terminate(false)
+  {
+    install(S2E_REGISTER_REPLY, &ExecutorProcess::registerReply,
+            &ExecutorRegisteredMessage::args);
 
-  ~ExecutorProcess() {}
+    install(S2E_RUN_TASK, &ExecutorProcess::runTask,
+            &RunTaskMessage::task);
+
+    install(S2E_KILL_TASK, &ExecutorProcess::killTask,
+            &KillTaskMessage::task_id);
+
+    install(S2E_FRAMEWORK_MESSAGE, &ExecutorProcess::frameworkMessage,
+            &FrameworkMessageMessage::message);
+
+    install(S2E_KILL_EXECUTOR, &ExecutorProcess::killExecutor);
+
+    install(process::EXITED, &ExecutorProcess::exited);
+  }
+
+  virtual ~ExecutorProcess() {}
 
 protected:
   virtual void operator () ()
   {
+    VLOG(1) << "Executor started at: " << self();
+
     link(slave);
 
     // Register with slave.
-    Message<E2S_REGISTER_EXECUTOR> out;
+    MSG<E2S_REGISTER_EXECUTOR> out;
     out.mutable_framework_id()->MergeFrom(frameworkId);
     out.mutable_executor_id()->MergeFrom(executorId);
     send(slave, out);
 
     while(true) {
-      // TODO(benh): Is there a better way to architect this code? In
-      // particular, if the executor blocks in a callback, we can't
-      // process any other messages. This is especially tricky if a
-      // slave dies since we won't handle the PROCESS_EXIT message in
-      // a timely manner (if at all).
-
       // Check for terminate in the same way as SchedulerProcess. See
       // comments there for an explanation of why this is necessary.
-      if (terminate)
-        return;
+      if (terminate) return;
 
-      switch(receive(2)) {
-        case S2E_REGISTER_REPLY: {
-          const Message<S2E_REGISTER_REPLY>& msg = message();
-          slaveId = msg.args().slave_id();
-          invoke(bind(&Executor::init, executor, driver, cref(msg.args())));
-          break;
-        }
+      serve(0, true);
+    }
+  }
 
-        case S2E_RUN_TASK: {
-          const Message<S2E_RUN_TASK>& msg = message();
+  void registerReply(const ExecutorArgs& args)
+  {
+    VLOG(1) << "Executor registered on slave " << args.slave_id();
+    slaveId = args.slave_id();
+    process::invoke(bind(&Executor::init, executor, driver, cref(args)));
+  }
 
-          const TaskDescription& task = msg.task();
+  void runTask(const TaskDescription& task)
+  {
+    VLOG(1) << "Executor asked to run a task " << task.task_id();
 
-          Message<E2S_STATUS_UPDATE> out;
-          out.mutable_framework_id()->MergeFrom(frameworkId);
-          TaskStatus* status = out.mutable_status();
-          status->mutable_task_id()->MergeFrom(task.task_id());
-          status->mutable_slave_id()->MergeFrom(slaveId);
-          status->set_state(TASK_RUNNING);
-          send(slave, out);
+    MSG<E2S_STATUS_UPDATE> out;
+    out.mutable_framework_id()->MergeFrom(frameworkId);
+    TaskStatus* status = out.mutable_status();
+    status->mutable_task_id()->MergeFrom(task.task_id());
+    status->mutable_slave_id()->MergeFrom(slaveId);
+    status->set_state(TASK_RUNNING);
+    send(slave, out);
 
-          invoke(bind(&Executor::launchTask, executor, driver, cref(task)));
-          break;
-        }
+    process::invoke(bind(&Executor::launchTask, executor, driver, cref(task)));
+  }
 
-        case S2E_KILL_TASK: {
-          const Message<S2E_KILL_TASK>& msg = message();
-          invoke(bind(&Executor::killTask, executor, driver,
-                      cref(msg.task_id())));
-          break;
-        }
+  void killTask(const TaskID& taskId)
+  {
+    VLOG(1) << "Executor asked to kill task " << taskId;
+    process::invoke(bind(&Executor::killTask, executor, driver, cref(taskId)));
+  }
 
-        case S2E_FRAMEWORK_MESSAGE: {
-          const Message<S2E_FRAMEWORK_MESSAGE>& msg = message();
-          const FrameworkMessage& message = msg.message();
-          invoke(bind(&Executor::frameworkMessage, executor, driver,
-                      cref(message)));
-          break;
-        }
+  void frameworkMessage(const FrameworkMessage& message)
+  {
+    VLOG(1) << "Executor received message";
+    process::invoke(bind(&Executor::frameworkMessage, executor, driver,
+                         cref(message)));
+  }
 
-        case S2E_KILL_EXECUTOR: {
-          invoke(bind(&Executor::shutdown, executor, driver));
-          if (!local)
-            exit(0);
-          else
-            return;
-        }
+  void killExecutor()
+  {
+    VLOG(1) << "Executor asked to shutdown";
+    process::invoke(bind(&Executor::shutdown, executor, driver));
+    if (!local) {
+      exit(0);
+    } else {
+      return;
+    }
+  }
 
-        case PROCESS_EXIT: {
-          // TODO: Pass an argument to shutdown to tell it this is abnormal?
-          invoke(bind(&Executor::shutdown, executor, driver));
+  void exited()
+  {
+    VLOG(1) << "Slave exited, trying to shutdown";
 
-          // This is a pretty bad state ... no slave is left. Rather
-          // than exit lets kill our process group (which includes
-          // ourself) hoping to clean up any processes this executor
-          // launched itself.
-          // TODO(benh): Maybe do a SIGTERM and then later do a SIGKILL?
-          if (!local)
-            killpg(0, SIGKILL);
-          else
-            return;
-        }
+    // TODO: Pass an argument to shutdown to tell it this is abnormal?
+    process::invoke(bind(&Executor::shutdown, executor, driver));
 
-        case PROCESS_TIMEOUT: {
-          break;
-        }
-
-        default: {
-          // TODO: Is this serious enough to exit?
-          cerr << "Received unknown message ID " << msgid()
-               << " from " << from() << endl;
-          break;
-        }
-      }
+    // This is a pretty bad state ... no slave is left. Rather
+    // than exit lets kill our process group (which includes
+    // ourself) hoping to clean up any processes this executor
+    // launched itself.
+    // TODO(benh): Maybe do a SIGTERM and then later do a SIGKILL?
+    if (!local) {
+      killpg(0, SIGKILL);
+    } else {
+      terminate = true;
     }
   }
 
 private:
   friend class mesos::MesosExecutorDriver;
 
-  PID slave;
+  UPID slave;
   MesosExecutorDriver* driver;
   Executor* executor;
   FrameworkID frameworkId;
@@ -176,12 +181,19 @@ MesosExecutorDriver::MesosExecutorDriver(Executor* _executor)
   pthread_mutex_init(&mutex, &attr);
   pthread_mutexattr_destroy(&attr);
   pthread_cond_init(&cond, 0);
+
+  // TODO(benh): Initialize glog.
+
+  // Initialize libprocess library (but not glog, done above).
+  process::initialize(false);
 }
 
 
 MesosExecutorDriver::~MesosExecutorDriver()
 {
-  Process::wait(process->self());
+  // Just as in SchedulerProcess, we might wait here indefinitely if
+  // MesosExecutorDriver::stop has not been invoked.
+  process::wait(process->self());
   delete process;
 
   pthread_mutex_destroy(&mutex);
@@ -204,7 +216,7 @@ int MesosExecutorDriver::start()
 
   bool local;
 
-  PID slave;
+  UPID slave;
   FrameworkID frameworkId;
   ExecutorID executorId;
 
@@ -214,42 +226,47 @@ int MesosExecutorDriver::start()
   /* Check if this is local (for example, for testing). */
   value = getenv("MESOS_LOCAL");
 
-  if (value != NULL)
+  if (value != NULL) {
     local = true;
-  else
+  } else {
     local = false;
+  }
 
   /* Get slave PID from environment. */
   value = getenv("MESOS_SLAVE_PID");
 
-  if (value == NULL)
+  if (value == NULL) {
     fatal("expecting MESOS_SLAVE_PID in environment");
+  }
 
-  slave = PID(value);
+  slave = UPID(value);
 
-  if (!slave)
+  if (!slave) {
     fatal("cannot parse MESOS_SLAVE_PID");
+  }
 
   /* Get framework ID from environment. */
   value = getenv("MESOS_FRAMEWORK_ID");
 
-  if (value == NULL)
+  if (value == NULL) {
     fatal("expecting MESOS_FRAMEWORK_ID in environment");
+  }
 
   frameworkId.set_value(value);
 
   /* Get executor ID from environment. */
   value = getenv("MESOS_EXECUTOR_ID");
 
-  if (value == NULL)
+  if (value == NULL) {
     fatal("expecting MESOS_EXECUTOR_ID in environment");
+  }
 
   executorId.set_value(value);
 
   process =
     new ExecutorProcess(slave, this, executor, frameworkId, executorId, local);
 
-  Process::spawn(process);
+  process::spawn(process);
 
   running = true;
 
@@ -265,7 +282,10 @@ int MesosExecutorDriver::stop()
     return -1;
   }
 
+  CHECK(process != NULL);
+
   process->terminate = true;
+  process::post(process->self(), process::TERMINATE);
 
   running = false;
 
@@ -278,8 +298,10 @@ int MesosExecutorDriver::stop()
 int MesosExecutorDriver::join()
 {
   Lock lock(&mutex);
-  while (running)
+
+  while (running) {
     pthread_cond_wait(&cond, &mutex);
+  }
 
   return 0;
 }
@@ -301,13 +323,15 @@ int MesosExecutorDriver::sendStatusUpdate(const TaskStatus& status)
     return -1;
   }
 
+  CHECK(process != NULL);
+
   // Validate that they set the correct slave ID.
   if (!(process->slaveId == status.slave_id())) {
     return -1;
   }
 
   // TODO(benh): Do a dispatch to Executor first?
-  Message<E2S_STATUS_UPDATE> out;
+  MSG<E2S_STATUS_UPDATE> out;
   out.mutable_framework_id()->MergeFrom(process->frameworkId);
   out.mutable_status()->MergeFrom(status);
   process->send(process->slave, out);
@@ -325,6 +349,8 @@ int MesosExecutorDriver::sendFrameworkMessage(const FrameworkMessage& message)
     return -1;
   }
 
+  CHECK(process != NULL);
+
   // Validate that they set the correct slave ID and executor ID.
   if (!(process->slaveId == message.slave_id())) {
     return -1;
@@ -335,7 +361,7 @@ int MesosExecutorDriver::sendFrameworkMessage(const FrameworkMessage& message)
   }
 
   // TODO(benh): Do a dispatch to Executor first?
-  Message<E2S_FRAMEWORK_MESSAGE> out;
+  MSG<E2S_FRAMEWORK_MESSAGE> out;
   out.mutable_framework_id()->MergeFrom(process->frameworkId);
   out.mutable_message()->MergeFrom(message);
   process->send(process->slave, out);

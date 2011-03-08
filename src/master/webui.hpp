@@ -12,10 +12,11 @@
 
 namespace mesos { namespace internal { namespace master {
 
-void startMasterWebUI(const PID& master, const Configuration& conf);
+void startMasterWebUI(const process::PID<Master>& master,
+                      const Configuration& conf);
 
-}}} /* namespace */
+}}} // namespace mesos { namespace internal { namespace master {
 
-#endif /* MESOS_WEBUI */
+#endif // MESOS_WEBUI
 
-#endif /* __MASTER_WEBUI_HPP__ */
+#endif // __MASTER_WEBUI_HPP__ 

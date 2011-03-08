@@ -1,6 +1,9 @@
+#include "common/build.hpp"
 #include "common/logging.hpp"
 
 #include "configurator/configurator.hpp"
+
+#include "detector/detector.hpp"
 
 #include "isolation_module_factory.hpp"
 #include "slave.hpp"
@@ -36,13 +39,15 @@ void usage(const char *programName, const Configurator& configurator)
 int main(int argc, char **argv)
 {
   Configurator configurator;
+  Logging::registerOptions(&configurator);
+  Slave::registerOptions(&configurator);
+  configurator.addOption<int>("port", 'p', "Port to listen on", 5050);
+  configurator.addOption<string>("ip", "IP address to listen on");
   configurator.addOption<string>("url", 'u', "Master URL");
   configurator.addOption<string>("isolation", 'i', "Isolation module name", "process");
 #ifdef MESOS_WEBUI
   configurator.addOption<int>("webui_port", 'w', "Web UI port", 8081);
 #endif
-  Logging::registerOptions(&configurator);
-  Slave::registerOptions(&configurator);
 
   if (argc == 2 && string("--help") == argv[1]) {
     usage(argv[0], configurator);
@@ -59,6 +64,17 @@ int main(int argc, char **argv)
 
   Logging::init(argv[0], conf);
 
+  if (conf.contains("port")) {
+    setenv("LIBPROCESS_PORT", conf["port"].c_str(), 1);
+  }
+
+  if (conf.contains("ip")) {
+    setenv("LIBPROCESS_IP", conf["ip"].c_str(), 1);
+  }
+
+  // Initialize libprocess library (but not glog, done above).
+  process::initialize(false);
+
   if (!conf.contains("url")) {
     cerr << "Master URL argument (--url) required." << endl;
     exit(1);
@@ -67,36 +83,35 @@ int main(int argc, char **argv)
 
   string isolation = conf["isolation"];
   LOG(INFO) << "Creating \"" << isolation << "\" isolation module";
-  IsolationModule *isolationModule = IsolationModule::create(isolation);
+  IsolationModule* isolationModule = IsolationModule::create(isolation);
 
   if (isolationModule == NULL) {
     cerr << "Unrecognized isolation type: " << isolation << endl;
     exit(1);
   }
 
-  LOG(INFO) << "Build: " << BUILD_DATE << " by " << BUILD_USER;
+  LOG(INFO) << "Build: " << build::DATE << " by " << build::USER;
   LOG(INFO) << "Starting Mesos slave";
 
-  if (chdir(dirname(argv[0])) != 0)
+  if (chdir(dirname(argv[0])) != 0) {
     fatalerror("Could not chdir into %s", dirname(argv[0]));
+  }
 
   Slave* slave = new Slave(conf, false, isolationModule);
-  PID pid = Process::spawn(slave);
+  process::spawn(slave);
 
-  bool quiet = Logging::isQuiet(conf);
-  MasterDetector *detector = MasterDetector::create(url, pid, false, quiet);
+  MasterDetector* detector =
+    MasterDetector::create(url, slave->self(), false, Logging::isQuiet(conf));
 
 #ifdef MESOS_WEBUI
-  startSlaveWebUI(pid, conf);
+  startSlaveWebUI(slave->self(), conf);
 #endif
 
-  Process::wait(pid);
+  process::wait(slave->self());
+  delete slave;
 
   MasterDetector::destroy(detector);
-
   IsolationModule::destroy(isolationModule);
-
-  delete slave;
 
   return 0;
 }

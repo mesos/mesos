@@ -1,18 +1,24 @@
 #include <libgen.h>
 
+#include "common/build.hpp"
 #include "common/logging.hpp"
 
 #include "configurator/configurator.hpp"
 
+#include "detector/detector.hpp"
+
 #include "master.hpp"
 #include "webui.hpp"
 
-using std::cerr;
-using std::endl;
+using namespace mesos::internal;
+using namespace mesos::internal::master;
+
 using boost::lexical_cast;
 using boost::bad_lexical_cast;
 
-using namespace mesos::internal::master;
+using std::cerr;
+using std::endl;
+using std::string;
 
 
 void usage(const char* progName, const Configurator& configurator)
@@ -31,14 +37,14 @@ void usage(const char* progName, const Configurator& configurator)
 int main(int argc, char **argv)
 {
   Configurator configurator;
-  configurator.addOption<string>("url", 'u', "URL used for leader election");
+  Logging::registerOptions(&configurator);
+  Master::registerOptions(&configurator);
   configurator.addOption<int>("port", 'p', "Port to listen on", 5050);
   configurator.addOption<string>("ip", "IP address to listen on");
+  configurator.addOption<string>("url", 'u', "URL used for leader election");
 #ifdef MESOS_WEBUI
   configurator.addOption<int>("webui_port", 'w', "Web UI port", 8080);
 #endif
-  Logging::registerOptions(&configurator);
-  Master::registerOptions(&configurator);
 
   if (argc == 2 && string("--help") == argv[1]) {
     usage(argv[0], configurator);
@@ -55,31 +61,38 @@ int main(int argc, char **argv)
 
   Logging::init(argv[0], conf);
 
-  if (conf.contains("port"))
+  if (conf.contains("port")) {
     setenv("LIBPROCESS_PORT", conf["port"].c_str(), 1);
+  }
 
-  if (conf.contains("ip"))
+  if (conf.contains("ip")) {
     setenv("LIBPROCESS_IP", conf["ip"].c_str(), 1);
+  }
+
+  // Initialize libprocess library (but not glog, done above).
+  process::initialize(false);
 
   string url = conf.get("url", "");
 
-  LOG(INFO) << "Build: " << BUILD_DATE << " by " << BUILD_USER;
+  LOG(INFO) << "Build: " << build::DATE << " by " << build::USER;
   LOG(INFO) << "Starting Mesos master";
 
-  if (chdir(dirname(argv[0])) != 0)
+  if (chdir(dirname(argv[0])) != 0) {
     fatalerror("Could not chdir into %s", dirname(argv[0]));
+  }
 
-  Master *master = new Master(conf);
-  PID pid = Process::spawn(master);
+  Master* master = new Master(conf);
+  process::spawn(master);
 
-  bool quiet = Logging::isQuiet(conf);
-  MasterDetector *detector = MasterDetector::create(url, pid, true, quiet);
+  MasterDetector* detector =
+    MasterDetector::create(url, master->self(), true, Logging::isQuiet(conf));
 
 #ifdef MESOS_WEBUI
-  startMasterWebUI(pid, conf);
+  startMasterWebUI(master->self(), conf);
 #endif
   
-  Process::wait(pid);
+  process::wait(master->self());
+  delete master;
 
   MasterDetector::destroy(detector);
 

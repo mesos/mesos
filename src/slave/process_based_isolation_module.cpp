@@ -39,8 +39,8 @@ ProcessBasedIsolationModule::~ProcessBasedIsolationModule()
   // could thus lead to a seg fault!
   if (initialized) {
     CHECK(reaper != NULL);
-    Process::post(reaper->self(), SHUTDOWN_REAPER);
-    Process::wait(reaper->self());
+    process::post(reaper->self(), process::TERMINATE);
+    process::wait(reaper->self());
     delete reaper;
   }
 }
@@ -50,7 +50,7 @@ void ProcessBasedIsolationModule::initialize(Slave *slave)
 {
   this->slave = slave;
   reaper = new Reaper(this);
-  Process::spawn(reaper);
+  process::spawn(reaper);
   initialized = true;
 }
 
@@ -128,7 +128,8 @@ ExecutorLauncher* ProcessBasedIsolationModule::createExecutorLauncher(Framework*
                          executor->info.executor_id(),
                          executor->info.uri(),
                          framework->info.user(),
-                         slave->getUniqueWorkDirectory(framework->frameworkId),
+                         slave->getUniqueWorkDirectory(framework->frameworkId,
+                                                       executor->info.executor_id()),
                          slave->self(),
                          slave->getConfiguration().get("frameworks_home", ""),
                          slave->getConfiguration().get("home", ""),
@@ -148,8 +149,8 @@ void ProcessBasedIsolationModule::Reaper::operator () ()
 {
   link(module->slave->self());
   while (true) {
-    switch (receive(1)) {
-    case PROCESS_TIMEOUT: {
+    receive(1);
+    if (name() == process::TIMEOUT) {
       // Check whether any child process has exited.
       pid_t pid;
       int status;
@@ -171,10 +172,7 @@ void ProcessBasedIsolationModule::Reaper::operator () ()
           }
         }
       }
-      break;
-    }
-    case SHUTDOWN_REAPER:
-    case PROCESS_EXIT:
+    } else if (name() == process::TERMINATE || name() == process::EXITED) {
       return;
     }
   }

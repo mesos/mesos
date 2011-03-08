@@ -12,6 +12,7 @@
 #include <iostream>
 #include <list>
 #include <sstream>
+#include <set>
 #include <vector>
 
 #include <arpa/inet.h>
@@ -26,19 +27,18 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 
-#include <reliable.hpp>
+#include <process.hpp>
 
 #include "isolation_module.hpp"
 #include "state.hpp"
 
+#include "common/build.hpp"
 #include "common/fatal.hpp"
 #include "common/foreach.hpp"
 #include "common/resources.hpp"
 #include "common/type_utils.hpp"
 
 #include "configurator/configurator.hpp"
-
-#include "detector/detector.hpp"
 
 #include "messaging/messages.hpp"
 
@@ -48,11 +48,14 @@ namespace mesos { namespace internal { namespace slave {
 using foreach::_;
 
 
+const double STATUS_UPDATE_RETRY_TIMEOUT = 10;
+
+
 // Information describing an executor (goes away if executor crashes).
 struct Executor
 {
   Executor(const FrameworkID& _frameworkId, const ExecutorInfo& _info)
-    : frameworkId(_frameworkId), info(_info), pid(PID()) {}
+    : frameworkId(_frameworkId), info(_info), pid(process::UPID()) {}
 
   ~Executor()
   {
@@ -106,7 +109,7 @@ struct Executor
   const FrameworkID frameworkId;
   const ExecutorInfo info;
 
-  PID pid;
+  process::UPID pid;
 
   std::list<TaskDescription> queuedTasks;
   boost::unordered_map<TaskID, Task*> tasks;
@@ -123,7 +126,7 @@ struct Executor
 struct Framework
 {
   Framework( const FrameworkID& _frameworkId, const FrameworkInfo& _info,
-            const PID& _pid)
+            const process::UPID& _pid)
     : frameworkId(_frameworkId), info(_info), pid(_pid) {}
 
   ~Framework() {}
@@ -168,17 +171,18 @@ struct Framework
   const FrameworkID frameworkId;
   const FrameworkInfo info;
 
-  PID pid;
+  process::UPID pid;
 
   boost::unordered_map<ExecutorID, Executor*> executors;
+  boost::unordered_map<double, boost::unordered_map<TaskID, TaskStatus> > statuses;
 };
 
 
 // Periodically sends heartbeats to the master
-class Heart : public MesosProcess
+class Heart : public MesosProcess<Heart>
 {
 public:
-  Heart(const PID &_master, const PID &_slave,
+  Heart(const process::UPID &_master, const process::UPID &_slave,
         const SlaveID& _slaveId, double _interval)
     : master(_master), slave(_slave), slaveId(_slaveId), interval(_interval) {}
 
@@ -188,29 +192,26 @@ protected:
     link(slave);
     link(master);
     do {
-      switch (receive(interval)) {
-        case PROCESS_TIMEOUT: {
-          Message<SH2M_HEARTBEAT> msg;
-          msg.mutable_slave_id()->MergeFrom(slaveId);
-          send(master, msg);
-          break;
-        }
-        case PROCESS_EXIT:
-        default:
-          return;
+      serve(interval);
+      if (name() == process::TIMEOUT) {
+        MSG<SH2M_HEARTBEAT> msg;
+        msg.mutable_slave_id()->MergeFrom(slaveId);
+        send(master, msg);
+      } else {
+        return;
       }
     } while (true);
   }
 
 private:
-  const PID master;
-  const PID slave;
+  const process::UPID master;
+  const process::UPID slave;
   const SlaveID slaveId;
   const double interval;
 };
 
 
-class Slave : public MesosProcess
+class Slave : public MesosProcess<Slave>
 {
 public:
   Slave(const Resources& resources, bool local,
@@ -223,17 +224,45 @@ public:
 
   static void registerOptions(Configurator* conf);
 
-  state::SlaveState *getState();
+  process::Promise<state::SlaveState*> getState();
 
   // Callback used by isolation module to tell us when an executor exits.
-  void executorExited(const FrameworkID& frameworkId, const ExecutorID& executorId, int status);
+  void executorExited(const FrameworkID& frameworkId, const ExecutorID& executorId, int result);
 
   // Kill a framework (possibly killing its executor).
   void killFramework(Framework *framework, bool killExecutors = true);
 
-  std::string getUniqueWorkDirectory(const FrameworkID& frameworkId);
+  std::string getUniqueWorkDirectory(const FrameworkID& frameworkId, const ExecutorID& executorId);
 
   const Configuration& getConfiguration();
+
+  void newMasterDetected(const std::string& pid);
+  void noMasterDetected();
+  void masterDetectionFailure();
+  void registerReply(const SlaveID& slaveId, double heartbeat_interval);
+  void reregisterReply(const SlaveID& slaveId, double heartbeat_interval);
+  void runTask(const FrameworkInfo& frameworkInfo,
+               const FrameworkID& frameworkId,
+               const std::string& pid,
+               const TaskDescription& task);
+  void killTask(const FrameworkID& frameworkId,
+                const TaskID& taskId);
+  void killFramework(const FrameworkID& frameworkId);
+  void schedulerMessage(const FrameworkID& frameworkId,
+                        const FrameworkMessage& message);
+  void updateFramework(const FrameworkID& frameworkId,
+                       const std::string& pid);
+  void statusUpdateAck(const FrameworkID& frameworkId,
+                       const SlaveID& slaveId,
+                       const TaskID& taskId);
+  void registerExecutor(const FrameworkID& frameworkId,
+                        const ExecutorID& executorId);
+  void statusUpdate(const FrameworkID& frameworkId,
+                    const TaskStatus& status);
+  void executorMessage(const FrameworkID& frameworkId,
+                       const FrameworkMessage& message);
+  void timeout();
+  void exited();
 
   // TODO(...): Don't make these instance variables public! Hack for
   // now because they are needed in the isolation modules.
@@ -242,6 +271,8 @@ public:
 
 protected:
   virtual void operator () ();
+
+  void initialize();
 
   Framework* getFramework(const FrameworkID& frameworkId);
 
@@ -252,14 +283,13 @@ protected:
 private:
   Configuration conf;
 
-  PID master;
+  SlaveInfo slave;
+
+  process::UPID master;
   Resources resources;
 
   // Invariant: framework will exist if executor exists.
   boost::unordered_map<FrameworkID, Framework*> frameworks;
-
-  // Sequence numbers of reliable messages sent per framework.
-  boost::unordered_map<FrameworkID, boost::unordered_set<int> > seqs;
 
   IsolationModule *isolationModule;
   Heart* heart;

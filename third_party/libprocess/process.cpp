@@ -15,6 +15,8 @@
 
 #include <arpa/inet.h>
 
+#include <glog/logging.h>
+
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 
@@ -38,27 +40,34 @@
 #include <sstream>
 #include <stack>
 #include <stdexcept>
+#include <vector>
 
+#include "process.hpp"
 #include "config.hpp"
+#include "decoder.hpp"
+#include "encoder.hpp"
 #include "fatal.hpp"
 #include "foreach.hpp"
 #include "gate.hpp"
-#include "process.hpp"
 #include "synchronized.hpp"
+#include "tokenize.hpp"
+
 
 using boost::tuple;
 
-using std::cerr;
 using std::deque;
-using std::endl;
 using std::find;
 using std::list;
 using std::map;
 using std::max;
 using std::ostream;
+using std::pair;
 using std::queue;
 using std::set;
 using std::stack;
+using std::string;
+using std::stringstream;
+using std::vector;
 
 using std::tr1::function;
 
@@ -83,14 +92,14 @@ using std::tr1::function;
    })
 
 
-struct node
+struct Node
 {
   uint32_t ip;
   uint16_t port;
 };
 
 
-bool operator < (const node& left, const node& right)
+bool operator < (const Node& left, const Node& right)
 {
   if (left.ip == right.ip)
     return left.port < right.port;
@@ -99,9 +108,9 @@ bool operator < (const node& left, const node& right)
 }
 
 
-ostream& operator << (ostream& stream, const node& n)
+ostream& operator << (ostream& stream, const Node& node)
 {
-  stream << n.ip << ":" << n.port;
+  stream << node.ip << ":" << node.port;
   return stream;
 }
 
@@ -115,7 +124,7 @@ ostream& operator << (ostream& stream, const node& n)
 struct timeout
 {
   ev_tstamp tstamp;
-  PID pid;
+  process::UPID pid;
   int generation;
 };
 
@@ -128,14 +137,16 @@ bool operator == (const timeout &left, const timeout &right)
 }
 
 
+namespace process {
+
 class ProcessReference
 {
 public:
-  explicit ProcessReference(Process *_process) : process(_process)
+  explicit ProcessReference(ProcessBase *_process) : process(_process)
   {
     if (process != NULL) {
       __sync_fetch_and_add(&(process->refs), 1);
-      if (process->state == Process::EXITING) {
+      if (process->state == ProcessBase::FINISHING) {
         __sync_fetch_and_sub(&(process->refs), 1);
         process = NULL;
       }
@@ -161,12 +172,12 @@ public:
     }
   }
 
-  Process * operator -> ()
+  ProcessBase * operator -> ()
   {
     return process;
   }
 
-  operator Process * ()
+  operator ProcessBase * ()
   {
     return process;
   }
@@ -179,7 +190,7 @@ public:
 private:
   ProcessReference & operator = (const ProcessReference &that);
 
-  Process *process;
+  ProcessBase *process;
 };
 
 
@@ -189,32 +200,33 @@ public:
   LinkManager();
   ~LinkManager();
 
-  void link(Process *process, const PID &to);
+  void link(ProcessBase* process, const UPID& to);
 
-  void send(struct msg *msg);
+  void send(Message* message);
+  void send(DataEncoder* encoder, int s);
 
-  struct msg * next(int s);
-  struct msg * next_or_close(int s);
-  struct msg * next_or_sleep(int s);
+  DataEncoder* next(int s);
 
   void closed(int s);
 
-  void exited(const node &n);
-  void exited(Process *process);
+  void exited(const Node& node);
+  void exited(ProcessBase* process);
 
 private:
-  /* Map from PID (local/remote) to process. */
-  map<PID, set<Process *> > links;
+  /* Map from UPID (local/remote) to process. */
+  map<UPID, set<ProcessBase*> > links;
 
   /* Map from socket to node (ip, port). */
-  map<int, node> sockets;
+  map<int, Node> sockets;
 
   /* Maps from node (ip, port) to socket. */
-  map<node, int> temps;
-  map<node, int> persists;
+  map<Node, int> temps;
+  map<Node, int> persists;
+
+  set<int> disposables;
 
   /* Map from socket to outgoing messages. */
-  map<int, queue<struct msg *> > outgoing;
+  map<int, queue<DataEncoder*> > outgoing;
 
   /* Protects instance variables. */
   synchronizable(this);
@@ -227,50 +239,96 @@ public:
   ProcessManager();
   ~ProcessManager();
 
-  ProcessReference use(const PID &pid);
+  ProcessReference use(const UPID &pid);
 
-  void record(struct msg *msg);
-  void replay();
+  bool deliver(Message* message, ProcessBase *sender = NULL);
+  bool deliver(int c, HttpRequest* request, ProcessBase *sender = NULL);
+  bool deliver(const UPID& to, function<void(ProcessBase*)>* delegator, ProcessBase *sender = NULL);
 
-  void deliver(struct msg *msg, Process *sender = NULL);
+  UPID spawn(ProcessBase *process);
+  void link(ProcessBase *process, const UPID &to);
+  bool receive(ProcessBase *process, double secs);
+  bool serve(ProcessBase *process, double secs);
+  void pause(ProcessBase *process, double secs);
+  bool wait(ProcessBase *process, const UPID &pid);
+  bool external_wait(const UPID &pid);
+  bool poll(ProcessBase *process, int fd, int op, double secs, bool ignore);
 
-  void spawn(Process *process);
-  void link(Process *process, const PID &to);
-  void receive(Process *process, double secs);
-  void pause(Process *process, double secs);
-  bool wait(Process *process, const PID &pid);
-  bool external_wait(const PID &pid);
-  bool await(Process *process, int fd, int op, double secs, bool ignore);
+  void enqueue(ProcessBase *process);
+  ProcessBase * dequeue();
 
-  void enqueue(Process *process);
-  Process * dequeue();
+  void timedout(const UPID &pid, int generation);
+  void polled(const UPID &pid, int generation);
 
-  void timedout(const PID &pid, int generation);
-  void awaited(const PID &pid, int generation);
-
-  void run(Process *process);
-  void cleanup(Process *process);
+  void run(ProcessBase *process);
+  void cleanup(ProcessBase *process);
 
   static void invoke(const function<void (void)> &thunk);
 
 private:
-  timeout create_timeout(Process *process, double secs);
+  timeout create_timeout(ProcessBase *process, double secs);
   void start_timeout(const timeout &timeout);
   void cancel_timeout(const timeout &timeout);
 
   /* Map of all local spawned and running processes. */
-  map<uint32_t, Process *> processes;
+  map<string, ProcessBase *> processes;
   synchronizable(processes);
 
   /* Waiting processes (protected by synchronizable(processes)). */
-  map<Process *, set<Process *> > waiters;
+  map<ProcessBase *, set<ProcessBase *> > waiters;
 
   /* Map of gates for waiting threads. */
-  map<Process *, Gate *> gates;
+  map<ProcessBase *, Gate *> gates;
 
   /* Queue of runnable processes (implemented as deque). */
-  deque<Process *> runq;
+  deque<ProcessBase *> runq;
   synchronizable(runq);
+};
+
+
+class HttpProxy : public Process<HttpProxy>
+{
+public:
+  HttpProxy(int _c, const Future<HttpResponse>& _future);
+  ~HttpProxy();
+
+protected:
+  virtual void operator () ();
+
+private:
+  int c;
+  Future<HttpResponse> future;
+};
+
+
+class HttpProxyManager : public Process<HttpProxyManager>
+{
+public:
+  HttpProxyManager() {}
+  ~HttpProxyManager() {}
+
+  void manage(HttpProxy* proxy)
+  {
+    assert(proxy != NULL);
+    proxies[proxy->self()] = proxy;
+    link(proxy->self());
+  }
+
+protected:
+  virtual void operator () ()
+  {
+    while (true) {
+      serve();
+      if (name() == EXITED && proxies.count(from()) > 0) {
+        HttpProxy* proxy = proxies[from()];
+        proxies.erase(from());
+        delete proxy;
+      }
+    }
+  }
+
+private:
+  map<UPID, HttpProxy*> proxies;
 };
 
 
@@ -285,7 +343,7 @@ public:
 
   ~InternalClock() {}
 
-  ev_tstamp getCurrent(Process *process)
+  ev_tstamp getCurrent(ProcessBase *process)
   {
     ev_tstamp tstamp;
 
@@ -298,7 +356,7 @@ public:
     return tstamp;
   }
 
-  void setCurrent(Process *process, ev_tstamp tstamp)
+  void setCurrent(ProcessBase *process, ev_tstamp tstamp)
   {
     currents[process] = tstamp;
   }
@@ -323,14 +381,14 @@ public:
     elapsed = tstamp;
   }
 
-  void discard(Process *process)
+  void discard(ProcessBase *process)
   {
     assert(process != NULL);
     currents.erase(process);
   }
 
 private:
-  map<Process *, ev_tstamp> currents;
+  map<ProcessBase *, ev_tstamp> currents;
   ev_tstamp initial;
   ev_tstamp current;
   ev_tstamp elapsed;
@@ -340,8 +398,8 @@ private:
 /* Using manual clock if non-null. */
 static InternalClock *clk = NULL;
 
-/* Global 'pipe' id uniquely assigned to each process. */
-static uint32_t global_pipe = 0;
+/* Unique id that can be assigned to each process. */
+static uint32_t id = 0;
 
 /* Local server socket. */
 static int s = -1;
@@ -370,9 +428,9 @@ static ev_timer timeouts_watcher;
 /* Server watcher for accepting connections. */
 static ev_io server_watcher;
 
-/* Queue of new I/O watchers. */
-static queue<ev_io *> *io_watchersq = new queue<ev_io *>();
-static synchronizable(io_watchersq) = SYNCHRONIZED_INITIALIZER;
+/* Queue of I/O watchers. */
+static queue<ev_io *> *watchers = new queue<ev_io *>();
+static synchronizable(watchers) = SYNCHRONIZED_INITIALIZER;
 
 /**
  * We store the timeouts in a map of lists indexed by the time stamp
@@ -401,8 +459,8 @@ static ucontext_t proc_uctx_schedule;
 static ucontext_t proc_uctx_running;
 
 /* Current process of processing thread. */
-//static __thread Process *proc_process = NULL;
-static Process *proc_process = NULL;
+//static __thread ProcessBase *proc_process = NULL;
+static ProcessBase *proc_process = NULL;
 
 /* Flag indicating if performing safe call into legacy. */
 // static __thread bool legacy = false;
@@ -422,24 +480,6 @@ static synchronizable(stacks) = SYNCHRONIZED_INITIALIZER;
 /* Last exited process's stack to be recycled (global variable hack!). */
 static void *recyclable = NULL;
 
-/* Record? */
-static bool recording = false;
-
-/* Record(s) for replay. */
-static std::fstream record_msgs;
-static std::fstream record_pipes;
-
-/* Replay? */
-static bool replaying = false;
-
-/* Replay messages (id -> queue of messages). */
-static map<uint32_t, queue<struct msg *> > *replay_msgs =
-  new map<uint32_t, queue<struct msg *> >();
-
-/* Replay pipes (parent id -> stack of remaining child ids). */
-static map<uint32_t, deque<uint32_t> > *replay_pipes =
-  new map<uint32_t, deque<uint32_t> >();
-
 /**
  * Filter. Synchronized support for using the filterer needs to be
  * recursive incase a filterer wants to do anything fancy (which is
@@ -448,6 +488,11 @@ static map<uint32_t, deque<uint32_t> > *replay_pipes =
 static Filter *filterer = NULL;
 static synchronizable(filterer) = SYNCHRONIZED_INITIALIZER_RECURSIVE;
 
+
+/**
+ * Instance of HttpProxyManager.
+ */
+static HttpProxyManager* proxy_manager = NULL;
 
 
 int set_nbio(int fd)
@@ -468,18 +513,41 @@ int set_nbio(int fd)
 }
 
 
-void handle_async(struct ev_loop *loop, ev_async *w, int revents)
+Message* encode(const UPID &from, const UPID &to, const string &name, const string &data = "")
 {
-  synchronized(io_watchersq) {
+  Message* message = new Message();
+  message->from = from;
+  message->to = to;
+  message->name = name;
+  message->body = data;
+  return message;
+}
+
+
+void transport(Message* message, ProcessBase* sender = NULL)
+{
+  if (message->to.ip == ip && message->to.port == port) {
+    // Local message.
+    process_manager->deliver(message, sender);
+  } else {
+    // Remote message.
+    link_manager->send(message);
+  }
+}
+
+
+void handle_async(struct ev_loop *loop, ev_async *_, int revents)
+{
+  synchronized (watchers) {
     /* Start all the new I/O watchers. */
-    while (!io_watchersq->empty()) {
-      ev_io *io_watcher = io_watchersq->front();
-      io_watchersq->pop();
-      ev_io_start(loop, io_watcher);
+    while (!watchers->empty()) {
+      ev_io *watcher = watchers->front();
+      watchers->pop();
+      ev_io_start(loop, watcher);
     }
   }
 
-  synchronized(timeouts) {
+  synchronized (timeouts) {
     if (update_timer) {
       if (!timeouts->empty()) {
 	// Determine the current time.
@@ -514,11 +582,11 @@ void handle_async(struct ev_loop *loop, ev_async *w, int revents)
 }
 
 
-void handle_timeout(struct ev_loop *loop, ev_timer *w, int revents)
+void handle_timeout(struct ev_loop *loop, ev_timer *watcher, int revents)
 {
   list<timeout> timedout;
 
-  synchronized(timeouts) {
+  synchronized (timeouts) {
     ev_tstamp current_tstamp;
 
     if (clk != NULL) {
@@ -568,396 +636,212 @@ void handle_timeout(struct ev_loop *loop, ev_timer *w, int revents)
     update_timer = false;
   }
 
-  foreach (const timeout &timeout, timedout)
+  foreach (const timeout &timeout, timedout) {
     process_manager->timedout(timeout.pid, timeout.generation);
+  }
 }
 
 
-void handle_await(struct ev_loop *loop, ev_io *w, int revents)
+void handle_poll(struct ev_loop *loop, ev_io *watcher, int revents)
 {
-  tuple<PID, int> *t = reinterpret_cast<tuple<PID, int> *>(w->data);
-  process_manager->awaited(t->get<0>(), t->get<1>());
-  ev_io_stop(loop, w);
-  free(w);
+  tuple<UPID, int> *t = (tuple<UPID, int> *) watcher->data;
+  process_manager->polled(t->get<0>(), t->get<1>());
+  ev_io_stop(loop, watcher);
+  delete watcher;
   delete t;
 }
 
 
-/* Socket reading .... */
-void read_data(struct ev_loop *loop, ev_io *w, int revents);
-void read_msg(struct ev_loop *loop, ev_io *w, int revents);
-
-struct read_ctx {
-  int len;
-  struct msg *msg;
-};
-
-
-void read_data(struct ev_loop *loop, ev_io *w, int revents)
+void recv_data(struct ev_loop *loop, ev_io *watcher, int revents)
 {
-  int c = w->fd;
+  DataDecoder* decoder = (DataDecoder*) watcher->data;
+  
+  int c = watcher->fd;
 
-  struct read_ctx *ctx = (struct read_ctx *) w->data;
+  while (true) {
+    const ssize_t size = 80 * 1024;
+    ssize_t length = 0;
 
-  /* Read the data starting from the last read. */
-  int len = recv(c,
-		 (char *) ctx->msg + sizeof(struct msg) + ctx->len,
-		 ctx->msg->len - ctx->len,
-		 0);
+    char data[size];
 
-  if (len > 0) {
-    ctx->len += len;
-  } else if (len < 0 && errno == EWOULDBLOCK) {
-    return;
-  } else if (len == 0 || (len < 0 &&
-			  (errno == ECONNRESET ||
-			   errno == EBADF ||
-			   errno == EHOSTUNREACH))) {
-    /* Socket has closed. */
-    link_manager->closed(c);
+    length = recv(c, data, size, 0);
 
-    /* Stop receiving ... */
-    ev_io_stop (loop, w);
-    close(c);
-    free(ctx->msg);
-    free(ctx);
-    free(w);
-    return;
-  } else {
-    fatalerror("unhandled socket error: please report (read_data)");
-  }
-
-  if (ctx->len == ctx->msg->len) {
-    /* Deliver message. */
-    process_manager->deliver(ctx->msg);
-
-    /* Reinitialize read context. */
-    ctx->len = 0;
-    ctx->msg = (struct msg *) malloc(sizeof(struct msg));
-
-    /* Continue receiving ... */
-    ev_io_stop (loop, w);
-    ev_io_init (w, read_msg, c, EV_READ);
-    ev_io_start (loop, w);
-  }
-}
-
-
-void read_msg(struct ev_loop *loop, ev_io *w, int revents)
-{
-  int c = w->fd;
-
-  struct read_ctx *ctx = (struct read_ctx *) w->data;
-
-  /* Read the message starting from the last read. */
-  int len = recv(c,
-		 (char *) ctx->msg + ctx->len,
-		 sizeof (struct msg) - ctx->len,
-		 0);
-
-  if (len > 0) {
-    ctx->len += len;
-  } else if (len < 0 && errno == EWOULDBLOCK) {
-    return;
-  } else if (len == 0 || (len < 0 &&
-			  (errno == ECONNRESET ||
-			   errno == EBADF ||
-			   errno == EHOSTUNREACH))) {
-    /* Socket has closed. */
-    link_manager->closed(c);
-
-    /* Stop receiving ... */
-    ev_io_stop (loop, w);
-    close(c);
-    free(ctx->msg);
-    free(ctx);
-    free(w);
-    return;
-  } else {
-    fatalerror("unhandled socket error: please report (read_msg)");
-  }
-
-  if (ctx->len == sizeof(struct msg)) {
-    /* Check and see if we need to receive data. */
-    if (ctx->msg->len > 0) {
-      /* Allocate enough space for data. */
-      ctx->msg = (struct msg *)
-	realloc (ctx->msg, sizeof(struct msg) + ctx->msg->len);
-
-      /* TODO(benh): Optimize ... try doing a read first! */
-      ctx->len = 0;
-
-      /* Start receiving data ... */
-      ev_io_stop (loop, w);
-      ev_io_init (w, read_data, c, EV_READ);
-      ev_io_start (loop, w);
+    if (length < 0 && (errno == EINTR)) {
+      // Interrupted, try again.
+      continue;
+    } else if (length < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+      // Might block, try again later.
+      break;
+    } else if (length <= 0) {
+      // Socket error ... we consider closed.
+      const char* error = strerror(errno);
+      VLOG(1) << "Socket error while receiving: " << error;
+      link_manager->closed(c);
+      delete decoder;
+      ev_io_stop(loop, watcher);
+      delete watcher;
+      break;
     } else {
-      /* Deliver message. */
-      process_manager->deliver(ctx->msg);
+      assert(length > 0);
 
-      /* Reinitialize read context. */
-      ctx->len = 0;
-      ctx->msg = (struct msg *) malloc(sizeof(struct msg));
+      // Decode as much of the data as possible into HTTP requests.
+      const deque<HttpRequest*>& requests = decoder->decode(data, length);
 
-      /* Continue receiving ... */
-      ev_io_stop (loop, w);
-      ev_io_init (w, read_msg, c, EV_READ);
-      ev_io_start (loop, w);
-    }
-  }
-}
-
-
-/* Socket writing .... */
-void write_data(struct ev_loop *loop, ev_io *w, int revents);
-void write_msg(struct ev_loop *loop, ev_io *w, int revents);
-
-struct write_ctx {
-  int len;
-  struct msg *msg;
-  bool close;
-};
-
-
-void write_data(struct ev_loop *loop, ev_io *w, int revents)
-{
-  int c = w->fd;
-
-  struct write_ctx *ctx = (struct write_ctx *) w->data;
-
-  int len = send(c,
-		 (char *) ctx->msg + sizeof(struct msg) + ctx->len,
-		 ctx->msg->len - ctx->len,
-		 MSG_NOSIGNAL);
-
-  if (len > 0) {
-    ctx->len += len;
-  } else if (len < 0 && errno == EWOULDBLOCK) {
-    return;
-  } else if (len == 0 || (len < 0 &&
-			  (errno == ECONNRESET ||
-			   errno == EBADF ||
-			   errno == EHOSTUNREACH ||
-			   errno == EPIPE))) {
-    /* Socket has closed. */
-    link_manager->closed(c);
-
-    /* Stop receiving ... */
-    ev_io_stop (loop, w);
-    close(c);
-    free(ctx->msg);
-    free(ctx);
-    free(w);
-    return;
-  } else {
-    fatalerror("unhandled socket error: please report (write_data)");
-  }
-
-  if (ctx->len == ctx->msg->len) {
-    ev_io_stop (loop, w);
-    free(ctx->msg);
-
-    if (ctx->close)
-      ctx->msg = link_manager->next_or_close(c);
-    else
-      ctx->msg = link_manager->next_or_sleep(c);
-
-    if (ctx->msg != NULL) {
-      ctx->len = 0;
-      ev_io_init(w, write_msg, c, EV_WRITE);
-      ev_io_start(loop, w);
-    } else {
-      free(ctx);
-      free(w);
-    }
-  }
-}
-
-
-void write_msg(struct ev_loop *loop, ev_io *w, int revents)
-{
-  int c = w->fd;
-
-  struct write_ctx *ctx = (struct write_ctx *) w->data;
-
-  int len = send(c,
-		 (char *) ctx->msg + ctx->len,
-		 sizeof (struct msg) - ctx->len,
-		 MSG_NOSIGNAL);
-
-  if (len > 0) {
-    ctx->len += len;
-  } else if (len < 0 && errno == EWOULDBLOCK) {
-    return;
-  } else if (len == 0 || (len < 0 &&
-			  (errno == ECONNRESET ||
-			   errno == EBADF ||
-			   errno == EHOSTUNREACH ||
-			   errno == EPIPE))) {
-    /* Socket has closed. */
-    link_manager->closed(c);
-
-    /* Stop receiving ... */
-    ev_io_stop (loop, w);
-    close(c);
-    free(ctx->msg);
-    free(ctx);
-    free(w);
-    return;
-  } else {
-    fatalerror("unhandled socket error: please report (write_msg)");
-  }
-
-  if (ctx->len == sizeof(struct msg)) {
-    /* Check and see if we need to write data. */
-    if (ctx->msg->len > 0) {
-      
-      /* TODO(benh): Optimize ... try doing a write first! */
-      ctx->len = 0;
-
-      /* Start writing data ... */
-      ev_io_stop(loop, w);
-      ev_io_init(w, write_data, c, EV_WRITE);
-      ev_io_start(loop, w);
-    } else {
-      ev_io_stop(loop, w);
-      free(ctx->msg);
-
-      if (ctx->close)
-	ctx->msg = link_manager->next_or_close(c);
-      else
-	ctx->msg = link_manager->next_or_sleep(c);
-
-      if (ctx->msg != NULL) {
-	ctx->len = 0;
-	ev_io_init(w, write_msg, c, EV_WRITE);
-	ev_io_start(loop, w);
-      } else {
-	free(ctx);
-	free(w);
+      if (!requests.empty()) {
+        foreach (HttpRequest* request, requests) {
+          process_manager->deliver(c, request);
+        }
+      } else if (requests.empty() && decoder->failed()) {
+        VLOG(1) << "Decoder error while receiving";
+        link_manager->closed(c);
+        delete decoder;
+        ev_io_stop(loop, watcher);
+        delete watcher;
+        break;
       }
     }
   }
 }
 
 
-void write_connect(struct ev_loop *loop, ev_io *w, int revents)
+void send_data(struct ev_loop *loop, ev_io *watcher, int revents)
 {
-  int s = w->fd;
+  DataEncoder* encoder = (DataEncoder*) watcher->data;
 
-  struct write_ctx *ctx = (struct write_ctx *) w->data;
+  int c = watcher->fd;
 
-  ev_io_stop(loop, w);
+  while (true) {
+    const void* data;
+    size_t size;
 
-  /* Check that the connection was successful. */
-  int opt;
-  socklen_t optlen = sizeof(opt);
+    data = encoder->next(&size);
+    assert(size > 0);
 
-  if (getsockopt(s, SOL_SOCKET, SO_ERROR, &opt, &optlen) < 0) {
-    link_manager->closed(s);
-    free(ctx->msg);
-    free(ctx);
-    free(w);
-    return;
+    ssize_t length = send(c, data, size, MSG_NOSIGNAL);
+
+    if (length < 0 && (errno == EINTR)) {
+      // Interrupted, try again.
+      continue;
+    } else if (length < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+      // Might block, try again later.
+      break;
+    } else if (length <= 0) {
+      // Socket closed or error ... we consider closed.
+      const char* error = strerror(errno);
+      VLOG(1) << "Socket error while sending: " << error;
+      link_manager->closed(c);
+      delete encoder;
+      ev_io_stop(loop, watcher);
+      delete watcher;
+      break;
+    } else {
+      assert(length > 0);
+
+      // Update the encoder with the amount sent.
+      encoder->backup(size - length);
+
+      // See if there is any more of the message to send.
+      if (encoder->remaining() == 0) {
+        delete encoder;
+
+        // Check for more stuff to send on socket.
+        encoder = link_manager->next(c);
+        if (encoder != NULL) {
+          watcher->data = encoder;
+        } else {
+          // Nothing more to send right now, clean up.
+          ev_io_stop(loop, watcher);
+          delete watcher;
+          break;
+        }
+      }
+    }
   }
-
-  if (opt != 0) {
-    link_manager->closed(s);
-    free(ctx->msg);
-    free(ctx);
-    free(w);
-    return;
-  }
-
-  /* TODO(benh): Optimize ... try doing a write first. */
-
-  ev_io_init(w, write_msg, s, EV_WRITE);
-  ev_io_start(loop, w);
 }
 
 
-
-void link_connect(struct ev_loop *loop, ev_io *w, int revents)
+void sending_connect(struct ev_loop *loop, ev_io *watcher, int revents)
 {
-  int s = w->fd;
+  int c = watcher->fd;
 
-  ev_io_stop(loop, w);
-
-  /* Check that the connection was successful. */
+  // Now check that a successful connection was made.
   int opt;
   socklen_t optlen = sizeof(opt);
 
-  if (getsockopt(s, SOL_SOCKET, SO_ERROR, &opt, &optlen) < 0) {
-    link_manager->closed(s);
-    free(w);
-    return;
+  if (getsockopt(c, SOL_SOCKET, SO_ERROR, &opt, &optlen) < 0 || opt != 0) {
+    // Connect failure.
+    VLOG(1) << "Socket error while connecting";
+    link_manager->closed(c);
+    MessageEncoder* encoder = (MessageEncoder*) watcher->data;
+    delete encoder;
+    ev_io_stop(loop, watcher);
+    delete watcher;
+  } else {
+    // We're connected! Now let's do some sending.
+    ev_io_stop(loop, watcher);
+    ev_io_init(watcher, send_data, c, EV_WRITE);
+    ev_io_start(loop, watcher);
   }
-
-  if (opt != 0) {
-    link_manager->closed(s);
-    free(w);
-    return;
-  }
-
-  /* Reuse/Initialize the watcher. */
-  w->data = malloc(sizeof(struct read_ctx));
-
-  /* Initialize read context. */
-  struct read_ctx *ctx = (struct read_ctx *) w->data;
-
-  ctx->len = 0;
-  ctx->msg = (struct msg *) malloc(sizeof(struct msg));
-
-  /* Initialize watcher for reading. */
-  ev_io_init(w, read_msg, s, EV_READ);
-
-  ev_io_start(loop, w);
 }
 
 
-void do_accept(struct ev_loop *loop, ev_io *w, int revents)
+void receiving_connect(struct ev_loop *loop, ev_io *watcher, int revents)
 {
-  int s = w->fd;
+  int c = watcher->fd;
 
-  struct sockaddr_in addr;
+  // Now check that a successful connection was made.
+  int opt;
+  socklen_t optlen = sizeof(opt);
 
+  if (getsockopt(c, SOL_SOCKET, SO_ERROR, &opt, &optlen) < 0 || opt != 0) {
+    // Connect failure.
+    VLOG(1) << "Socket error while connecting";
+    link_manager->closed(c);
+    DataDecoder* decoder = (DataDecoder*) watcher->data;
+    delete decoder;
+    ev_io_stop(loop, watcher);
+    delete watcher;
+  } else {
+    // We're connected! Now let's do some receiving.
+    ev_io_stop(loop, watcher);
+    ev_io_init(watcher, recv_data, c, EV_READ);
+    ev_io_start(loop, watcher);
+  }
+}
+
+
+void accept(struct ev_loop *loop, ev_io *watcher, int revents)
+{
+  int s = watcher->fd;
+
+  sockaddr_in addr;
   socklen_t addrlen = sizeof(addr);
 
-  /* Do accept. */
-  int c = accept(s, (struct sockaddr *) &addr, &addrlen);
+  int c = ::accept(s, (sockaddr *) &addr, &addrlen);
 
   if (c < 0) {
     return;
   }
 
-  /* Make socket non-blocking. */
   if (set_nbio(c) < 0) {
     close(c);
     return;
   }
 
-  /* Turn off Nagle (on TCP_NODELAY) so pipelined requests don't wait. */
+  // Turn off Nagle (via TCP_NODELAY) so pipelined requests don't wait.
   int on = 1;
   if (setsockopt(c, SOL_TCP, TCP_NODELAY, &on, sizeof(on)) < 0) {
     close(c);
-    return;
+  } else {
+    // Allocate and initialize the decoder and watcher.
+    DataDecoder* decoder = new DataDecoder();
+
+    ev_io *watcher = new ev_io();
+    watcher->data = decoder;
+
+    ev_io_init(watcher, recv_data, c, EV_READ);
+    ev_io_start(loop, watcher);
   }
-
-  /* Allocate the watcher. */
-  ev_io *io_watcher = (ev_io *) malloc (sizeof (ev_io));
-
-  io_watcher->data = malloc(sizeof(struct read_ctx));
-
-  /* Initialize the read context */
-  struct read_ctx *ctx = (struct read_ctx *) io_watcher->data;
-
-  ctx->len = 0;
-  ctx->msg = (struct msg *) malloc(sizeof(struct msg));
-
-  /* Initialize watcher for reading. */
-  ev_io_init(io_watcher, read_msg, c, EV_READ);
-
-  ev_io_start(loop, io_watcher);
 }
 
 
@@ -973,15 +857,15 @@ void trampoline(int stack0, int stack1, int process0, int process1)
 {
   /* Unpackage the arguments. */
 #ifdef __x86_64__
-  assert (sizeof(unsigned long) == sizeof(Process *));
+  assert (sizeof(unsigned long) == sizeof(ProcessBase *));
   void *stack = (void *)
     (((unsigned long) stack1 << 32) + (unsigned int) stack0);
-  Process *process = (Process *)
+  ProcessBase *process = (ProcessBase *)
     (((unsigned long) process1 << 32) + (unsigned int) process0);
 #else
-  assert (sizeof(unsigned int) == sizeof(Process *));
+  assert (sizeof(unsigned int) == sizeof(ProcessBase *));
   void *stack = (void *) (unsigned int) stack0;
-  Process *process = (Process *) (unsigned int) process0;
+  ProcessBase *process = (ProcessBase *) (unsigned int) process0;
 #endif /* __x86_64__ */
 
   /* Run the process. */
@@ -1005,17 +889,14 @@ void * schedule(void *arg)
 
   // Recycle the stack from an exited process.
   if (recyclable != NULL) {
-    synchronized(stacks) {
+    synchronized (stacks) {
       stacks->push(recyclable);
     }
     recyclable = NULL;
   }
 
   do {
-    if (replaying)
-      process_manager->replay();
-
-    Process *process = process_manager->dequeue();
+    ProcessBase *process = process_manager->dequeue();
 
     if (process == NULL) {
       Gate::state_t old = gate->approach();
@@ -1034,7 +915,7 @@ void * schedule(void *arg)
         // been run which could be run up to the current time. The
         // only way another process could become runnable is if (1) it
         // receives a message from another node, (2) a file descriptor
-        // it is awaiting has become ready, or (3) if it has a
+        // it is polling has become ready, or (3) if it has a
         // timeout. We can ignore processes that become runnable due
         // to receiving a message from another node or getting an
         // event on a file descriptor because that should not change
@@ -1047,7 +928,7 @@ void * schedule(void *arg)
         // move the current time to the next timeout value, and tell
         // the timer to update itself.
 
-        synchronized(timeouts) {
+        synchronized (timeouts) {
           if (clk != NULL) {
             if (!timeouts->empty()) {
               // Adjust the current time to the next timeout, provided
@@ -1063,7 +944,7 @@ void * schedule(void *arg)
               // branch because this is a pretty serious state ... the
               // only way to make progress is for another node to send
               // a message or for an event to occur on a file
-              // descriptor that a process is awaiting. We may want to
+              // descriptor that a process is polling. We may want to
               // consider doing (or printing) something here.
             }
           }
@@ -1079,10 +960,10 @@ void * schedule(void *arg)
 
     process->lock();
     {
-      assert(process->state == Process::INIT ||
-	     process->state == Process::READY ||
-	     process->state == Process::INTERRUPTED ||
-	     process->state == Process::TIMEDOUT);
+      assert(process->state == ProcessBase::INIT ||
+	     process->state == ProcessBase::READY ||
+	     process->state == ProcessBase::INTERRUPTED ||
+	     process->state == ProcessBase::TIMEDOUT);
 
       /* Continue process. */
       assert(proc_process == NULL);
@@ -1101,25 +982,15 @@ void * schedule(void *arg)
 
 
 /*
- * We might need/want to catch terminating signals to close our log
- * ... or the underlying filesystem and operating system might be
- * robust enough to flush our last writes and close the file cleanly,
- * or we might need to force flushes at appropriate times. However,
- * for now, adding signal handlers freely is not allowed because they
- * will clash with Java and Python virtual machines and causes hard to
- * debug crashes/segfaults. This can be revisited when recording gets
- * turned on by default.
+ * We might find value in catching terminating signals at some point.
+ * However, for now, adding signal handlers freely is not allowed
+ * because they will clash with Java and Python virtual machines and
+ * causes hard to debug crashes/segfaults.
  */
 
 
 // void sigbad(int signal, struct sigcontext *ctx)
 // {
-//   if (recording) {
-//     assert(!replaying);
-//     record_msgs.close();
-//     record_pipes.close();
-//   }
-
 //   /* Pass on the signal (so that a core file is produced).  */
 //   struct sigaction sa;
 //   sa.sa_handler = SIG_DFL;
@@ -1130,7 +1001,7 @@ void * schedule(void *arg)
 // }
 
 
-void initialize()
+void initialize(bool initialize_google_logging)
 {
   static volatile bool initialized = false;
   static volatile bool initializing = true;
@@ -1146,6 +1017,11 @@ void initialize()
       while (initializing);
       return;
     }
+  }
+
+  if (initialize_google_logging) {
+    google::InitGoogleLogging("libprocess");
+    google::LogToStderr();
   }
 
 //   /* Install signal handler. */
@@ -1209,52 +1085,6 @@ void initialize()
     port = result;
   }
 
-  /* Check environment for replay. */
-  value = getenv("LIBPROCESS_REPLAY");
-  replaying = value != NULL;
-
-  /* Setup for recording or replaying. */
-  if (recording && !replaying) {
-    /* Setup record. */
-    time_t t;
-    time(&t);
-    std::string record(".record-");
-    std::string date(ctime(&t));
-
-    replace(date.begin(), date.end(), ' ', '_');
-    replace(date.begin(), date.end(), '\n', '\0');
-
-    /* TODO(benh): Create file if it doesn't exist. */
-    record_msgs.open((record + "msgs-" + date).c_str(),
-		     std::ios::out | std::ios::binary | std::ios::app);
-    record_pipes.open((record + "pipes-" + date).c_str(),
-		      std::ios::out | std::ios::app);
-    if (!record_msgs.is_open() || !record_pipes.is_open())
-      fatal("could not open record(s) for recording");
-  } else if (replaying) {
-    assert(!recording);
-    /* Open record(s) for replay. */
-    record_msgs.open((std::string(".record-msgs-") += value).c_str(),
-		     std::ios::in | std::ios::binary);
-    record_pipes.open((std::string(".record-pipes-") += value).c_str(),
-		      std::ios::in);
-    if (!record_msgs.is_open() || !record_pipes.is_open())
-      fatal("could not open record(s) with prefix %s for replay", value);
-
-    /* Read in all pipes from record. */
-    while (!record_pipes.eof()) {
-      uint32_t parent, child;
-      record_pipes >> parent >> child;
-      if (record_pipes.fail())
-	fatal("could not read from record");
-      (*replay_pipes)[parent].push_back(child);
-    }
-
-    record_pipes.close();
-  }
-
-  /* TODO(benh): Check during replay that the same ip and port is used. */
-
   // Lookup hostname if missing ip (avoids getting 127.0.0.1). Note
   // that we need only one ip address, so that other processes can
   // send and receive and don't get confused as to whom they are
@@ -1305,8 +1135,9 @@ void initialize()
   ip = addr.sin_addr.s_addr;
   port = ntohs(addr.sin_port);
 
-  if (listen(s, 500000) < 0)
+  if (listen(s, 500000) < 0) {
     fatalerror("failed to initialize (listen)");
+  }
 
   /* Setup event loop. */
 #ifdef __sun__
@@ -1321,7 +1152,7 @@ void initialize()
   ev_timer_init(&timeouts_watcher, handle_timeout, 0., 2100000.0);
   ev_timer_again(loop, &timeouts_watcher);
 
-  ev_io_init(&server_watcher, do_accept, s, EV_READ);
+  ev_io_init(&server_watcher, accept, s, EV_READ);
   ev_io_start(loop, &server_watcher);
 
 //   ev_child_init(&child_watcher, child_exited, pid, 0);
@@ -1339,10 +1170,54 @@ void initialize()
 //   sigaddset (&sa.sa_mask, w->signum);
 //   sigprocmask (SIG_UNBLOCK, &sa.sa_mask, 0);
 
-  if (pthread_create(&io_thread, NULL, serve, loop) != 0)
+  if (pthread_create(&io_thread, NULL, serve, loop) != 0) {
     fatalerror("failed to initialize node (pthread_create)");
+  }
 
   initializing = false;
+
+  char temp[INET_ADDRSTRLEN];
+  CHECK(inet_ntop(AF_INET, (in_addr *) &ip, temp, INET_ADDRSTRLEN) != NULL);
+  VLOG(1) << "libprocess is initialized on " << temp << ":" << port;
+}
+
+
+HttpProxy::HttpProxy(int _c, const Future<HttpResponse>& _future)
+  : c(_c), future(_future)
+{
+  // TODO(benh): Do proper initialization of the proxy manager. Right
+  // now we can rely on invocations of the HttpProxy constructor to be
+  // serial, so we don't need to do any fancy
+  // synchronization. However, ultimately, we'd like to stick the
+  // initialization into 'initialize' above, but that seemed to have
+  // some issues. :(
+  if (proxy_manager == NULL) {
+    proxy_manager = new HttpProxyManager();
+    spawn(proxy_manager);
+  }
+
+  dispatch(proxy_manager->self(), &HttpProxyManager::manage, this);
+}
+
+
+HttpProxy::~HttpProxy() {}
+
+
+void HttpProxy::operator () ()
+{
+  // Wait for the response!
+  const HttpResponse& response = future.get();
+
+  link_manager->send(new HttpResponseEncoder(response), c);
+
+  // How the socket gets closed is a bit esoteric. :( If the browser
+  // closes their socket then we will close it in when
+  // LinkManger::closed gets called. Otherwise, after the future gets
+  // set and we send the response then LinkManager::next will get
+  // called, which will close the socket. Ultimately, the
+  // HttpProxyManager will deal with deallocating the HttpProxy, even
+  // though it was allocated in ProcessManager::deliver. Ugh, gross,
+  // gross, gross. :(
 }
 
 
@@ -1355,76 +1230,64 @@ LinkManager::LinkManager()
 LinkManager::~LinkManager() {}
 
 
-void LinkManager::link(Process *process, const PID &to)
+void LinkManager::link(ProcessBase *process, const UPID &to)
 {
   // TODO(benh): The semantics we want to support for link are such
   // that if there is nobody to link to (local or remote) then a
-  // PROCESS_EXIT message gets generated. This functionality has only
+  // EXITED message gets generated. This functionality has only
   // been implemented when the link is local, not remote. Of course,
   // if there is nobody listening on the remote side, then this should
   // work remotely ... but if there is someone listening remotely just
-  // not at that pipe value, then it will silently continue executing.
+  // not at that id, then it will silently continue executing.
 
   assert(process != NULL);
 
-  const node n = { to.ip, to.port };
+  const Node node = { to.ip, to.port };
 
-  synchronized(this) {
+  synchronized (this) {
     // Check if node is remote and there isn't a persistant link.
-    if ((n.ip != ip || n.port != port) &&
-        persists.find(n) == persists.end()) {
+    if ((node.ip != ip || node.port != port) && persists.count(node) == 0) {
+      // Okay, no link, lets create a socket.
       int s;
 
-      /* Create socket for communicating with remote process. */
       if ((s = socket(AF_INET, SOCK_STREAM, IPPROTO_IP)) < 0)
         fatalerror("failed to link (socket)");
-    
-      /* Use non-blocking sockets. */
+
       if (set_nbio(s) < 0)
         fatalerror("failed to link (set_nbio)");
 
-      /* Record socket. */
-      sockets[s] = n;
+      sockets[s] = node;
+      persists[node] = s;
 
-      /* Record node. */
-      persists[n] = s;
-
-      /* Allocate the watcher. */
-      ev_io *io_watcher = (ev_io *) malloc(sizeof(ev_io));
-
-      struct sockaddr_in addr;
-      
+      sockaddr_in addr;
       memset(&addr, 0, sizeof(addr));
-      
       addr.sin_family = PF_INET;
       addr.sin_port = htons(to.port);
       addr.sin_addr.s_addr = to.ip;
 
-      if (connect(s, (struct sockaddr *) &addr, sizeof(addr)) < 0) {
+      // Allocate and initialize the decoder and watcher.
+      DataDecoder* decoder = new DataDecoder();
+
+      ev_io *watcher = new ev_io();
+      watcher->data = decoder;
+
+      // Try and connect to the node using this socket.
+      if (connect(s, (sockaddr *) &addr, sizeof(addr)) < 0) {
         if (errno != EINPROGRESS)
           fatalerror("failed to link (connect)");
 
-        /* Initialize watcher for connecting. */
-        ev_io_init(io_watcher, link_connect, s, EV_WRITE);
+        // Wait for socket to be connected.
+        ev_io_init(watcher, receiving_connect, s, EV_WRITE);
       } else {
-        /* Initialize watcher for reading. */
-        io_watcher->data = malloc(sizeof(struct read_ctx));
-
-        /* Initialize read context. */
-        struct read_ctx *ctx = (struct read_ctx *) io_watcher->data;
-
-        ctx->len = 0;
-        ctx->msg = (struct msg *) malloc(sizeof(struct msg));
-
-        ev_io_init(io_watcher, read_msg, s, EV_READ);
+        ev_io_init(watcher, recv_data, s, EV_READ);
       }
 
-      /* Enqueue the watcher. */
-      synchronized(io_watchersq) {
-        io_watchersq->push(io_watcher);
+      // Enqueue the watcher.
+      synchronized (watchers) {
+        watchers->push(watcher);
       }
 
-      /* Interrupt the loop. */
+      // Interrupt the loop.
       ev_async_send(loop, &async_watcher);
     }
 
@@ -1433,254 +1296,239 @@ void LinkManager::link(Process *process, const PID &to)
 }
 
 
-void LinkManager::send(struct msg *msg)
+void LinkManager::send(Message* message)
 {
-  assert(msg != NULL);
+  assert(message != NULL);
 
-  node n = { msg->to.ip, msg->to.port };
+  DataEncoder* encoder = new MessageEncoder(message);
 
-  synchronized(this) {
+  Node node = { message->to.ip, message->to.port };
+
+  synchronized (this) {
     // Check if there is already a link.
-    map<node, int>::iterator it;
-    if ((it = persists.find(n)) != persists.end() ||
-        (it = temps.find(n)) != temps.end()) {
-      int s = it->second;
-      if (outgoing.count(s) == 0) {
-        assert(persists.count(n) != 0);
-        assert(temps.count(n) == 0 || temps[n] != s);
+    if (persists.count(node) > 0 || temps.count(node) > 0) {
+      int s = persists.count(node) > 0 ? persists[node] : temps[node];
 
-        /* Initialize the outgoing queue. */
+      // Check whether or not this socket has an outgoing queue.
+      if (outgoing.count(s) != 0) {
+        outgoing[s].push(encoder);
+      } else {
+        // Must be a persistant socket since temporary socket
+        // shouldn't outlast it's outgoing queue!
+        assert(persists.count(node) != 0);
+        assert(temps.count(node) == 0 || temps[node] != s);
+
+        // Initialize the outgoing queue.
         outgoing[s];
 
-        /* Allocate/Initialize the watcher. */
-        ev_io *io_watcher = (ev_io *) malloc (sizeof (ev_io));
+        // Allocate and initialize the watcher.
+        ev_io *watcher = new ev_io();
+        watcher->data = encoder;
 
-        io_watcher->data = malloc(sizeof(struct write_ctx));
+        ev_io_init(watcher, send_data, s, EV_WRITE);
 
-        /* Initialize the write context. */
-        struct write_ctx *ctx = (struct write_ctx *) io_watcher->data;
-
-        ctx->len = 0;
-        ctx->msg = msg;
-        ctx->close = false;
-
-        ev_io_init(io_watcher, write_msg, s, EV_WRITE);
-
-        /* Enqueue the watcher. */
-        synchronized(io_watchersq) {
-          io_watchersq->push(io_watcher);
+        synchronized (watchers) {
+          watchers->push(watcher);
         }
-    
-        /* Interrupt the loop. */
+
         ev_async_send(loop, &async_watcher);
-      } else {
-        outgoing[s].push(msg);
       }
     } else {
+      // No peristant or temporary socket to the node currently
+      // exists, so we create a temporary one.
       int s;
 
-      /* Create socket for communicating with remote process. */
       if ((s = socket(AF_INET, SOCK_STREAM, IPPROTO_IP)) < 0)
         fatalerror("failed to send (socket)");
-    
-      /* Use non-blocking sockets. */
+
       if (set_nbio(s) < 0)
         fatalerror("failed to send (set_nbio)");
 
-      /* Record socket. */
-      sockets[s] = n;
+      sockets[s] = node;
+      temps[node] = s;
 
-      /* Record node. */
-      temps[n] = s;
-
-      /* Initialize the outgoing queue. */
+      // Initialize the outgoing queue.
       outgoing[s];
 
-      /* Allocate/Initialize the watcher. */
-      ev_io *io_watcher = (ev_io *) malloc (sizeof (ev_io));
-
-      io_watcher->data = malloc(sizeof(struct write_ctx));
-
-      /* Initialize the write context. */
-      struct write_ctx *ctx = (struct write_ctx *) io_watcher->data;
-
-      ctx->len = 0;
-      ctx->msg = msg;
-      ctx->close = true;
-
-      struct sockaddr_in addr;
-
+      // Try and connect to the node using this socket.
+      sockaddr_in addr;
       memset(&addr, 0, sizeof(addr));
-      
       addr.sin_family = PF_INET;
-      addr.sin_port = htons(msg->to.port);
-      addr.sin_addr.s_addr = msg->to.ip;
+      addr.sin_port = htons(message->to.port);
+      addr.sin_addr.s_addr = message->to.ip;
+
+      // Allocate and initialize the watcher.
+      ev_io *watcher = new ev_io();
+      watcher->data = encoder;
     
-      if (connect(s, (struct sockaddr *) &addr, sizeof(addr)) < 0) {
+      if (connect(s, (sockaddr *) &addr, sizeof(addr)) < 0) {
         if (errno != EINPROGRESS)
           fatalerror("failed to send (connect)");
 
-        /* Initialize watcher for connecting. */
-        ev_io_init(io_watcher, write_connect, s, EV_WRITE);
+        // Initialize watcher for connecting.
+        ev_io_init(watcher, sending_connect, s, EV_WRITE);
       } else {
-        /* Initialize watcher for writing. */
-        ev_io_init(io_watcher, write_msg, s, EV_WRITE);
+        // Initialize watcher for sending.
+        ev_io_init(watcher, send_data, s, EV_WRITE);
       }
 
-      /* Enqueue the watcher. */
-      synchronized(io_watchersq) {
-        io_watchersq->push(io_watcher);
+      // Enqueue the watcher.
+      synchronized (watchers) {
+        watchers->push(watcher);
       }
 
-      /* Interrupt the loop. */
       ev_async_send(loop, &async_watcher);
     }
   }
 }
 
 
-struct msg * LinkManager::next(int s)
+void LinkManager::send(DataEncoder* encoder, int s)
 {
-  struct msg *msg = NULL;
+  assert(encoder != NULL);
 
-  synchronized(this) {
-    assert(outgoing.find(s) != outgoing.end());
-    if (!outgoing[s].empty()) {
-      msg = outgoing[s].front();
-      outgoing[s].pop();
+  // TODO(benh): This is a big hack for sending data on a socket from
+  // an encoder where we want one-time (i.e., disposable) use of the
+  // socket. This is particularly useful right now for proxies we set
+  // up for HTTP GET requests, however, the semantics of what this
+  // send means should be less esoteric.
+
+  synchronized (this) {
+    assert(sockets.count(s) == 0);
+    assert(outgoing.count(s) == 0);
+
+    sockets[s] = Node(); // TODO(benh): HACK!
+    outgoing[s];
+    disposables.insert(s);
+
+    // Allocate and initialize the watcher.
+    ev_io *watcher = new ev_io();
+    watcher->data = encoder;
+
+    ev_io_init(watcher, send_data, s, EV_WRITE);
+
+    synchronized (watchers) {
+      watchers->push(watcher);
     }
-  }
 
-  return msg;
+    ev_async_send(loop, &async_watcher);
+  }
 }
 
 
-struct msg * LinkManager::next_or_close(int s)
+DataEncoder* LinkManager::next(int s)
 {
-  struct msg *msg;
+  DataEncoder* encoder = NULL;
 
-  synchronized(this) {
-    if ((msg = next(s)) == NULL) {
-      assert(outgoing[s].empty());
-      outgoing.erase(s);
-      assert(temps.count(sockets[s]) > 0);
-      temps.erase(sockets[s]);
-      sockets.erase(s);
-      close(s);
+  // Sometimes we look for another encoder even though this socket
+  // isn't actually maintained by the LinkManager (e.g., for proxy
+  // sockets). In the future this kind of esoteric semantics will
+  // hopefully get improved. :(
+  synchronized (this) {
+    if (sockets.count(s) > 0 && outgoing.count(s) > 0) {
+      if (!outgoing[s].empty()) {
+        // More messages!
+        encoder = outgoing[s].front();
+        outgoing[s].pop();
+      } else {
+        // No more messages ... erase the outgoing queue.
+        outgoing.erase(s);
+
+        // Close the socket if it was for one-time use.
+        if (disposables.count(s) > 0) {
+          disposables.erase(s);
+          sockets.erase(s);
+          close(s);
+        }
+
+        // Close the socket if it was temporary.
+        const Node &node = sockets[s];
+        if (temps.count(node) > 0 && temps[node] == s) {
+          temps.erase(node);
+          sockets.erase(s);
+          close(s);
+        }
+      }
     }
   }
 
-  return msg;
-}
-
-
-struct msg * LinkManager::next_or_sleep(int s)
-{
-  struct msg *msg;
-
-  synchronized(this) {
-    if ((msg = next(s)) == NULL) {
-      assert(outgoing[s].empty());
-      outgoing.erase(s);
-      assert(persists.find(sockets[s]) != persists.end());
-    }
-  }
-
-  return msg;
+  return encoder;
 }
 
 
 void LinkManager::closed(int s)
 {
-  synchronized(this) {
+  synchronized (this) {
     if (sockets.count(s) > 0) {
-      const node &n = sockets[s];
+      const Node& node = sockets[s];
 
-      // Don't bother invoking exited unless socket was from persists.
-      if (persists.count(n) > 0 && persists[n] == s) {
-	persists.erase(n);
-	exited(n);
+      // Don't bother invoking exited unless socket was persistant.
+      if (persists.count(node) > 0 && persists[node] == s) {
+	persists.erase(node);
+	exited(node);
       } else {
-	assert(temps.count(n) > 0 && temps[n] == s);
-	temps.erase(n);
+        if (temps.count(node) > 0 && temps[node] == s) {
+          temps.erase(node);
+        }
       }
 
       sockets.erase(s);
       outgoing.erase(s);
-      close(s);
     }
   }
+
+  // This might have just been a receiving socket, so we want to make
+  // sure to call close so that the file descriptor can get reused.
+  close(s);
 }
 
 
-void LinkManager::exited(const node &n)
+void LinkManager::exited(const Node &node)
 {
   // TODO(benh): It would be cleaner if this routine could call back
   // into ProcessManager ... then we wouldn't have to convince
   // ourselves that the accesses to each Process object will always be
   // valid.
-  synchronized(this) {
-    list<PID> removed;
-    /* Look up all linked processes. */
-    foreachpair (const PID &pid, set<Process *> &processes, links) {
-      if (pid.ip == n.ip && pid.port == n.port) {
-        /* N.B. If we call exited(pid) we might invalidate iteration. */
-        /* Deliver PROCESS_EXIT messages (if we aren't replaying). */
-        if (!replaying) {
-          foreach (Process *process, processes) {
-            struct msg *msg = (struct msg *) malloc(sizeof(struct msg));
-            msg->from.pipe = pid.pipe;
-            msg->from.ip = pid.ip;
-            msg->from.port = pid.port;
-            msg->to.pipe = process->pid.pipe;
-            msg->to.ip = process->pid.ip;
-            msg->to.port = process->pid.port;
-            msg->id = PROCESS_EXIT;
-            msg->len = 0;
-            process->enqueue(msg);
-          }
+  synchronized (this) {
+    list<UPID> removed;
+    // Look up all linked processes.
+    foreachpair (const UPID &pid, set<ProcessBase *> &processes, links) {
+      if (pid.ip == node.ip && pid.port == node.port) {
+        // N.B. If we call exited(pid) we might invalidate iteration.
+        foreach (ProcessBase *process, processes) {
+          Message* message = encode(pid, process->pid, EXITED);
+          process->enqueue(message);
         }
         removed.push_back(pid);
       }
     }
-    foreach (const PID &pid, removed)
+
+    foreach (const UPID &pid, removed) {
       links.erase(pid);
+    }
   }
 }
 
 
-void LinkManager::exited(Process *process)
+void LinkManager::exited(ProcessBase *process)
 {
-  synchronized(this) {
+  synchronized (this) {
     /* Remove any links this process might have had. */
-    foreachpair (_, set<Process *> &processes, links)
+    foreachpair (_, set<ProcessBase *> &processes, links)
       processes.erase(process);
 
-    const PID &pid = process->self();
-
     /* Look up all linked processes. */
-    map<PID, set<Process *> >::iterator it = links.find(pid);
+    map<UPID, set<ProcessBase *> >::iterator it = links.find(process->pid);
 
     if (it != links.end()) {
-      set<Process *> &processes = it->second;
-      /* Deliver PROCESS_EXIT messages (if we aren't replaying). */
-      if (!replaying) {
-        foreach (Process *p, processes) {
-          assert(process != p);
-          struct msg *msg = (struct msg *) malloc(sizeof(struct msg));
-          msg->from.pipe = pid.pipe;
-          msg->from.ip = pid.ip;
-          msg->from.port = pid.port;
-          msg->to.pipe = p->pid.pipe;
-          msg->to.ip = p->pid.ip;
-          msg->to.port = p->pid.port;
-          msg->id = PROCESS_EXIT;
-          msg->len = 0;
-          // TODO(benh): Preserve happens-before when using clock.
-          p->enqueue(msg);
-        }
+      set<ProcessBase *> &processes = it->second;
+      foreach (ProcessBase *p, processes) {
+        assert(process != p);
+        Message *message = encode(process->pid, p->pid, EXITED);
+        // TODO(benh): Preserve happens-before when using clock.
+        p->enqueue(message);
       }
-      links.erase(pid);
+      links.erase(process->pid);
     }
   }
 }
@@ -1696,14 +1544,14 @@ ProcessManager::ProcessManager()
 ProcessManager::~ProcessManager() {}
 
 
-ProcessReference ProcessManager::use(const PID &pid)
+ProcessReference ProcessManager::use(const UPID &pid)
 {
   if (pid.ip == ip && pid.port == port) {
-    synchronized(processes) {
-      if (processes.count(pid.pipe) > 0) {
+    synchronized (processes) {
+      if (processes.count(pid.id) > 0) {
         // Note that the ProcessReference constructor MUST get called
         // while holding the lock on processes.
-        return ProcessReference(processes[pid.pipe]);
+        return ProcessReference(processes[pid.id]);
       }
     }
   }
@@ -1712,69 +1560,11 @@ ProcessReference ProcessManager::use(const PID &pid)
 }
 
 
-void ProcessManager::record(struct msg *msg)
+bool ProcessManager::deliver(Message *message, ProcessBase *sender)
 {
-  assert(recording && !replaying);
-  synchronized(processes) {
-    record_msgs.write((char *) msg, sizeof(struct msg) + msg->len);
-    if (record_msgs.fail())
-      fatalerror("failed to write to messages record");
-  }
-}
+  assert(message != NULL);
 
-
-void ProcessManager::replay()
-{
-  assert(!recording && replaying);
-  synchronized(processes) {
-    if (!record_msgs.eof()) {
-      struct msg *msg = (struct msg *) malloc(sizeof(struct msg));
-
-      /* Read a message worth of data. */
-      record_msgs.read((char *) msg, sizeof(struct msg));
-
-      if (record_msgs.eof()) {
-        free(msg);
-        return;
-      }
-
-      if (record_msgs.fail())
-        fatalerror("failed to read from messages record");
-
-      /* Read the body of the message if necessary. */
-      if (msg->len != 0) {
-        struct msg *temp = msg;
-        msg = (struct msg *) malloc(sizeof(struct msg) + msg->len);
-        memcpy(msg, temp, sizeof(struct msg));
-        free(temp);
-        record_msgs.read((char *) msg + sizeof(struct msg), msg->len);
-        if (record_msgs.fail())
-          fatalerror("failed to read from messages record");
-      }
-
-      /* Add message to be delivered later. */
-      (*replay_msgs)[msg->to.pipe].push(msg);
-    }
-
-    /* Deliver any messages to available processes. */
-    foreachpair (uint32_t pipe, Process *process, processes) {
-      queue<struct msg *> &msgs = (*replay_msgs)[pipe];
-      while (!msgs.empty()) {
-        struct msg *msg = msgs.front();
-        msgs.pop();
-        process->enqueue(msg);
-      }
-    }
-  }
-}
-
-
-void ProcessManager::deliver(struct msg *msg, Process *sender)
-{
-  assert(msg != NULL);
-  assert(!replaying);
-
-  if (ProcessReference receiver = use(msg->to)) {
+  if (ProcessReference receiver = use(message->to)) {
     // If we have a local sender AND we are using a manual clock
     // then update the current time of the receiver to preserve
     // the happens-before relationship between the sender and
@@ -1782,7 +1572,7 @@ void ProcessManager::deliver(struct msg *msg, Process *sender)
     // remains valid for at least the duration of this routine (so
     // that we can look up it's current time).
     if (sender != NULL) {
-      synchronized(timeouts) {
+      synchronized (timeouts) {
         if (clk != NULL) {
           clk->setCurrent(receiver, max(clk->getCurrent(receiver),
                                         clk->getCurrent(sender)));
@@ -1790,28 +1580,150 @@ void ProcessManager::deliver(struct msg *msg, Process *sender)
       }
     }
 
-    receiver->enqueue(msg);
+    receiver->enqueue(message);
   } else {
-    free(msg);
+    delete message;
+    return false;
   }
+
+  return true;
 }
 
 
-void ProcessManager::spawn(Process *process)
+// TODO(benh): Refactor and share code with above!
+bool ProcessManager::deliver(int c, HttpRequest *request, ProcessBase *sender)
+{
+  assert(request != NULL);
+
+  // Get out the receiver (needed regardless of if this is a standard
+  // HTTP request or a libprocess message).
+  const vector<string>& pairs = tokenize(request->path, "/");
+  if (pairs.size() != 2) {
+    // This has no receiver, send a response and cleanup.
+    VLOG(1) << "Returning '404 Not Found' for HTTP request '"
+            << request->path << "'";
+    link_manager->send(new HttpResponseEncoder(HttpNotFoundResponse()), c);
+    delete request;
+    return false;
+  }
+
+  UPID to(pairs[0], ip, port);
+
+  // Determine whether or not this is just a libprocess message.
+  if (request->method == "POST" && request->headers.count("User-Agent") > 0) {
+    const string& value = request->headers["User-Agent"];
+    string libprocess = "libprocess/";
+    size_t index = value.find(libprocess);
+    if (index != string::npos) {
+      // Okay, this is a libprocess message, now we can try and
+      // determine name and from.
+      UPID from(value.substr(index + libprocess.size(), value.size()));
+
+      string name = pairs[1];
+      if (name == "") {
+        delete request;
+        return false;
+      }
+  
+      Message* message = new Message();
+      message->name = name;
+      message->from = from;
+      message->to = to;
+      message->body = request->body;
+
+      delete request;
+
+      return deliver(message, sender);
+    }
+  }
+
+  // Okay, this isn't a libprocess message, so create a proxy and deliver.
+
+  if (ProcessReference receiver = use(to)) {
+    // If we have a local sender AND we are using a manual clock
+    // then update the current time of the receiver to preserve
+    // the happens-before relationship between the sender and
+    // receiver. Note that the assumption is that the sender
+    // remains valid for at least the duration of this routine (so
+    // that we can look up it's current time).
+    if (sender != NULL) {
+      synchronized (timeouts) {
+        if (clk != NULL) {
+          clk->setCurrent(receiver, max(clk->getCurrent(receiver),
+                                        clk->getCurrent(sender)));
+        }
+      }
+    }
+    
+    // Create the future to associate with whatever gets returned.
+    Future<HttpResponse>* future = new Future<HttpResponse>();
+
+    // Spawn a proxy that waits on the future.
+    spawn(new HttpProxy(c, *future));
+
+    receiver->enqueue(new pair<HttpRequest*, Future<HttpResponse>*>(request, future));
+  } else {
+    // This has no receiver, send a response and cleanup.
+    VLOG(1) << "Returning '404 Not Found' for HTTP request '"
+            << request->path << "'";
+    link_manager->send(new HttpResponseEncoder(HttpNotFoundResponse()), c);
+    delete request;
+    return false;
+  }
+
+  return true;
+}
+
+
+// TODO(benh): Refactor and share code with above!
+bool ProcessManager::deliver(const UPID& to, function<void(ProcessBase*)>* delegator, ProcessBase *sender)
+{
+  assert(delegator != NULL);
+
+  if (ProcessReference receiver = use(to)) {
+    // If we have a local sender AND we are using a manual clock
+    // then update the current time of the receiver to preserve
+    // the happens-before relationship between the sender and
+    // receiver. Note that the assumption is that the sender
+    // remains valid for at least the duration of this routine (so
+    // that we can look up it's current time).
+    if (sender != NULL) {
+      synchronized (timeouts) {
+        if (clk != NULL) {
+          clk->setCurrent(receiver, max(clk->getCurrent(receiver),
+                                        clk->getCurrent(sender)));
+        }
+      }
+    }
+
+    receiver->enqueue(delegator);
+  } else {
+    delete delegator;
+    return false;
+  }
+
+  return true;
+}
+
+
+UPID ProcessManager::spawn(ProcessBase *process)
 {
   assert(process != NULL);
 
-  process->state = Process::INIT;
+  process->state = ProcessBase::INIT;
 
-  /* Record process. */
-  synchronized(processes) {
-    processes[process->pid.pipe] = process;
+  synchronized (processes) {
+    if (processes.count(process->pid.id) > 0) {
+      return UPID();
+    } else {
+      processes[process->pid.id] = process;
+    }
   }
 
   void *stack = NULL;
 
   // Reuse a stack if any are available.
-  synchronized(stacks) {
+  synchronized (stacks) {
     if (!stacks->empty()) {
       stack = stacks->top();
       stacks->pop();
@@ -1842,13 +1754,13 @@ void ProcessManager::spawn(Process *process)
 
   /* Package the arguments. */
 #ifdef __x86_64__
-  assert(sizeof(unsigned long) == sizeof(Process *));
+  assert(sizeof(unsigned long) == sizeof(ProcessBase *));
   int stack0 = (unsigned int) (unsigned long) stack;
   int stack1 = (unsigned long) stack >> 32;
   int process0 = (unsigned int) (unsigned long) process;
   int process1 = (unsigned long) process >> 32;
 #else
-  assert(sizeof(unsigned int) == sizeof(Process *));
+  assert(sizeof(unsigned int) == sizeof(ProcessBase *));
   int stack0 = (unsigned int) stack;
   int stack1 = 0;
   int process0 = (unsigned int) process;
@@ -1860,11 +1772,13 @@ void ProcessManager::spawn(Process *process)
 
   /* Add process to the run queue. */
   enqueue(process);
+
+  return process->self();
 }
 
 
 
-void ProcessManager::link(Process *process, const PID &to)
+void ProcessManager::link(ProcessBase *process, const UPID &to)
 {
   // Check if the pid is local.
   if (!(to.ip == ip && to.port == port)) {
@@ -1872,34 +1786,29 @@ void ProcessManager::link(Process *process, const PID &to)
   } else {
     // Since the pid is local we want to get a reference to it's
     // underlying process so that while we are invoking the link
-    // manager we don't miss sending a possible PROCESS_EXIT.
+    // manager we don't miss sending a possible EXITED.
     if (ProcessReference _ = use(to)) {
       link_manager->link(process, to);
     } else {
       // Since the pid isn't valid it's process must have already died
       // (or hasn't been spawned yet) so send a process exit message.
-      struct msg *msg = (struct msg *) malloc(sizeof(struct msg));
-      msg->from.pipe = to.pipe;
-      msg->from.ip = to.ip;
-      msg->from.port = to.port;
-      msg->to.pipe = process->pid.pipe;
-      msg->to.ip = process->pid.ip;
-      msg->to.port = process->pid.port;
-      msg->id = PROCESS_EXIT;
-      msg->len = 0;
-      process->enqueue(msg);
+      Message *message = encode(to, process->pid, EXITED);
+      process->enqueue(message);
     }
   }
 }
 
 
-void ProcessManager::receive(Process *process, double secs)
+bool ProcessManager::receive(ProcessBase *process, double secs)
 {
   assert(process != NULL);
+
+  bool timedout = false;
+
   process->lock();
   {
-    /* Ensure nothing enqueued since check in Process::receive. */
-    if (process->msgs.empty()) {
+    /* Ensure nothing enqueued since check in ProcessBase::receive. */
+    if (process->messages.empty()) {
       if (secs > 0) {
         /* Create timeout. */
         const timeout &timeout = create_timeout(process, secs);
@@ -1908,36 +1817,95 @@ void ProcessManager::receive(Process *process, double secs)
         start_timeout(timeout);
 
         /* Context switch. */
-        process->state = Process::RECEIVING;
+        process->state = ProcessBase::RECEIVING;
         swapcontext(&process->uctx, &proc_uctx_running);
 
-        assert(process->state == Process::READY ||
-               process->state == Process::TIMEDOUT);
+        assert(process->state == ProcessBase::READY ||
+               process->state == ProcessBase::TIMEDOUT);
 
         /* Attempt to cancel the timer if necessary. */
-        if (process->state != Process::TIMEDOUT)
+        if (process->state != ProcessBase::TIMEDOUT) {
           cancel_timeout(timeout);
+        } else {
+          timedout = true;
+        }
 
         /* N.B. No cancel means possible unnecessary timeouts. */
 
-        process->state = Process::RUNNING;
+        process->state = ProcessBase::RUNNING;
       
         /* Update the generation (handles racing timeouts). */
         process->generation++;
       } else {
         /* Context switch. */
-        process->state = Process::RECEIVING;
+        process->state = ProcessBase::RECEIVING;
         swapcontext(&process->uctx, &proc_uctx_running);
-        assert(process->state == Process::READY);
-        process->state = Process::RUNNING;
+        assert(process->state == ProcessBase::READY);
+        process->state = ProcessBase::RUNNING;
       }
     }
   }
   process->unlock();
+
+  return !timedout;
 }
 
 
-void ProcessManager::pause(Process *process, double secs)
+bool ProcessManager::serve(ProcessBase *process, double secs)
+{
+  assert(process != NULL);
+
+  bool timedout = false;
+
+  process->lock();
+  {
+    /* Ensure nothing enqueued since check in ProcessBase::serve. */
+    if (process->messages.empty() &&
+        process->requests.empty() &&
+        process->delegators.empty()) {
+      if (secs > 0) {
+        /* Create timeout. */
+        const timeout &timeout = create_timeout(process, secs);
+
+        /* Start the timeout. */
+        start_timeout(timeout);
+
+        /* Context switch. */
+        process->state = ProcessBase::SERVING;
+        swapcontext(&process->uctx, &proc_uctx_running);
+
+        assert(process->state == ProcessBase::READY ||
+               process->state == ProcessBase::TIMEDOUT);
+
+        /* Attempt to cancel the timer if necessary. */
+        if (process->state != ProcessBase::TIMEDOUT) {
+          cancel_timeout(timeout);
+        } else {
+          timedout = true;
+        }
+
+        /* N.B. No cancel means possible unnecessary timeouts. */
+
+        process->state = ProcessBase::RUNNING;
+      
+        /* Update the generation (handles racing timeouts). */
+        process->generation++;
+      } else {
+        /* Context switch. */
+        process->state = ProcessBase::SERVING;
+        swapcontext(&process->uctx, &proc_uctx_running);
+        assert(process->state == ProcessBase::READY);
+        process->state = ProcessBase::RUNNING;
+      }
+    }
+  }
+  process->unlock();
+
+  return !timedout;
+}
+
+
+void ProcessManager::pause(ProcessBase *process, double secs)
 {
   assert(process != NULL);
 
@@ -1948,32 +1916,32 @@ void ProcessManager::pause(Process *process, double secs)
       start_timeout(create_timeout(process, secs));
 
       /* Context switch. */
-      process->state = Process::PAUSED;
+      process->state = ProcessBase::PAUSED;
       swapcontext(&process->uctx, &proc_uctx_running);
-      assert(process->state == Process::TIMEDOUT);
-      process->state = Process::RUNNING;
+      assert(process->state == ProcessBase::TIMEDOUT);
+      process->state = ProcessBase::RUNNING;
     } else {
       /* Modified context switch (basically a yield). */
-      process->state = Process::READY;
+      process->state = ProcessBase::READY;
       enqueue(process);
       swapcontext(&process->uctx, &proc_uctx_running);
-      assert(process->state == Process::READY);
-      process->state = Process::RUNNING;
+      assert(process->state == ProcessBase::READY);
+      process->state = ProcessBase::RUNNING;
     }
   }
   process->unlock();
 }
 
 
-bool ProcessManager::wait(Process *process, const PID &pid)
+bool ProcessManager::wait(ProcessBase *process, const UPID &pid)
 {
   bool waited = false;
 
   /* Now we can add the process to the waiters. */
-  synchronized(processes) {
-    if (processes.count(pid.pipe) > 0) {
-      assert(processes[pid.pipe]->state != Process::EXITED);
-      waiters[processes[pid.pipe]].insert(process);
+  synchronized (processes) {
+    if (processes.count(pid.id) > 0) {
+      assert(processes[pid.id]->state != ProcessBase::FINISHED);
+      waiters[processes[pid.id]].insert(process);
       waited = true;
     }
   }
@@ -1982,16 +1950,16 @@ bool ProcessManager::wait(Process *process, const PID &pid)
   if (waited) {
     process->lock();
     {
-      if (process->state == Process::RUNNING) {
+      if (process->state == ProcessBase::RUNNING) {
         /* Context switch. */
-        process->state = Process::WAITING;
+        process->state = ProcessBase::WAITING;
         swapcontext(&process->uctx, &proc_uctx_running);
-        assert(process->state == Process::READY);
-        process->state = Process::RUNNING;
+        assert(process->state == ProcessBase::READY);
+        process->state = ProcessBase::RUNNING;
       } else {
         /* Process is cleaned up and we have been removed from waiters. */
-        assert(process->state == Process::INTERRUPTED);
-        process->state = Process::RUNNING;
+        assert(process->state == ProcessBase::INTERRUPTED);
+        process->state = ProcessBase::RUNNING;
       }
     }
     process->unlock();
@@ -2001,7 +1969,7 @@ bool ProcessManager::wait(Process *process, const PID &pid)
 }
 
 
-bool ProcessManager::external_wait(const PID &pid)
+bool ProcessManager::external_wait(const UPID &pid)
 {
   // We use a gate for external waiters. A gate is single use. That
   // is, a new gate is created when the first external thread shows
@@ -2016,10 +1984,10 @@ bool ProcessManager::external_wait(const PID &pid)
   Gate::state_t old;
 
   /* Try and approach the gate if necessary. */
-  synchronized(processes) {
-    if (processes.count(pid.pipe) > 0) {
-      Process *process = processes[pid.pipe];
-      assert(process->state != Process::EXITED);
+  synchronized (processes) {
+    if (processes.count(pid.id) > 0) {
+      ProcessBase *process = processes[pid.id];
+      assert(process->state != ProcessBase::FINISHED);
 
       /* Check and see if a gate already exists. */
       if (gates.find(process) == gates.end())
@@ -2041,7 +2009,7 @@ bool ProcessManager::external_wait(const PID &pid)
 }
 
 
-bool ProcessManager::await(Process *process, int fd, int op, double secs, bool ignore)
+bool ProcessManager::poll(ProcessBase *process, int fd, int op, double secs, bool ignore)
 {
   assert(process != NULL);
 
@@ -2050,32 +2018,32 @@ bool ProcessManager::await(Process *process, int fd, int op, double secs, bool i
   process->lock();
   {
     /* Consider a non-empty message queue as an immediate interrupt. */
-    if (!ignore && !process->msgs.empty()) {
+    if (!ignore && !process->messages.empty()) {
       process->unlock();
       return false;
     }
 
-    // Treat an await with a bad fd as an interruptible pause!
+    // Treat an poll with a bad fd as an interruptible pause!
     if (fd >= 0) {
       /* Allocate/Initialize the watcher. */
-      ev_io *io_watcher = (ev_io *) malloc(sizeof(ev_io));
+      ev_io *watcher = new ev_io();
 
-      if ((op & Process::RDWR) == Process::RDWR)
-        ev_io_init(io_watcher, handle_await, fd, EV_READ | EV_WRITE);
-      else if ((op & Process::RDONLY) == Process::RDONLY)
-        ev_io_init(io_watcher, handle_await, fd, EV_READ);
-      else if ((op & Process::WRONLY) == Process::WRONLY)
-        ev_io_init(io_watcher, handle_await, fd, EV_WRITE);
+      if ((op & ProcessBase::RDWR) == ProcessBase::RDWR)
+        ev_io_init(watcher, handle_poll, fd, EV_READ | EV_WRITE);
+      else if ((op & ProcessBase::RDONLY) == ProcessBase::RDONLY)
+        ev_io_init(watcher, handle_poll, fd, EV_READ);
+      else if ((op & ProcessBase::WRONLY) == ProcessBase::WRONLY)
+        ev_io_init(watcher, handle_poll, fd, EV_WRITE);
 
       // Tuple describing state (on heap in case we can't "cancel" it,
       // the watcher will always fire, even if we get interrupted and
       // return early, so this tuple will get cleaned up when the
       // watcher runs).
-      io_watcher->data = new tuple<PID, int>(process->pid, process->generation);
+      watcher->data = new tuple<UPID, int>(process->pid, process->generation);
 
       /* Enqueue the watcher. */
-      synchronized(io_watchersq) {
-        io_watchersq->push(io_watcher);
+      synchronized (watchers) {
+        watchers->push(watcher);
       }
     
       /* Interrupt the loop. */
@@ -2092,23 +2060,23 @@ bool ProcessManager::await(Process *process, int fd, int op, double secs, bool i
     }
 
     /* Context switch. */
-    process->state = Process::AWAITING;
+    process->state = ProcessBase::POLLING;
     swapcontext(&process->uctx, &proc_uctx_running);
-    assert(process->state == Process::READY ||
-           process->state == Process::TIMEDOUT ||
-           process->state == Process::INTERRUPTED);
+    assert(process->state == ProcessBase::READY ||
+           process->state == ProcessBase::TIMEDOUT ||
+           process->state == ProcessBase::INTERRUPTED);
 
     /* Attempt to cancel the timer if necessary. */
     if (secs != 0)
-      if (process->state != Process::TIMEDOUT)
+      if (process->state != ProcessBase::TIMEDOUT)
         cancel_timeout(timeout);
 
-    if (process->state == Process::INTERRUPTED)
+    if (process->state == ProcessBase::INTERRUPTED)
       interrupted = true;
 
-    process->state = Process::RUNNING;
+    process->state = ProcessBase::RUNNING;
       
-    /* Update the generation (handles racing awaited). */
+    /* Update the generation (handles racing polled). */
     process->generation++;
   }
   process->unlock();
@@ -2117,10 +2085,10 @@ bool ProcessManager::await(Process *process, int fd, int op, double secs, bool i
 }
 
 
-void ProcessManager::enqueue(Process *process)
+void ProcessManager::enqueue(ProcessBase *process)
 {
   assert(process != NULL);
-  synchronized(runq) {
+  synchronized (runq) {
     assert(find(runq.begin(), runq.end(), process) == runq.end());
     runq.push_back(process);
   }
@@ -2130,11 +2098,11 @@ void ProcessManager::enqueue(Process *process)
 }
 
 
-Process * ProcessManager::dequeue()
+ProcessBase * ProcessManager::dequeue()
 {
-  Process *process = NULL;
+  ProcessBase *process = NULL;
 
-  synchronized(runq) {
+  synchronized (runq) {
     if (!runq.empty()) {
       process = runq.front();
       runq.pop_front();
@@ -2145,38 +2113,41 @@ Process * ProcessManager::dequeue()
 }
 
 
-void ProcessManager::timedout(const PID &pid, int generation)
+void ProcessManager::timedout(const UPID &pid, int generation)
 {
   if (ProcessReference process = use(pid)) {
     process->lock();
     {
       // We know we timed out if the state != READY after a timeout
       // but the generation is still the same.
-      if (process->state != Process::READY &&
+      if (process->state != ProcessBase::READY &&
           process->generation == generation) {
 
         // The process could be in any of the following states,
-        // including RUNNING if a pause, receive, or await was
+        // including RUNNING if a pause, receive, or poll was
         // initiated by an "outside" thread (e.g., in the constructor
         // of the process).
-        assert(process->state == Process::RUNNING ||
-               process->state == Process::RECEIVING ||
-               process->state == Process::AWAITING ||
-               process->state == Process::INTERRUPTED ||
-               process->state == Process::PAUSED);
+        assert(process->state == ProcessBase::RUNNING ||
+               process->state == ProcessBase::RECEIVING ||
+               process->state == ProcessBase::SERVING ||
+               process->state == ProcessBase::POLLING ||
+               process->state == ProcessBase::INTERRUPTED ||
+               process->state == ProcessBase::PAUSED);
 
-        if (process->state != Process::RUNNING ||
-            process->state != Process::INTERRUPTED ||
-            process->state != Process::EXITING)
+        if (process->state != ProcessBase::RUNNING ||
+            process->state != ProcessBase::INTERRUPTED ||
+            process->state != ProcessBase::FINISHING) {
           process_manager->enqueue(process);
+        }
 
         // We always have a timeout override the state (unless we are
         // exiting). This includes overriding INTERRUPTED. This means
-        // that a process that was awaiting when selected from the
+        // that a process that was polling when selected from the
         // runq will fall out because of a timeout even though it also
         // received a message.
-        if (process->state != Process::EXITING)
-          process->state = Process::TIMEDOUT;
+        if (process->state != ProcessBase::FINISHING) {
+          process->state = ProcessBase::TIMEDOUT;
+        }
       }
     }
     process->unlock();
@@ -2184,14 +2155,14 @@ void ProcessManager::timedout(const PID &pid, int generation)
 }
 
 
-void ProcessManager::awaited(const PID &pid, int generation)
+void ProcessManager::polled(const UPID &pid, int generation)
 {
   if (ProcessReference process = use(pid)) {
     process->lock();
     {
-      if (process->state == Process::AWAITING &&
+      if (process->state == ProcessBase::POLLING &&
           process->generation == generation) {
-        process->state = Process::READY;
+        process->state = ProcessBase::READY;
         enqueue(process);
       }
     }
@@ -2200,51 +2171,51 @@ void ProcessManager::awaited(const PID &pid, int generation)
 }
 
 
-void ProcessManager::run(Process *process)
+void ProcessManager::run(ProcessBase *process)
 {
   // Each process gets locked before 'schedule' runs it to enforce
-  // atomicity for the blocking routines (receive, await, pause,
+  // atomicity for the blocking routines (receive, poll, pause,
   // etc). So, we only need to unlock the process here.
   {
-    process->state = Process::RUNNING;
+    process->state = ProcessBase::RUNNING;
   }
   process->unlock();
 
   try {
     (*process)();
   } catch (const std::exception &e) {
-    cerr << "libprocess: " << process->pid
-         << " exited due to "
-         << e.what() << endl;
+    std::cerr << "libprocess: " << process->pid
+              << " exited due to "
+              << e.what() << std::endl;
   } catch (...) {
-    cerr << "libprocess: " << process->pid
-         << " exited due to unknown exception" << endl;
+    std::cerr << "libprocess: " << process->pid
+              << " exited due to unknown exception" << std::endl;
   }
 
   cleanup(process);
 }
 
 
-void ProcessManager::cleanup(Process *process)
+void ProcessManager::cleanup(ProcessBase *process)
 {
-  /* Processes that were waiting on exiting process. */
-  list<Process *> resumable;
+  // Processes that were waiting on exiting process.
+  list<ProcessBase *> resumable;
 
-  /* Possible gate non-libprocess threads are waiting at. */
+  // Possible gate non-libprocess threads are waiting at.
   Gate *gate = NULL;
 
-  /* Stop new process references from being created. */
-  process->state = Process::EXITING;
+  // Stop new process references from being created.
+  process->state = ProcessBase::FINISHING;
 
   /* Remove process. */
-  synchronized(processes) {
-    /* Remove from internal clock (if necessary). */
-    synchronized(timeouts) {
+  synchronized (processes) {
+    // Remove from internal clock (if necessary).
+    synchronized (timeouts) {
       if (clk != NULL)
         clk->discard(process);
     }
 
-    /* Wait for all process references to get cleaned up. */
+    // Wait for all process references to get cleaned up.
     while (process->refs > 0) {
       asm ("pause");
       __sync_synchronize();
@@ -2252,61 +2223,64 @@ void ProcessManager::cleanup(Process *process)
 
     process->lock();
     {
-      /* Free any pending messages. */
-      while (!process->msgs.empty()) {
-        struct msg *msg = process->msgs.front();
-        process->msgs.pop_front();
-        free(msg);
+      // Free any pending messages.
+      while (!process->messages.empty()) {
+        Message *message = process->messages.front();
+        process->messages.pop_front();
+        delete message;
       }
 
-      /* Free current message. */
-      if (process->current) free(process->current);
+      // Free current message.
+      if (process->current) {
+        delete process->current;
+      }
 
-      processes.erase(process->pid.pipe);
+      processes.erase(process->pid.id);
 
-      /* Confirm that the process is not in any waiting queue. */
-      foreachpair (_, set<Process *> &waiting, waiters)
+      // Confirm that the process is not in any waiting queue.
+      foreachpair (_, set<ProcessBase *> &waiting, waiters) {
         assert(waiting.find(process) == waiting.end());
+      }
 
-      /* Grab all the waiting processes that are now resumable. */
-      foreach (Process *waiter, waiters[process])
+      // Grab all the waiting processes that are now resumable.
+      foreach (ProcessBase *waiter, waiters[process]) {
         resumable.push_back(waiter);
+      }
 
       waiters.erase(process);
 
-      /* Lookup gate to wake up waiting non-libprocess threads. */
-      map<Process *, Gate *>::iterator it = gates.find(process);
+      // Lookup gate to wake up waiting non-libprocess threads.
+      map<ProcessBase *, Gate *>::iterator it = gates.find(process);
       if (it != gates.end()) {
         gate = it->second;
-        /* N.B. The last thread that leaves the gate also free's it. */
+        // N.B. The last thread that leaves the gate also free's it.
         gates.erase(it);
       }
-        
+
       assert(process->refs == 0);
-      process->state = Process::EXITED;
+      process->state = ProcessBase::FINISHED;
     }
     process->unlock();
   }
 
-  /* Inform link manager. */
+  // Inform link manager.
   link_manager->exited(process);
 
-  /* Confirm process not in runq. */
-  synchronized(runq) {
+  // Confirm process not in runq.
+  synchronized (runq) {
     assert(find(runq.begin(), runq.end(), process) == runq.end());
   }
 
-  /*
-   * N.B. After opening the gate we can no longer dereference
-   * 'process' since it might already be cleaned up by user code (a
-   * waiter might have cleaned up the stack where the process was
-   * allocated).
-   */
-  if (gate != NULL)
+  // N.B. After opening the gate we can no longer dereference
+  // 'process' since it might already be cleaned up by user code (a
+  // waiter might have cleaned up the stack where the process was
+  // allocated).
+  if (gate != NULL) {
     gate->open();
+  }
 
-  /* And resume all processes waiting too. */
-  foreach (Process *p, resumable) {
+  // And resume all processes waiting too.
+  foreach (ProcessBase *p, resumable) {
     p->lock();
     {
       // Process 'p' might be RUNNING because it is racing to become
@@ -2315,12 +2289,13 @@ void ProcessManager::cleanup(Process *process)
       // TODO(benh): Once we actually run multiple processes at a
       // time (using multiple threads) this logic will need to get
       // made thread safe (in particular, a process may be
-      // EXITING).
-      assert(p->state == Process::RUNNING || p->state == Process::WAITING);
-      if (p->state == Process::RUNNING) {
-        p->state = Process::INTERRUPTED;
+      // FINISHING).
+      assert(p->state == ProcessBase::RUNNING ||
+             p->state == ProcessBase::WAITING);
+      if (p->state == ProcessBase::RUNNING) {
+        p->state = ProcessBase::INTERRUPTED;
       } else {
-        p->state = Process::READY;
+        p->state = ProcessBase::READY;
         enqueue(p);
       }
     }
@@ -2339,13 +2314,13 @@ void ProcessManager::invoke(const function<void (void)> &thunk)
 }
 
 
-timeout ProcessManager::create_timeout(Process *process, double secs)
+timeout ProcessManager::create_timeout(ProcessBase *process, double secs)
 {
   assert(process != NULL);
 
   ev_tstamp tstamp;
 
-  synchronized(timeouts) {
+  synchronized (timeouts) {
     if (clk != NULL) {
       tstamp = clk->getCurrent(process) + secs;
     } else {
@@ -2366,7 +2341,7 @@ timeout ProcessManager::create_timeout(Process *process, double secs)
 void ProcessManager::start_timeout(const timeout &timeout)
 {
   /* Add the timer. */
-  synchronized(timeouts) {
+  synchronized (timeouts) {
     if (timeouts->size() == 0 || timeout.tstamp < timeouts->begin()->first) {
       // Need to interrupt the loop to update/set timer repeat.
       (*timeouts)[timeout.tstamp].push_back(timeout);
@@ -2383,7 +2358,7 @@ void ProcessManager::start_timeout(const timeout &timeout)
 
 void ProcessManager::cancel_timeout(const timeout &timeout)
 {
-  synchronized(timeouts) {
+  synchronized (timeouts) {
     // Check if the timeout is still pending, and if so, erase
     // it. In addition, erase an empty list if we just removed the
     // last timeout.
@@ -2400,12 +2375,12 @@ void Clock::pause()
 {
   initialize();
 
-  synchronized(timeouts) {
+  synchronized (timeouts) {
     // For now, only one global clock (rather than clock per
     // process). This Means that we have to take special care to
     // ensure happens-before timing (currently done for local message
     // sends and spawning new processes, not currently done for
-    // PROCESS_EXIT messages).
+    // EXITED messages).
     if (clk == NULL) {
       clk = new InternalClock();
 
@@ -2421,7 +2396,7 @@ void Clock::resume()
 {
   initialize();
 
-  synchronized(timeouts) {
+  synchronized (timeouts) {
     if (clk != NULL) {
       delete clk;
       clk = NULL;
@@ -2435,7 +2410,7 @@ void Clock::resume()
 
 void Clock::advance(double secs)
 {
-  synchronized(timeouts) {
+  synchronized (timeouts) {
     if (clk != NULL) {
       clk->setElapsed(clk->getElapsed() + secs);
 
@@ -2446,40 +2421,23 @@ void Clock::advance(double secs)
 }
 
 
-Process::Process()
+ProcessBase::ProcessBase(const std::string& _id)
 {
   initialize();
 
   pthread_mutex_init(&m, NULL);
 
   refs = 0;
-
   current = NULL;
-
   generation = 0;
 
-  /* Initialize the PID associated with the process. */
-  if (!replaying) {
-    /* Get a new unique pipe identifier. */
-    pid.pipe = __sync_add_and_fetch(&global_pipe, 1);
+  // Generate string representation of unique id for process.
+  if (_id != "") {
+    pid.id = _id;
   } else {
-    /* Lookup pipe from record. */
-    map<uint32_t, deque<uint32_t> >::iterator it = proc_process == NULL
-      ? replay_pipes->find(0)
-      : replay_pipes->find(proc_process->pid.pipe);
-
-    /* Check that this is an expected process creation. */
-    if (it == replay_pipes->end() && !it->second.empty())
-      fatal("not expecting to create (this) process during replay");
-
-    pid.pipe = it->second.front();
-    it->second.pop_front();
-  }
-
-  if (recording) {
-    assert(!replaying);
-    record_pipes << " " << (proc_process == NULL ? 0 : proc_process->pid.pipe);
-    record_pipes << " " << pid.pipe;
+    stringstream out;
+    out << __sync_add_and_fetch(&id, 1);
+    pid.id = out.str();
   }
 
   pid.ip = ip;
@@ -2487,7 +2445,7 @@ Process::Process()
 
   // If using a manual clock, try and set current time of process
   // using happens before relationship between creator and createe!
-  synchronized(timeouts) {
+  synchronized (timeouts) {
     if (clk != NULL) {
       if (pthread_self() == proc_thread) {
         assert(proc_process != NULL);
@@ -2500,25 +2458,20 @@ Process::Process()
 }
 
 
-Process::~Process() {}
+ProcessBase::~ProcessBase() {}
 
 
-void Process::enqueue(struct msg *msg)
+void ProcessBase::enqueue(Message* message)
 {
-  assert(msg != NULL);
+  assert(message != NULL);
 
   // TODO(benh): Put filter inside lock statement below so that we can
   // guarantee the order of the messages seen by a filter are the same
-  // as the order of messages seen by the process. This is hard to do
-  // now because the locks aren't all correctly re-entrant. In
-  // addition, we should really put the filterer in
-  // ProcessManager::deliver because that updates the happens-before
-  // timing relationship and if the message just gets filtered then
-  // some timing could be incorrect.
-  synchronized(filterer) {
+  // as the order of messages seen by the process.
+  synchronized (filterer) {
     if (filterer != NULL) {
-      if (filterer->filter(msg)) {
-        free(msg);
+      if (filterer->filter(message)) {
+        delete message;
         return;
       }
     }
@@ -2526,14 +2479,14 @@ void Process::enqueue(struct msg *msg)
 
   lock();
   {
-    assert(state != EXITED);
+    assert(state != FINISHED);
 
-    msgs.push_back(msg);
+    messages.push_back(message);
 
-    if (state == RECEIVING) {
+    if (state == RECEIVING || state == SERVING) {
       state = READY;
       process_manager->enqueue(this);
-    } else if (state == AWAITING) {
+    } else if (state == POLLING) {
       state = INTERRUPTED;
       process_manager->enqueue(this);
     }
@@ -2545,69 +2498,152 @@ void Process::enqueue(struct msg *msg)
            state == WAITING ||
            state == INTERRUPTED ||
            state == TIMEDOUT ||
-           state == EXITING);
+           state == FINISHING);
   }
   unlock();
 }
 
 
-struct msg * Process::dequeue()
+void ProcessBase::enqueue(pair<HttpRequest*, Future<HttpResponse>*>* request)
 {
-  struct msg *msg = NULL;
+  assert(request != NULL);
+
+  // TODO(benh): Support filtering HTTP requests.
 
   lock();
   {
-    assert (state == RUNNING);
-    if (!msgs.empty()) {
-      msg = msgs.front();
-      msgs.pop_front();
+    assert(state != FINISHED);
+
+    requests.push_back(request);
+
+    if (state == SERVING) {
+      state = READY;
+      process_manager->enqueue(this);
+    } else if (state == POLLING) {
+      state = INTERRUPTED;
+      process_manager->enqueue(this);
+    }
+
+    assert(state == INIT ||
+           state == READY ||
+           state == RUNNING ||
+           state == RECEIVING ||
+           state == PAUSED ||
+           state == WAITING ||
+           state == INTERRUPTED ||
+           state == TIMEDOUT ||
+           state == FINISHING);
+  }
+  unlock();
+}
+
+
+void ProcessBase::enqueue(function<void(ProcessBase*)>* delegator)
+{
+  assert(delegator != NULL);
+
+  // TODO(benh): Support filtering dispatches.
+
+  lock();
+  {
+    assert(state != FINISHED);
+
+    delegators.push_back(delegator);
+
+    if (state == SERVING) {
+      state = READY;
+      process_manager->enqueue(this);
+    } else if (state == POLLING) {
+      state = INTERRUPTED;
+      process_manager->enqueue(this);
+    }
+
+    assert(state == INIT ||
+           state == READY ||
+           state == RUNNING ||
+           state == RECEIVING ||
+           state == PAUSED ||
+           state == WAITING ||
+           state == INTERRUPTED ||
+           state == TIMEDOUT ||
+           state == FINISHING);
+  }
+  unlock();
+}
+
+
+template <>
+Message * ProcessBase::dequeue()
+{
+  Message *message = NULL;
+
+  lock();
+  {
+    assert(state == RUNNING);
+    if (!messages.empty()) {
+      message = messages.front();
+      messages.pop_front();
     }
   }
   unlock();
 
-  return msg;
+  return message;
 }
 
 
-void Process::inject(const PID &from, MSGID id, const char *data, size_t length)
+template <>
+pair<HttpRequest*, Future<HttpResponse>*>* ProcessBase::dequeue()
 {
-  if (replaying)
-    return;
+  pair<HttpRequest*, Future<HttpResponse>*>* request = NULL;
 
+  lock();
+  {
+    assert(state == RUNNING);
+    if (!requests.empty()) {
+      request = requests.front();
+      requests.pop_front();
+    }
+  }
+  unlock();
+
+  return request;
+}
+
+
+template <>
+function<void(ProcessBase*)> * ProcessBase::dequeue()
+{
+  function<void(ProcessBase*)> *delegator = NULL;
+
+  lock();
+  {
+    assert(state == RUNNING);
+    if (!delegators.empty()) {
+      delegator = delegators.front();
+      delegators.pop_front();
+    }
+  }
+  unlock();
+
+  return delegator;
+}
+
+
+void ProcessBase::inject(const UPID& from, const string& name, const char* data, size_t length)
+{
   if (!from)
     return;
 
-  /* Disallow sending messages using an internal id. */
-  if (id < PROCESS_MSGID)
-    return;
-
-  /* Allocate/Initialize outgoing message. */
-  struct msg *msg = (struct msg *) malloc(sizeof(struct msg) + length);
-
-  msg->from.pipe = from.pipe;
-  msg->from.ip = from.ip;
-  msg->from.port = from.port;
-  msg->to.pipe = pid.pipe;
-  msg->to.ip = pid.ip;
-  msg->to.port = pid.port;
-  msg->id = id;
-  msg->len = length;
-
-  if (length > 0)
-    memcpy((char *) msg + sizeof(struct msg), data, length);
+  // Encode outgoing message.
+  Message *message = encode(from, pid, name, string(data, length));
 
   // TODO(benh): Put filter inside lock statement below so that we can
   // guarantee the order of the messages seen by a filter are the same
-  // as the order of messages seen by the process. This is hard to do
-  // now because the locks aren't all correctly re-entrant. In
-  // addition, we should really put the filterer in
-  // ProcessManager::deliver because that updates the happens-before
-  // timing relationship and if the message just gets filtered then
-  // some timing could be incorrect.
-  synchronized(filterer) {
+  // as the order of messages seen by the process.
+  synchronized (filterer) {
     if (filterer != NULL) {
-      if (filterer->filter(msg)) {
-        free(msg);
+      if (filterer->filter(message)) {
+        delete message;
         return;
       }
     }
@@ -2615,171 +2651,186 @@ void Process::inject(const PID &from, MSGID id, const char *data, size_t length)
 
   lock();
   {
-    msgs.push_front(msg);
+    messages.push_front(message);
   }
   unlock();
 }
 
 
-void Process::send(const PID &to, MSGID id, const char *data, size_t length)
+void ProcessBase::send(const UPID& to, const string& name, const char* data, size_t length)
 {
-  if (replaying)
+  if (!to) {
     return;
+  }
 
-  if (!to)
-    return;
-  
-  /* Disallow sending messages using an internal id. */
-  if (id < PROCESS_MSGID)
-    return;
-
-  /* Allocate/Initialize outgoing message. */
-  struct msg *msg = (struct msg *) malloc(sizeof(struct msg) + length);
-
-  msg->from.pipe = pid.pipe;
-  msg->from.ip = pid.ip;
-  msg->from.port = pid.port;
-  msg->to.pipe = to.pipe;
-  msg->to.ip = to.ip;
-  msg->to.port = to.port;
-  msg->id = id;
-  msg->len = length;
-
-  if (length > 0)
-    memcpy((char *) msg + sizeof(struct msg), data, length);
-
-  if (to.ip == ip && to.port == port)
-    /* Local message. */
-    process_manager->deliver(msg, this);
-  else
-    /* Remote message. */
-    link_manager->send(msg);
+  // Encode and transport outgoing message.
+  transport(encode(pid, to, name, string(data, length)), this);
 }
 
 
-MSGID Process::receive(double secs)
+string ProcessBase::receive(double secs)
 {
   // Free current message.
   if (current != NULL) {
-    free(current);
+    delete current;
     current = NULL;
   }
 
-  // Check if there is a message queued.
-  if ((current = dequeue()) != NULL)
-    goto found;
+  // Check if there is a message.
+ check:
+  if ((current = dequeue<Message>()) != NULL) {
+    return name();
+  }
 
   if (pthread_self() == proc_thread) {
     // Avoid blocking if negative seconds.
-    if (secs >= 0)
-      process_manager->receive(this, secs);
-
-    // Check for a message (otherwise we timed out).
-    if ((current = dequeue()) == NULL)
-      goto timeout;
-
-  } else {
-    // TODO(benh): Handle timeout (this code actually waits
-    // indefintely until the dequeue stops returning NULL.
-    do {
-      lock();
-      {
-	if (state == TIMEDOUT) {
-	  state = RUNNING;
-	  unlock();
-	  goto timeout;
-	}
-	assert(state == RUNNING);
+    if (secs >= 0) {
+      if (!process_manager->receive(this, secs)) {
+        goto timeout;
+      } else {
+        lock();
+        {
+          assert(!messages.empty());
+        }
+        unlock();
+        goto check;
       }
-      unlock();
-      usleep(50000); // 50000 == ~RTT 
-    } while ((current = dequeue()) == NULL);
+    } else {
+      goto timeout;
+    }
+  } else {
+    // TODO(benh): Handle calling receive from an outside thread.
+    fatal("unimplemented");
   }
-
- found:
-  assert (current != NULL);
-
-  if (recording)
-    process_manager->record(current);
-
-  return current->id;
 
  timeout:
-  current = (struct msg *) malloc(sizeof(struct msg));
-  current->from.pipe = 0;
-  current->from.ip = 0;
-  current->from.port = 0;
-  current->to.pipe = pid.pipe;
-  current->to.ip = pid.ip;
-  current->to.port = pid.port;
-  current->id = PROCESS_TIMEOUT;
-  current->len = 0;
-
-  if (recording)
-    process_manager->record(current);
-
-  return current->id;
+  assert(current == NULL);
+  current = encode(UPID(), pid, TIMEOUT);
+  return name();
 }
 
 
-MSGID Process::serve(double secs, bool forever)
+string ProcessBase::serve(double secs, bool once)
 {
   do {
-    switch (receive(secs)) {
-      case PROCESS_DISPATCH: {
-        void *pointer = (char *) current + sizeof(struct msg);
-        std::tr1::function<void (void)> *delegator =
-          *reinterpret_cast<std::tr1::function<void (void)> **>(pointer);
-        (*delegator)();
-        delete delegator;
-        break;
-      }
+    // Free current message.
+    if (current != NULL) {
+      delete current;
+      current = NULL;
+    }
 
-      default: {
-        return msgid();
+    // Check if there is a message, an HTTP request, or a delegator.
+  check:
+    pair<HttpRequest*, Future<HttpResponse>*>* request;
+    function<void(ProcessBase*)>* delegator;
+    if ((request = dequeue<pair<HttpRequest*, Future<HttpResponse>*> >()) != NULL) {
+      const string& id = "/" + pid.id + "/";
+      size_t index = request->first->path.find(id);
+      CHECK(index != string::npos);
+      const string& name =
+        request->first->path.substr(index + id.size(), request->first->path.size());
+      if (http_handlers.count(name) > 0) {
+        http_handlers[name](*request->first).associate(*request->second);
+      } else {
+        Promise<HttpResponse>(HttpNotFoundResponse()).associate(*request->second);
+        VLOG(1) << "Returning '404 Not Found' for HTTP request '"
+                << request->first->path << "'";
+      }
+      delete request->first;
+      delete request->second;
+      delete request;
+    } else if ((delegator = dequeue<function<void(ProcessBase*)> >()) != NULL) {
+      (*delegator)(this);
+      delete delegator;
+    } else if ((current = dequeue<Message>()) != NULL) {
+      if (message_handlers.count(name()) > 0) {
+        message_handlers[name()]();
+      } else {
+        return name();
       }
     }
-  } while (forever);
+
+    // Okay, nothing found, possibly block in ProcessManager::serve.
+    if (pthread_self() == proc_thread) {
+      // Avoid blocking if negative seconds.
+      if (secs >= 0) {
+        if (!process_manager->serve(this, secs)) {
+          goto timeout;
+        } else {
+          // Okay, something should be ready.
+          lock();
+          {
+            assert(!messages.empty() ||
+                   !requests.empty() ||
+                   !delegators.empty());
+          }
+          unlock();
+          goto check;
+        }
+      } else {
+        goto timeout;
+      }
+    } else {
+      // TODO(benh): Handle calling serve from an outside thread.
+      fatal("unimplemented");
+    }
+  } while (!once);
+
+ timeout:
+  assert(current == NULL);
+  current = encode(UPID(), pid, TIMEOUT);
+  return name();
 }
 
 
-void Process::operator () ()
+UPID ProcessBase::from() const
 {
-  serve();
-}
-
-
-const char * Process::body(size_t *length) const
-{
-  if (current != NULL && current->len > 0) {
-    if (length != NULL)
-      *length = current->len;
-    return (char *) current + sizeof(struct msg);
+  if (current != NULL) {
+    return current->from;
   } else {
-    if (length != NULL)
-      *length = 0;
-    return NULL;
+    return UPID();
   }
 }
 
 
-void Process::pause(double secs)
+const string& ProcessBase::name() const
+{
+  static const string EMPTY;
+
+  if (current != NULL) {
+    return current->name;
+  } else {
+    return EMPTY;
+  }
+}
+
+
+const std::string& ProcessBase::body() const
+{
+  static const string EMPTY;
+
+  if (current != NULL) {
+    return current->body;
+  }
+
+  return EMPTY;
+}
+
+
+void ProcessBase::pause(double secs)
 {
   if (pthread_self() == proc_thread) {
-    if (replaying)
-      process_manager->pause(this, 0);
-    else
-      process_manager->pause(this, secs);
   } else {
     sleep(secs);
   }
 }
 
 
-PID Process::link(const PID &to)
+UPID ProcessBase::link(const UPID& to)
 {
-  if (!to)
+  if (!to) {
     return to;
+  }
 
   process_manager->link(this, to);
 
@@ -2787,23 +2838,26 @@ PID Process::link(const PID &to)
 }
 
 
-bool Process::await(int fd, int op, double secs, bool ignore)
+bool ProcessBase::poll(int fd, int op, double secs, bool ignore)
 {
-  if (secs < 0)
+  if (secs < 0) {
     return true;
+  }
 
-  /* TODO(benh): Handle invoking await from "outside" thread. */
-  if (pthread_self() != proc_thread)
+  /* TODO(benh): Handle invoking poll from "outside" thread. */
+  if (pthread_self() != proc_thread) {
     fatal("unimplemented");
+  }
 
-  return process_manager->await(this, fd, op, secs, ignore);
+  return process_manager->poll(this, fd, op, secs, ignore);
 }
 
 
-bool Process::ready(int fd, int op)
+bool ProcessBase::ready(int fd, int op)
 {
-  if (fd < 0)
+  if (fd < 0) {
     return false;
+  }
 
   fd_set rdset;
   fd_set wrset;
@@ -2820,20 +2874,20 @@ bool Process::ready(int fd, int op)
     FD_SET(fd, &wrset);
   }
 
-  struct timeval timeout;
+  timeval timeout;
   memset(&timeout, 0, sizeof(timeout));
 
-  select(fd+1, &rdset, &wrset, NULL, &timeout);
+  select(fd + 1, &rdset, &wrset, NULL, &timeout);
 
   return FD_ISSET(fd, &rdset) || FD_ISSET(fd, &wrset);
 }
 
 
-double Process::elapsed()
+double ProcessBase::elapsed()
 {
   double now = 0;
 
-  synchronized(timeouts) {
+  synchronized (timeouts) {
     if (clk != NULL) {
       now = clk->getCurrent(this);
     } else {
@@ -2846,14 +2900,14 @@ double Process::elapsed()
 }
 
 
-PID Process::spawn(Process *process)
+UPID ProcessBase::spawn(ProcessBase* process)
 {
   initialize();
 
   if (process != NULL) {
     // If using a manual clock, try and set current time of process
     // using happens before relationship between spawner and spawnee!
-    synchronized(timeouts) {
+    synchronized (timeouts) {
       if (clk != NULL) {
         if (pthread_self() == proc_thread) {
           assert(proc_process != NULL);
@@ -2864,21 +2918,20 @@ PID Process::spawn(Process *process)
       }
     }
 
-    process_manager->spawn(process);
-
-    return process->self();
+    return process_manager->spawn(process);
   } else {
-    return PID();
+    return UPID();
   }
 }
 
 
-bool Process::wait(const PID &pid)
+bool wait(const UPID& pid)
 {
   initialize();
 
-  if (!pid)
+  if (!pid) {
     return false;
+  }
 
   // N.B. This could result in a deadlock! We could check if such was
   // the case by doing:
@@ -2892,89 +2945,51 @@ bool Process::wait(const PID &pid)
   // has waited on a process and it is now finished (and can be
   // cleaned up).
 
-  if (pthread_self() != proc_thread)
+  if (pthread_self() != proc_thread) {
     return process_manager->external_wait(pid);
-  else
-    return process_manager->wait(proc_process, pid);
+  }
+
+  return process_manager->wait(proc_process, pid);
 }
 
 
-void Process::invoke(const function<void (void)> &thunk)
+void invoke(const function<void (void)> &thunk)
 {
   initialize();
   ProcessManager::invoke(thunk);
 }
 
 
-void Process::filter(Filter *filter)
+void filter(Filter *filter)
 {
   initialize();
 
-  synchronized(filterer) {
+  synchronized (filterer) {
     filterer = filter;
   }
 }
 
 
-void Process::post(const PID &to, MSGID id, const char *data, size_t length)
+void post(const UPID& to, const string& name, const char* data, size_t length)
 {
   initialize();
 
-  if (replaying)
+  if (!to) {
     return;
+  }
 
-  if (!to)
-    return;
-
-  /* Disallow sending messages using an internal id. */
-  if (id < PROCESS_MSGID)
-    return;
-
-  /* Allocate/Initialize outgoing message. */
-  struct msg *msg = (struct msg *) malloc(sizeof(struct msg) + length);
-
-  msg->from.pipe = 0;
-  msg->from.ip = 0;
-  msg->from.port = 0;
-  msg->to.pipe = to.pipe;
-  msg->to.ip = to.ip;
-  msg->to.port = to.port;
-  msg->id = id;
-  msg->len = length;
-
-  if (length > 0)
-    memcpy((char *) msg + sizeof(struct msg), data, length);
-
-  if (to.ip == ip && to.port == port)
-    /* Local message. */
-    process_manager->deliver(msg);
-  else
-    /* Remote message. */
-    link_manager->send(msg);
+  // Encode and transport outgoing message.
+  transport(encode(UPID(), to, name, string(data, length)));
 }
 
 
-void Process::dispatcher(Process *process, function<void (void)> *delegator)
+void dispatcher(const UPID& pid, function<void(ProcessBase*)>* delegator)
 {
-  if (replaying)
-    return;
-
-  if (process == NULL)
-    return;
-
-  /* Allocate/Initialize outgoing message. */
-  struct msg *msg = (struct msg *) malloc(sizeof(struct msg) + sizeof(delegator));
-
-  msg->from.pipe = 0;
-  msg->from.ip = 0;
-  msg->from.port = 0;
-  msg->to.pipe = process->pid.pipe;
-  msg->to.ip = process->pid.ip;
-  msg->to.port = process->pid.port;
-  msg->id = PROCESS_DISPATCH;
-  msg->len = sizeof(delegator);
-
-  memcpy((char *) msg + sizeof(struct msg), &delegator, sizeof(delegator));
-
-  process_manager->deliver(msg);
+  if (proc_process != NULL) {
+    process_manager->deliver(pid, delegator, proc_process);
+  } else {
+    process_manager->deliver(pid, delegator);
+  }
 }
+
+}  // namespace process {

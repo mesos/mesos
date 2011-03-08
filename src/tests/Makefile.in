@@ -69,14 +69,6 @@ endif
 CFLAGS += -MMD -MP
 CXXFLAGS += -MMD -MP
 
-# Add build date to CFLAGS, CXXFLAGS
-CFLAGS += -DBUILD_DATE="\"$$(date '+%Y-%m-%d %H:%M:%S')\""
-CXXFLAGS += -DBUILD_DATE="\"$$(date '+%Y-%m-%d %H:%M:%S')\""
-
-# Add build user to CFLAGS, CXXFLAGS
-CFLAGS += -DBUILD_USER="\"$$USER\""
-CXXFLAGS += -DBUILD_USER="\"$$USER\""
-
 # Add protobuf, glog, gmock, gtest, libev, libprocess, pthread, and dl to LIBS.
 LIBS += -lprotobuf -lglog -lgmock -lgtest -lprocess -lev -lpthread -ldl
 
@@ -100,7 +92,6 @@ EXTERNAL_SCRIPTS =							\
   $(BINDIR)/tests/external/LxcIsolation/ScaleUpAndDown.sh		\
   $(BINDIR)/tests/external/LxcIsolation/TwoSeparateTasks.sh		\
   $(BINDIR)/tests/external/LxcIsolation/run_scheduled_memhog_test.sh	\
-  $(BINDIR)/tests/external/SampleFrameworks/CFramework.sh		\
   $(BINDIR)/tests/external/SampleFrameworks/CFrameworkCmdlineParsing.sh	\
   $(BINDIR)/tests/external/SampleFrameworks/CFrameworkInvalidCmdline.sh	\
   $(BINDIR)/tests/external/SampleFrameworks/CFrameworkInvalidEnv.sh	\

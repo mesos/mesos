@@ -30,18 +30,15 @@ public:
   virtual void resourcesChanged(Framework* framework, Executor* executor);
 
   // Reaps child processes and tells the slave if they exit
-  class Reaper : public Process {
+  class Reaper : public process::Process<Reaper> {
     ProcessBasedIsolationModule* module;
 
   protected:
-    void operator () ();
+    virtual void operator () ();
 
   public:
     Reaper(ProcessBasedIsolationModule* module);
   };
-
-  // Extra shutdown message for reaper
-  enum { SHUTDOWN_REAPER = PROCESS_MSGID };
 
 protected:
   // Main method executed after a fork() to create a Launcher for launching

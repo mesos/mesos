@@ -10,6 +10,8 @@
 
 #include <gmock/gmock.h>
 
+#include <messaging/messages.hpp>
+
 
 namespace mesos { namespace internal { namespace test {
 
@@ -97,10 +99,10 @@ public:
 /**
  * Definition of a mock Filter so that messages can act as triggers.
  */
-class MockFilter : public Filter
+class MockFilter : public process::Filter
 {
- public:
-  MOCK_METHOD1(filter, bool(struct msg *));
+public:
+  MOCK_METHOD1(filter, bool(process::Message *));
 };
 
 
@@ -108,11 +110,11 @@ class MockFilter : public Filter
  * A message can be matched against in conjunction with the MockFilter
  * (see above) to perform specific actions based for messages.
  */
-MATCHER_P3(MsgMatcher, id, from, to, "")
+MATCHER_P3(MsgMatcher, name, from, to, "")
 {
-  return (testing::Matcher<MSGID>(id).Matches(arg->id) &&
-          testing::Matcher<PID>(from).Matches(arg->from) &&
-          testing::Matcher<PID>(to).Matches(arg->to));
+  return (testing::Matcher<std::string>(name).Matches(arg->name) &&
+          testing::Matcher<process::UPID>(from).Matches(arg->from) &&
+          testing::Matcher<process::UPID>(to).Matches(arg->to));
 }
 
 
@@ -121,8 +123,8 @@ MATCHER_P3(MsgMatcher, id, from, to, "")
  * using the message matcher (see above) as well as the MockFilter
  * (see above).
  */
-#define EXPECT_MSG(filter, id, from, to)                \
-  EXPECT_CALL(filter, filter(MsgMatcher(id, from, to)))
+#define EXPECT_MSG(filter, name, from, to)                \
+  EXPECT_CALL(filter, filter(MsgMatcher(name, from, to)))
 
 
 /**
