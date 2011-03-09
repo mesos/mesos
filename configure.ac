@@ -4,8 +4,9 @@
 AC_PREREQ(2.61)
 AC_INIT
 
-# Use explicit python version 2.6.
-PYTHON=python2.6
+if test -z "$PYTHON"; then
+  PYTHON=python2.6
+fi
 
 # Update CFLAGS and CXXFLAGS with environment args. 
 CFLAGS="-O2 -fno-strict-aliasing -fPIC ${CFLAGS}"
@@ -22,10 +23,17 @@ ac_configure_args=`echo $ac_configure_args | \
                    sed -e "s/CXXFLAGS=/CXXFLAGS=-O2 -fno-strict-aliasing /"`
 ac_configure_args="$ac_configure_args --enable-shared=no --with-pic"
 
-AC_CONFIG_FILES([Makefile src/Makefile src/examples/Makefile src/tests/Makefile src/config/config.hpp])
+AC_CONFIG_FILES([Makefile
+                 src/Makefile
+                 src/examples/Makefile
+                 src/examples/java/Makefile
+                 src/examples/python/Makefile
+                 src/tests/Makefile
+                 src/config/config.hpp])
 AC_CONFIG_SUBDIRS([third_party/libprocess])
-AC_CONFIG_SUBDIRS([third_party/gtest-1.5.0])
 AC_CONFIG_SUBDIRS([third_party/glog-0.3.1])
+AC_CONFIG_SUBDIRS([third_party/gmock-1.5.0])
+AC_CONFIG_SUBDIRS([third_party/sqlite-3.6.23.1])
 AC_CONFIG_SUBDIRS([third_party/zookeeper-3.3.1/src/c])
 
 AC_CANONICAL_SYSTEM
@@ -58,7 +66,6 @@ case "${target_os}" in
     CFLAGS="${CFLAGS} -pthreads -march=i586"
     CXXFLAGS="${CXXFLAGS} -pthreads -march=i586"
     LIBS="-lsocket -lnsl -lproject -lproc"
-    PYTHON="python2.6"
     OS_NAME=solaris
     ;;
   *)
@@ -67,6 +74,21 @@ case "${target_os}" in
 
 # Export OS name to Makefiles
 AC_SUBST(OS_NAME)
+
+JAVA_HEADERS=""
+AC_ARG_WITH([java-headers],
+  AC_HELP_STRING([--with-java-headers=DIR],
+                 [find Java headers in DIR (if different from JAVA_HOME/include)]),
+	         [case "$with_java_headers" in
+		    yes) 
+                      AC_MSG_ERROR([
+*** --with-java-headers requires an argument]) ;;
+		    *)
+                      JAVA_HEADERS="$withval"
+                      ;;
+	          esac],
+	         [])
+AC_SUBST(JAVA_HEADERS)
 
 JAVA_HOME=""
 HAS_JAVA="0"
@@ -80,6 +102,9 @@ AC_ARG_WITH([java-home],
 		    *)
                       JAVA_HOME="$withval"
                       HAS_JAVA="1"
+                      if test -z "$JAVA_HEADERS"; then
+                        JAVA_HEADERS="$JAVA_HOME/include/$OS_NAME"
+                      fi
                       ;;
 	          esac],
 	         [])
@@ -147,6 +172,20 @@ AC_ARG_WITH([swig],
 	          esac],
 	         [])
 AC_SUBST(SWIG)
+
+WITH_INCLUDED_SQLITE="0"
+AC_ARG_WITH([included-sqlite],
+  AC_HELP_STRING([--with-included-sqlite],
+                 [build with included sqlite]),
+	         [case "$with_included_sqlite" in
+		    yes) WITH_SQLITE="1"
+                         WITH_INCLUDED_SQLITE="1" ;;
+                    no) WITH_INCLUDED_SQLITE="0" ;;
+		    *) AC_MSG_ERROR([
+*** --with-included-sqlite does not take arguments]) ;;
+	          esac],
+	         [])
+AC_SUBST(WITH_INCLUDED_SQLITE)
 
 WITH_ZOOKEEPER="0"
 AC_ARG_WITH([zookeeper],

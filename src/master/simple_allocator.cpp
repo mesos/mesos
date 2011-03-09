@@ -80,9 +80,12 @@ void SimpleAllocator::offerReturned(SlotOffer* offer,
       }
     }
   }
-  // Make new offers, unless the offer returned due to a lost framework or slave
-  // (in those cases, frameworkRemoved and slaveRemoved will be called later)
-  if (reason != ORR_SLAVE_LOST && reason != ORR_FRAMEWORK_LOST) {
+  // Make new offers unless the offer returned due to a lost framework or slave
+  // (in those cases, frameworkRemoved and slaveRemoved will be called later),
+  // or returned due to a framework failover (in which case the framework's
+  // new PID won't be set yet so we just wait for the next timer tick).
+  if (reason != ORR_SLAVE_LOST && reason != ORR_FRAMEWORK_LOST &&
+      reason != ORR_FRAMEWORK_FAILOVER) {
     vector<Slave*> slaves;
     foreach (const SlaveResources& r, resLeft)
       slaves.push_back(r.slave);
@@ -164,8 +167,10 @@ void SimpleAllocator::makeNewOffers(const vector<Slave*>& slaves)
 {
   // Get an ordering of frameworks to send offers to
   vector<Framework*> ordering = getAllocationOrdering();
-  if (ordering.size() == 0)
+  if (ordering.size() == 0) {
+    VLOG(1) << "makeNewOffers returning because no frameworks are connected";
     return;
+  }
   
   // Find all the free resources that can be allocated
   unordered_map<Slave* , Resources> freeResources;
@@ -178,8 +183,10 @@ void SimpleAllocator::makeNewOffers(const vector<Slave*>& slaves)
       }
     }
   }
-  if (freeResources.size() == 0)
+  if (freeResources.size() == 0) {
+    VLOG(1) << "makeNewOffers returning because there are no free resources";
     return;
+  }
   
   // Clear refusers on any slave that has been refused by everyone
   foreachpair (Slave* slave, _, freeResources) {

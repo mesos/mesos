@@ -29,15 +29,13 @@ LIBEV = $(LIBPROCESS)/third_party/libev-3.8
 
 GLOG = third_party/glog-0.3.1
 
+SQLITE = third_party/sqlite-3.6.23.1
+
 ZOOKEEPER = third_party/zookeeper-3.3.1/src/c
 
 # Ensure that we get better debugging info.
 CFLAGS += -g
 CXXFLAGS += -g
-
-# Add source dir to CFLAGS and CXXFLAGS.
-CFLAGS += -I@srcdir@
-CXXFLAGS += -I@srcdir@
 
 # Add include to CFLAGS and CXXFLAGS.
 CFLAGS += -I@top_srcdir@/include
@@ -56,8 +54,8 @@ LDFLAGS += -L@top_builddir@/$(LIBPROCESS)
 LDFLAGS += -L@top_builddir@/$(LIBEV)/.libs
 
 # Add glog to include and lib paths.
-CXXFLAGS += -I@top_srcdir@/$(GLOG)/src -I@top_builddir@/$(GLOG)/src
-LDFLAGS += -L@top_builddir@/$(GLOG)/.libs
+CXXFLAGS += -I@top_srcdir@/$(GLOG)/src -I@top_builddir@/$(GLOG)/src -I@top_srcdir@/$(SQLITE)
+LDFLAGS += -L@top_builddir@/$(GLOG)/.libs -L@top_builddir@/$(SQLITE)/.libs
 
 # Add included ZooKeeper to include and lib paths if necessary.
 ifeq ($(WITH_INCLUDED_ZOOKEEPER),1)
@@ -81,7 +79,7 @@ CXXFLAGS += -DBUILD_USER="\"$$USER\""
 LDFLAGS += -L$(LIBEV)/.libs
 
 # Add glog, libev, libprocess, pthread, and dl to LIBS.
-LIBS += -lglog -lprocess -lev -lpthread -ldl
+LIBS += -lglog -lprocess -lev -lpthread -ldl -lsqlite3
 
 # Add ZooKeeper if necessary.
 ifeq ($(WITH_ZOOKEEPER),1)
@@ -102,33 +100,9 @@ EXAMPLES_EXES = $(SCHED_EXES) $(EXEC_EXES)
 MESOS_SCHED_LIB = $(LIBDIR)/libmesos_sched.a
 MESOS_EXEC_LIB = $(LIBDIR)/libmesos_exec.a
 
-JAVA_CLASSES = $(BINDIR)/examples/java/TestFramework.class          \
-               $(BINDIR)/examples/java/TestExecutor.class           \
-               $(BINDIR)/examples/java/TestExceptionFramework.class
-
-JAVA_SCRIPTS = $(BINDIR)/examples/java/test_framework               \
-	       $(BINDIR)/examples/java/test_executor                \
-	       $(BINDIR)/examples/java/test_exception_framework
-
-JAVA = $(JAVA_CLASSES) $(JAVA_SCRIPTS)
-
-MESOS_JAVA_JAR = $(LIBDIR)/java/mesos.jar
-
-PYTHON_SCRIPTS = $(BINDIR)/examples/python/test_framework.py        \
-                 $(BINDIR)/examples/python/test_framework           \
-                 $(BINDIR)/examples/python/test_executor.py         \
-                 $(BINDIR)/examples/python/test_executor            \
-
-PYTHON = $(PYTHON_SCRIPTS)
-
-MESOS_PYTHON_LIB = $(LIBDIR)/python/_mesos.so
-
 # Create rules for building the directories that aren't created
 # automagically by configure.
-DIRECTORIES = $(BINDIR)/examples                \
-	      $(BINDIR)/examples/java           \
-	      $(BINDIR)/examples/python
-
+DIRECTORIES = $(BINDIR)/examples
 
 default: all
 
@@ -160,36 +134,28 @@ $(BINDIR)/examples/memhog-executor: @srcdir@/memhog_executor.cpp $(MESOS_EXEC_LI
 $(BINDIR)/examples/scheduled-memhog: @srcdir@/scheduled_memhog.cpp $(MESOS_SCHED_LIB)
 	$(CXX) $(CXXFLAGS) -o $@ $< $(MESOS_SCHED_LIB) $(LDFLAGS) $(LIBS)
 
-$(JAVA): | $(BINDIR)/examples/java
-
-$(JAVA_CLASSES): $(MESOS_JAVA_JAR)
-
-$(JAVA_CLASSES): $(BINDIR)/examples/java/%.class: @srcdir@/java/%.java
+java:
 ifdef JAVA_HOME
-	$(JAVA_HOME)/bin/javac -cp $(MESOS_JAVA_JAR):@srcdir@/java -sourcepath @srcdir@/java -d $(BINDIR)/examples/java $<
+	$(MAKE) -C java
 endif
 
-$(JAVA_SCRIPTS): $(BINDIR)/examples/java/%: @srcdir@/java/%
-ifdef JAVA_HOME
-	cp -r $< $@
-endif
-
-$(PYTHON): | $(BINDIR)/examples/python
-
-$(PYTHON_SCRIPTS): $(MESOS_PYTHON_LIB)
-
-$(PYTHON_SCRIPTS): $(BINDIR)/examples/python/%: @srcdir@/python/%
+python:
 ifdef PYTHON_HEADERS
-	cp -r $< $@
+	$(MAKE) -C python
 endif
 
-all: $(EXAMPLES_EXES) $(JAVA) $(PYTHON)
+all: $(EXAMPLES_EXES) java python
 
 clean:
 	rm -f $(patsubst %, %.d, $(EXAMPLES_EXES))
 	rm -rf $(patsubst %, %.dSYM, $(EXAMPLES_EXES))
 	rm -f $(EXAMPLES_EXES)
-	rm -f $(JAVA) $(PYTHON)
 	rm -f TAGS
+ifdef JAVA_HOME
+	$(MAKE) -C java clean
+endif
+ifdef PYTHON_HEADERS
+	$(MAKE) -C python clean
+endif
 
-.PHONY: default all clean
+.PHONY: default all clean java python

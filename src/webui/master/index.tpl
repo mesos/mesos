@@ -18,7 +18,6 @@ Started: {{format_time(start_time)}}<br />
 PID: {{master.pid}}<br />
 Slaves: {{master.slaves.size()}}<br />
 Frameworks: {{master.frameworks.size()}}<br />
-Fault-tolerant: {{master.isFT}}<br />
 </p>
 
 <p>
@@ -121,7 +120,7 @@ Idle: {{idle_cpus}} CPUs, {{format_mem(idle_mem)}} MEM<br />
   %for s in master.slaves:
     <tr>
     <td>{{s.id}}</td>
-    <td><a href="http://{{s.public_dns}}:8081/">{{s.public_dns}}</a></td>
+    <td><a href="http://{{s.web_ui_url}}/">{{s.web_ui_url}}</a></td>
     <td>{{s.cpus}}</td>
     <td>{{format_mem(s.mem)}}</td>
     <td>{{format_time(s.connect_time)}}</td>

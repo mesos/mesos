@@ -1,6 +1,9 @@
 #include <iomanip>
+#include <sys/time.h>
 
 #include <glog/logging.h>
+
+#include "common/date_utils.hpp"
 
 #include "allocator.hpp"
 #include "allocator_factory.hpp"
@@ -75,12 +78,15 @@ protected:
       pause(1);
 
       send(master, pack<M2M_GET_STATE>());
-      receive();
+	      receive();
       CHECK(msgid() == M2M_GET_STATE_REPLY);
       state::MasterState *state = unpack<M2M_GET_STATE_REPLY, 0>(body());
 
       uint32_t total_cpus = 0;
       uint32_t total_mem = 0;
+      struct timeval curr_time;
+      struct timezone tzp;
+      gettimeofday(&curr_time, &tzp);
 
       foreach (state::Slave *s, state->slaves) {
         total_cpus += s->cpus;
@@ -94,7 +100,9 @@ protected:
           double cpu_share = f->cpus / (double) total_cpus;
           double mem_share = f->mem / (double) total_mem;
           double max_share = max(cpu_share, mem_share);
-          file << tick << "#" << f->id << "#" << f->name << "#" 
+          file << tick << "#" 
+               << (curr_time.tv_sec * 1000000 + curr_time.tv_usec) << "#" 
+               << f->id << "#" << f->name << "#" 
                << f->cpus << "#" << f->mem << "#"
                << cpu_share << "#" << mem_share << "#" << max_share << endl;
         }
@@ -113,16 +121,17 @@ public:
 }
 
 
-Master::Master()
-  : nextFrameworkId(0), nextSlaveId(0), nextSlotOfferId(0), masterId(0)
+Master::Master(EventLogger* evLogger_)
+  : evLogger(evLogger_), nextFrameworkId(0), nextSlaveId(0), 
+    nextSlotOfferId(0)
 {
   allocatorType = "simple";
 }
 
 
-Master::Master(const Params& conf_)
-  : conf(conf_), nextFrameworkId(0), nextSlaveId(0), nextSlotOfferId(0),
-    masterId(0)
+Master::Master(const Params& conf_, EventLogger* evLogger_)
+  : conf(conf_), evLogger(evLogger_), nextFrameworkId(0), nextSlaveId(0), 
+    nextSlotOfferId(0)
 {
   allocatorType = conf.get("allocator", "simple");
 }
@@ -167,7 +176,7 @@ state::MasterState * Master::getState()
     new state::MasterState(BUILD_DATE, BUILD_USER, oss.str());
 
   foreachpair (_, Slave *s, slaves) {
-    state::Slave *slave = new state::Slave(s->id, s->hostname, s->publicDns,
+    state::Slave *slave = new state::Slave(s->id, s->hostname, s->webUIUrl,
         s->resources.cpus, s->resources.mem, s->connectTime);
     state->slaves.push_back(slave);
   }
@@ -256,14 +265,15 @@ void Master::operator () ()
 {
   LOG(INFO) << "Master started at mesos://" << self();
 
-  // Don't do anything until we get an identifier.
-  while (receive() != GOT_MASTER_ID)
+  // Don't do anything until we get a master ID.
+  while (receive() != GOT_MASTER_ID) {
     LOG(INFO) << "Oops! We're dropping a message since "
               << "we haven't received an identifier yet!";  
-  string id;
-  tie(id) = unpack<GOT_MASTER_ID>(body());
-  masterId = lexical_cast<long>(id);
-  LOG(INFO) << "Master ID:" << masterId;
+  }
+  string faultToleranceId;
+  tie(faultToleranceId) = unpack<GOT_MASTER_ID>(body());
+  masterId = DateUtils::humanReadableDate() + "-" + faultToleranceId;
+  LOG(INFO) << "Master ID: " << masterId;
 
   // Create the allocator (we do this after the constructor because it
   // leaks 'this').
@@ -314,72 +324,91 @@ void Master::operator () ()
               1, "Root is not allowed to submit jobs on this cluster"));
         delete framework;
         break;
+
       }
 
+      evLogger->logFrameworkRegistered(fid, framework->user);
+      LOG(INFO) << "Logged framework registered to event history" << endl;
       addFramework(framework);
       break;
     }
 
     case F2M_REREGISTER_FRAMEWORK: {
-      Framework *framework = new Framework(from(), "", elapsed());
+      FrameworkID fid;
+      string name;
+      string user;
+      ExecutorInfo executorInfo;
       int32_t generation;
 
-      tie(framework->id, framework->name, framework->user,
-          framework->executorInfo, generation) =
+      tie(fid, name, user, executorInfo, generation) =
         unpack<F2M_REREGISTER_FRAMEWORK>(body());
 
-      if (framework->executorInfo.uri == "") {
-        LOG(INFO) << framework << " re-registering without an executor URI";
-        send(framework->pid, pack<M2F_ERROR>(1, "No executor URI given"));
-        delete framework;
+      if (executorInfo.uri == "") {
+        LOG(INFO) << "Framework " << fid << " re-registering "
+                  << "without an executor URI";
+        send(from(), pack<M2F_ERROR>(1, "No executor URI given"));
         break;
       }
 
-      if (framework->id == "") {
+      if (fid == "") {
         LOG(ERROR) << "Framework re-registering without an id!";
-        send(framework->pid, pack<M2F_ERROR>(1, "Missing framework id"));
-        delete framework;
+        send(from(), pack<M2F_ERROR>(1, "Missing framework id"));
         break;
       }
 
-      LOG(INFO) << "Re-registering " << framework << " at " << framework->pid;
+      LOG(INFO) << "Re-registering framework " << fid << " at " << from();
 
-      if (frameworks.count(framework->id) > 0) {
+      if (frameworks.count(fid) > 0) {
+        // Using the "generation" of the scheduler allows us to keep a
+        // scheduler that got partitioned but didn't die (in ZooKeeper
+        // speak this means didn't lose their session) and then
+        // eventually tried to connect to this master even though
+        // another instance of their scheduler has reconnected. This
+        // might not be an issue in the future when the
+        // master/allocator launches the scheduler can get restarted
+        // (if necessary) by the master and the master will always
+        // know which scheduler is the correct one.
         if (generation == 0) {
-          LOG(INFO) << framework << " failed over";
-          replaceFramework(frameworks[framework->id], framework);
+          LOG(INFO) << "Framework " << fid << " failed over";
+          failoverFramework(frameworks[fid], from());
+          // TODO: Should we check whether the new scheduler has given
+          // us a different framework name, user name or executor info?
         } else {
-          LOG(INFO) << framework << " re-registering with an already "
-		    << "used id and not failing over!";
-          send(framework->pid, pack<M2F_ERROR>(1, "Framework id in use"));
-          delete framework;
+          LOG(INFO) << "Framework " << fid << " re-registering with an "
+		    << "already used id and not failing over!";
+          send(from(), pack<M2F_ERROR>(1, "Framework id in use"));
           break;
         }
       } else {
+        // We don't have a framework with this ID, so we must be a newly
+        // elected Mesos master to which either an existing scheduler or a
+        // failed-over one is connecting. Create a Framework object and add
+        // any tasks it has that have been reported by reconnecting slaves.
+        Framework *framework = new Framework(from(), fid, elapsed());
+        framework->name = name;
+        framework->user = user;
+        framework->executorInfo = executorInfo;
         addFramework(framework);
-      }
-
-      CHECK(frameworks.find(framework->id) != frameworks.end());
-
-      // Reunite running tasks with this framework. This may be
-      // necessary because a framework scheduler has failed over, or
-      // the master has failed over and the framework schedulers are
-      // reregistering.
-      foreachpair (SlaveID slaveId, Slave *slave, slaves) {
-        foreachpair (_, Task *task, slave->tasks) {
-          if (framework->id == task->frameworkId) {
-            framework->addTask(task);
+        // Add any running tasks reported by slaves for this framework.
+        foreachpair (SlaveID slaveId, Slave *slave, slaves) {
+          foreachpair (_, Task *task, slave->tasks) {
+            if (framework->id == task->frameworkId) {
+              framework->addTask(task);
+            }
           }
         }
       }
+
+      CHECK(frameworks.find(fid) != frameworks.end());
 
       // Broadcast the new framework pid to all the slaves. We have to
       // broadcast because an executor might be running on a slave but
       // it currently isn't running any tasks. This could be a
       // potential scalability issue ...
-      foreachpair (_, Slave *slave, slaves)
-	send(slave->pid, pack<M2S_UPDATE_FRAMEWORK_PID>(framework->id,
-							framework->pid));
+      foreachpair (_, Slave *slave, slaves) {
+        send(slave->pid, pack<M2S_UPDATE_FRAMEWORK_PID>(fid, from()));
+      }
+
       break;
     }
 
@@ -388,8 +417,10 @@ void Master::operator () ()
       tie(fid) = unpack<F2M_UNREGISTER_FRAMEWORK>(body());
       LOG(INFO) << "Asked to unregister framework " << fid;
       Framework *framework = lookupFramework(fid);
-      if (framework != NULL && framework->pid == from())
+      if (framework != NULL && framework->pid == from()) {
         removeFramework(framework);
+        //evLogger->logFrameworkUnregistered(fid);
+      }
       else
         LOG(WARNING) << "Non-authoratative PID attempting framework "
                      << "unregistration ... ignoring";
@@ -441,9 +472,10 @@ void Master::operator () ()
         if (task != NULL) {
           LOG(INFO) << "Asked to kill " << task << " by its framework";
           killTask(task);
-	} else {
-	  LOG(INFO) << "Asked to kill UNKNOWN task by its framework";
-	  send(framework->pid, pack<M2F_STATUS_UPDATE>(tid, TASK_LOST, ""));
+          evLogger->logTaskStateUpdated(tid, fid, TASK_KILLED);
+        } else {
+          LOG(INFO) << "Asked to kill UNKNOWN task by its framework";
+          send(framework->pid, pack<M2F_STATUS_UPDATE>(tid, TASK_LOST, ""));
         }
       }
       break;
@@ -463,10 +495,9 @@ void Master::operator () ()
     }
 
     case S2M_REGISTER_SLAVE: {
-      string slaveId = lexical_cast<string>(masterId) + "-"
-        + lexical_cast<string>(nextSlaveId++);
+      string slaveId = masterId + "-" + lexical_cast<string>(nextSlaveId++);
       Slave *slave = new Slave(from(), slaveId, elapsed());
-      tie(slave->hostname, slave->publicDns, slave->resources) =
+      tie(slave->hostname, slave->webUIUrl, slave->resources) =
         unpack<S2M_REGISTER_SLAVE>(body());
       LOG(INFO) << "Registering " << slave << " at " << slave->pid;
       slaves[slave->id] = slave;
@@ -481,12 +512,11 @@ void Master::operator () ()
     case S2M_REREGISTER_SLAVE: {
       Slave *slave = new Slave(from(), "", elapsed());
       vector<Task> tasks;
-      tie(slave->id, slave->hostname, slave->publicDns,
+      tie(slave->id, slave->hostname, slave->webUIUrl,
           slave->resources, tasks) = unpack<S2M_REREGISTER_SLAVE>(body());
 
       if (slave->id == "") {
-        slave->id = lexical_cast<string>(masterId) + "-"
-          + lexical_cast<string>(nextSlaveId++);
+        slave->id = masterId + "-" + lexical_cast<string>(nextSlaveId++);
         LOG(ERROR) << "Slave re-registered without a SlaveID, "
                    << "generating a new id for it.";
       }
@@ -530,50 +560,6 @@ void Master::operator () ()
       break;
     }
 
-    case S2M_FT_STATUS_UPDATE: {
-      SlaveID sid;
-      FrameworkID fid;
-      TaskID tid;
-      TaskState state;
-      string data;
-      tie(sid, fid, tid, state, data) = unpack<S2M_FT_STATUS_UPDATE>(body());
-
-      VLOG(1) << "FT: prepare relay seq:"<< seq() << " from: "<< from();
-      if (Slave *slave = lookupSlave(sid)) {
-        if (Framework *framework = lookupFramework(fid)) {
-	  // Pass on the status update to the framework.
-	  // TODO(benh): Do we not want to forward the
-	  // S2M_FT_STATUS_UPDATE message? This seems a little tricky
-	  // because we really wanted to send the M2F_FT_STATUS_UPDATE
-	  // message.
-          forward(framework->pid);
-          if (duplicate()) {
-            LOG(WARNING) << "FT: Locally ignoring duplicate message with id:" << seq();
-            break;
-          }
-          // Update the task state locally.
-          Task *task = slave->lookupTask(fid, tid);
-          if (task != NULL) {
-            LOG(INFO) << "Status update: " << task << " is in state " << state;
-            task->state = state;
-            // Remove the task if it finished or failed
-            if (state == TASK_FINISHED || state == TASK_FAILED ||
-                state == TASK_KILLED || state == TASK_LOST) {
-              LOG(INFO) << "Removing " << task << " because it's done";
-              removeTask(task, TRR_TASK_ENDED);
-            }
-          }
-        } else {
-          LOG(ERROR) << "S2M_FT_STATUS_UPDATE error: couldn't lookup "
-                     << "framework id " << fid;
-        }
-      } else {
-        LOG(ERROR) << "S2M_FT_STATUS_UPDATE error: couldn't lookup slave id "
-                   << sid;
-      }
-      break;
-    }
-
     case S2M_STATUS_UPDATE: {
       SlaveID sid;
       FrameworkID fid;
@@ -581,15 +567,21 @@ void Master::operator () ()
       TaskState state;
       string data;
       tie(sid, fid, tid, state, data) = unpack<S2M_STATUS_UPDATE>(body());
+
       if (Slave *slave = lookupSlave(sid)) {
         if (Framework *framework = lookupFramework(fid)) {
-          // Pass on the status update to the framework
-          send(framework->pid, pack<M2F_STATUS_UPDATE>(tid, state, data));
-          // Update the task state locally
+	  // Pass on the (transformed) status update to the framework.
+          forward(framework->pid, pack<M2F_STATUS_UPDATE>(tid, state, data));
+          if (duplicate()) {
+            LOG(WARNING) << "Locally ignoring duplicate message with id:" << seq();
+            break;
+          }
+          // Update the task state locally.
           Task *task = slave->lookupTask(fid, tid);
           if (task != NULL) {
             LOG(INFO) << "Status update: " << task << " is in state " << state;
             task->state = state;
+            evLogger->logTaskStateUpdated(tid, fid, state);
             // Remove the task if it finished or failed
             if (state == TASK_FINISHED || state == TASK_FAILED ||
                 state == TASK_KILLED || state == TASK_LOST) {
@@ -598,14 +590,14 @@ void Master::operator () ()
             }
           }
         } else {
-          LOG(ERROR) << "S2M_STATUS_UPDATE error: couldn't lookup framework id "
-                     << fid;
+          LOG(ERROR) << "S2M_STATUS_UPDATE error: couldn't lookup "
+                     << "framework id " << fid;
         }
       } else {
         LOG(ERROR) << "S2M_STATUS_UPDATE error: couldn't lookup slave id "
                    << sid;
       }
-     break;
+      break;
     }
 
     case S2M_FRAMEWORK_MESSAGE: {
@@ -762,8 +754,7 @@ void Master::operator () ()
 OfferID Master::makeOffer(Framework *framework,
                           const vector<SlaveResources>& resources)
 {
-  OfferID oid = lexical_cast<string>(masterId) + "-" 
-    + lexical_cast<string>(nextSlotOfferId++);
+  OfferID oid = masterId + "-" + lexical_cast<string>(nextSlotOfferId++);
 
   SlotOffer *offer = new SlotOffer(oid, framework->id, resources);
   slotOffers[offer->id] = offer;
@@ -850,6 +841,16 @@ void Master::processOfferReply(SlotOffer *offer,
 
   // Launch the tasks in the response
   foreach (const TaskDescription &t, tasks) {
+    // Record the resources in event_history
+    Params params(t.params);
+    Resources res(params.getInt32("cpus", -1),
+                  params.getInt64("mem", -1));
+
+    Slave *slave = lookupSlave(t.slaveId);
+    evLogger->logTaskCreated(t.taskId, framework->id, t.slaveId, 
+                             slave->webUIUrl, res);
+
+    // Launch the tasks in the response
     launchTask(framework, t);
   }
 
@@ -916,9 +917,6 @@ void Master::killTask(Task *task)
   CHECK(framework != NULL);
   CHECK(slave != NULL);
   send(slave->pid, pack<M2S_KILL_TASK>(framework->id, task->id));
-  send(framework->pid,
-       pack<M2F_STATUS_UPDATE>(task->id, TASK_KILLED, task->message));
-  removeTask(task, TRR_TASK_ENDED);
 }
 
 
@@ -979,30 +977,28 @@ void Master::addFramework(Framework *framework)
 }
 
 
-void Master::replaceFramework(Framework *old, Framework *current)
+// Replace the scheduler for a framework with a new process ID, in the
+// event of a scheduler failover.
+void Master::failoverFramework(Framework *framework, const PID &newPid)
 {
-  CHECK(old->id == current->id);
+  PID oldPid = framework->pid;
 
-  old->active = false;
-  
   // Remove the framework's slot offers.
   // TODO(benh): Consider just reoffering these to the new framework.
-  unordered_set<SlotOffer *> slotOffersCopy = old->slotOffers;
+  unordered_set<SlotOffer *> slotOffersCopy = framework->slotOffers;
   foreach (SlotOffer* offer, slotOffersCopy) {
     removeSlotOffer(offer, ORR_FRAMEWORK_FAILOVER, offer->resources);
   }
 
-  send(old->pid, pack<M2F_ERROR>(1, "Framework failover"));
+  send(oldPid, pack<M2F_ERROR>(1, "Framework failover"));
 
   // TODO(benh): unlink(old->pid);
-  pidToFid.erase(old->pid);
-  delete old;
+  pidToFid.erase(oldPid);
+  pidToFid[newPid] = framework->id;
+  framework->pid = newPid;
+  link(newPid);
 
-  frameworks[current->id] = current;
-  pidToFid[current->pid] = current->id;
-  link(current->pid);
-
-  send(current->pid, pack<M2F_REGISTER_REPLY>(current->id));
+  send(newPid, pack<M2F_REGISTER_REPLY>(framework->id));
 }
 
 
@@ -1032,7 +1028,7 @@ void Master::removeFramework(Framework *framework)
   }
 
   // TODO(benh): Similar code between removeFramework and
-  // replaceFramework needs to be shared!
+  // failoverFramework needs to be shared!
 
   // TODO(benh): unlink(framework->pid);
   pidToFid.erase(framework->pid);
@@ -1121,21 +1117,14 @@ Allocator* Master::createAllocator()
 }
 
 
-// Create a new framework ID. We format the ID as YYYYMMDDhhmm-master-fw,
-// where the first part is the submission date and submission time, master
-// is ID of the master (emphemeral ID from ZooKeeper if ZK is used), and
-// fw is the ID of the framework within the master (an increasing integer).
+// Create a new framework ID. We format the ID as MASTERID-FWID, where
+// MASTERID is the ID of the master (launch date plus fault tolerant ID)
+// and FWID is an increasing integer.
 FrameworkID Master::newFrameworkId()
 {
-  time_t rawtime;
-  struct tm* timeinfo;
-  time(&rawtime);
-  timeinfo = localtime(&rawtime);
-  char timestr[32];
-  strftime(timestr, sizeof(timestr), "%Y%m%d%H%M", timeinfo);
   int fwId = nextFrameworkId++;
   ostringstream oss;
-  oss << timestr << "-" << masterId << "-" << setw(4) << setfill('0') << fwId;
+  oss << masterId << "-" << setw(4) << setfill('0') << fwId;
   return oss.str();
 }
 

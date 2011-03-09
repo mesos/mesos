@@ -104,8 +104,11 @@ void Slave::registerOptions(Configurator* conf)
   conf->addOption<bool>("switch_user", 
                         "Whether to run tasks as the user who\n"
                         "submitted them rather than the user running\n"
-                        "the slave (requires setuid permission)\n",
+                        "the slave (requires setuid permission)",
                         true);
+   conf->addOption<string>("frameworks_home",
+                           "Directory prepended to relative executor\n"
+                           "paths (default: MESOS_HOME/frameworks)");
 }
 
 
@@ -146,18 +149,24 @@ void Slave::operator () ()
   LOG(INFO) << "Slave started at " << self();
 
   // Get our hostname
-  char buf[256];
+  char buf[512];
   gethostname(buf, sizeof(buf));
   hostent *he = gethostbyname2(buf, AF_INET);
   string hostname = he->h_name;
 
-  // Get our public DNS name. Normally this is our hostname, but on EC2
+  // Get our public Web UI URL. Normally this is our hostname, but on EC2
   // we look for the MESOS_PUBLIC_DNS environment variable. This allows
   // the master to display our public name in its web UI.
-  string publicDns = hostname;
+  LOG(INFO) << "setting up webUIUrl on port " << conf["webui_port"];
+  string webUIUrl;
   if (getenv("MESOS_PUBLIC_DNS") != NULL) {
-    publicDns = getenv("MESOS_PUBLIC_DNS");
+    webUIUrl = getenv("MESOS_PUBLIC_DNS");
+  } else {
+    webUIUrl = hostname;
   }
+#ifdef MESOS_WEBUI
+  webUIUrl += ":" + conf["webui_port"];
+#endif
 
   // Initialize isolation module.
   isolationModule->initialize(this);
@@ -177,7 +186,7 @@ void Slave::operator () ()
 
 	if (id.empty()) {
 	  // Slave started before master.
-	  send(master, pack<S2M_REGISTER_SLAVE>(hostname, publicDns, resources));
+	  send(master, pack<S2M_REGISTER_SLAVE>(hostname, webUIUrl, resources));
 	} else {
 	  // Reconnecting, so reconstruct resourcesInUse for the master.
 	  Resources resourcesInUse; 
@@ -192,7 +201,7 @@ void Slave::operator () ()
 	    }
 	  }
 
-	  send(master, pack<S2M_REREGISTER_SLAVE>(id, hostname, publicDns, resources, taskVec));
+	  send(master, pack<S2M_REREGISTER_SLAVE>(id, hostname, webUIUrl, resources, taskVec));
 	}
 	break;
       }
@@ -269,8 +278,6 @@ void Slave::operator () ()
           fw->removeTask(tid);
           isolationModule->resourcesChanged(fw);
         }
-        // Report to master that the task is killed
-        send(master, pack<S2M_STATUS_UPDATE>(id, fid, tid, TASK_KILLED, ""));
         break;
       }
 
@@ -363,8 +370,8 @@ void Slave::operator () ()
 	  // Reliably send message and save sequence number for
 	  // canceling later.
 	  int seq = rsend(master, framework->pid,
-			  pack<S2M_FT_STATUS_UPDATE>(id, fid, tid,
-						     taskState, data));
+			  pack<S2M_STATUS_UPDATE>(id, fid, tid,
+                                                  taskState, data));
 	  seqs[fid].insert(seq);
 	} else {
 	  LOG(WARNING) << "Got status update for UNKNOWN task "

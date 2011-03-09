@@ -33,10 +33,15 @@
 
 #include "detector/detector.hpp"
 
+#include "event_history/event_logger.hpp"
+
 #include "messaging/messages.hpp"
 
 
 namespace mesos { namespace internal { namespace master {
+
+using namespace mesos;
+using namespace mesos::internal;
 
 using std::make_pair;
 using std::map;
@@ -48,8 +53,8 @@ using std::vector;
 using boost::unordered_map;
 using boost::unordered_set;
 
-using namespace mesos;
-using namespace mesos::internal;
+using mesos::internal::eventhistory::EventLogger;
+using foreach::_;
 
 
 // Maximum number of slot offers to have outstanding for each framework.
@@ -238,7 +243,7 @@ struct Slave
   SlaveID id;
   bool active; // Turns false when slave is being removed
   string hostname;
-  string publicDns;
+  string webUIUrl;
   double connectTime;
   double lastHeartbeat;
   
@@ -310,6 +315,7 @@ class Master : public MesosProcess
 {
 protected:
   Params conf;
+  EventLogger* evLogger;
 
   unordered_map<FrameworkID, Framework *> frameworks;
   unordered_map<SlaveID, Slave *> slaves;
@@ -325,13 +331,14 @@ protected:
   string allocatorType;
   Allocator *allocator;
 
-  int64_t masterId; // Used to differentiate masters in fault tolerant mode;
-                    // will be this master's ZooKeeper ephemeral id
+  string masterId; // Contains the date the master was launched and its fault
+                   // tolerance ID (e.g. ephemeral ID returned from ZooKeeper).
+                   // Used in framework and slave IDs created by this master.
 
 public:
-  Master();
+  Master(EventLogger* evLogger);
 
-  Master(const Params& conf);
+  Master(const Params& conf, EventLogger* evLogger);
   
   ~Master();
 
@@ -388,7 +395,9 @@ protected:
 
   void addFramework(Framework *framework);
 
-  void replaceFramework(Framework *old, Framework *current);
+  // Replace the scheduler for a framework with a new process ID, in the
+  // event of a scheduler failover.
+  void failoverFramework(Framework *framework, const PID &newPid);
 
   // Kill all of a framework's tasks, delete the framework object, and
   // reschedule slot offers for slots that were assigned to this framework
@@ -400,6 +409,8 @@ protected:
   virtual Allocator* createAllocator();
 
   FrameworkID newFrameworkId();
+
+  string currentDate();
 };
 
 

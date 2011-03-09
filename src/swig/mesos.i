@@ -293,7 +293,9 @@ jenv->ExceptionDescribe();
      jmethodID taskDescCtor = jenv->GetMethodID(taskDescCls, "<init>", "(JZ)V");
      for (int i = 0; i < $1.size(); i++) {
        // TODO: Copy the SlaveOffer object here so Java owns it?
-       jobject obj = jenv->NewObject(taskDescCls, taskDescCtor, &($1.at(i)), JNI_FALSE);
+       jlong ptr;
+       *(const mesos::SlaveOffer **)&ptr = &($1.at(i));
+       jobject obj = jenv->NewObject(taskDescCls, taskDescCtor, ptr, JNI_FALSE);
        jenv->CallVoidMethod(list, add, obj);
        jenv->DeleteLocalRef(obj); // Recommended in case list is big and fills local ref table
      }
@@ -310,7 +312,9 @@ jenv->ExceptionDescribe();
      jmethodID taskDescCtor = jenv->GetMethodID(taskDescCls, "<init>", "(JZ)V");
      for (int i = 0; i < $1.size(); i++) {
        // TODO: Copy the SlaveOffer object here so Java owns it?
-       jobject obj = jenv->NewObject(taskDescCls, taskDescCtor, &($1.at(i)), JNI_FALSE);
+       jlong ptr;
+       *(const mesos::SlaveOffer **)&ptr = &($1.at(i));
+       jobject obj = jenv->NewObject(taskDescCls, taskDescCtor, ptr, JNI_FALSE);
        jenv->CallVoidMethod(list, add, obj);
        jenv->DeleteLocalRef(obj); // Recommended in case list is big and fills local ref table
      }
@@ -370,7 +374,9 @@ jenv->ExceptionDescribe();
      jmethodID taskDescCtor = jenv->GetMethodID(taskDescCls, "<init>", "(JZ)V");
      for (int i = 0; i < $1.size(); i++) {
        // TODO: Copy the TaskDescription object here so Java owns it?
-       jobject obj = jenv->NewObject(taskDescCls, taskDescCtor, &($1.at(i)), JNI_FALSE);
+       jlong ptr;
+       *(const mesos::TaskDescription **)&ptr = &($1.at(i));
+       jobject obj = jenv->NewObject(taskDescCls, taskDescCtor, ptr, JNI_FALSE);
        jenv->CallVoidMethod(list, add, obj);
        jenv->DeleteLocalRef(obj); // Recommended in case list is big and fills local ref table
      }
@@ -387,7 +393,9 @@ jenv->ExceptionDescribe();
      jmethodID taskDescCtor = jenv->GetMethodID(taskDescCls, "<init>", "(JZ)V");
      for (int i = 0; i < $1.size(); i++) {
        // TODO: Copy the TaskDescription object here so Java owns it?
-       jobject obj = jenv->NewObject(taskDescCls, taskDescCtor, &($1.at(i)), JNI_FALSE);
+       jlong ptr;
+       *(const mesos::TaskDescription **)&ptr = &($1.at(i));
+       jobject obj = jenv->NewObject(taskDescCls, taskDescCtor, ptr, JNI_FALSE);
        jenv->CallVoidMethod(list, add, obj);
        jenv->DeleteLocalRef(obj); // Recommended in case list is big and fills local ref table
      }
@@ -535,6 +543,17 @@ jenv->ExceptionDescribe();
   %template(SlaveOfferVector) std::vector<mesos::SlaveOffer>;
   %template(TaskDescriptionVector) std::vector<mesos::TaskDescription>;
   %template(StringMap) std::map<std::string, std::string>;
+
+  %feature("director:except") {
+    if( $error != NULL ) {
+      PyObject *ptype, *pvalue, *ptraceback;
+      PyErr_Fetch( &ptype, &pvalue, &ptraceback );
+      PyErr_Restore( ptype, pvalue, ptraceback );
+      PyErr_Print();
+      Py_Exit(1);
+    }
+  }
+
 #endif /* SWIGPYTHON */
 
 /* Rename task_state enum so that the generated class is called TaskState */

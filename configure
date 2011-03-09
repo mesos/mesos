@@ -627,6 +627,7 @@ target_cpu
 target_vendor
 target_os
 OS_NAME
+JAVA_HEADERS
 JAVA_HOME
 HAS_JAVA
 PYTHON_HEADERS
@@ -637,6 +638,7 @@ WEBUI_CFLAGS
 WEBUI_CXXFLAGS
 WEBUI_LDFLAGS
 SWIG
+WITH_INCLUDED_SQLITE
 WITH_ZOOKEEPER
 WITH_INCLUDED_ZOOKEEPER
 CXX
@@ -664,8 +666,9 @@ CCC
 CC
 CFLAGS'
 ac_subdirs_all='third_party/libprocess
-third_party/gtest-1.5.0
 third_party/glog-0.3.1
+third_party/gmock-1.5.0
+third_party/sqlite-3.6.23.1
 third_party/zookeeper-3.3.1/src/c'
 
 # Initialize some variables set by options.
@@ -1239,11 +1242,14 @@ if test -n "$ac_init_help"; then
 Optional Packages:
   --with-PACKAGE[=ARG]    use PACKAGE [ARG=yes]
   --without-PACKAGE       do not use PACKAGE (same as --with-PACKAGE=no)
+  --with-java-headers=DIR find Java headers in DIR (if different from
+                          JAVA_HOME/include)
   --with-java-home=DIR    find Java Development Kit in DIR
   --with-python-headers=DIR
                           find Python headers in DIR
   --with-webui            enable web UI (requires Python)
   --with-swig=PATH        use the SWIG binary at PATH
+  --with-included-sqlite  build with included sqlite
   --with-zookeeper        use ZooKeeper support
   --with-included-zookeeper
                           build with included ZooKeeper
@@ -1682,8 +1688,9 @@ ac_compiler_gnu=$ac_cv_c_compiler_gnu
 
 
 
-# Use explicit python version 2.6.
-PYTHON=python2.6
+if test -z "$PYTHON"; then
+  PYTHON=python2.6
+fi
 
 # Update CFLAGS and CXXFLAGS with environment args.
 CFLAGS="-O2 -fno-strict-aliasing -fPIC ${CFLAGS}"
@@ -1700,7 +1707,7 @@ ac_configure_args=`echo $ac_configure_args | \
                    sed -e "s/CXXFLAGS=/CXXFLAGS=-O2 -fno-strict-aliasing /"`
 ac_configure_args="$ac_configure_args --enable-shared=no --with-pic"
 
-ac_config_files="$ac_config_files Makefile src/Makefile src/examples/Makefile src/tests/Makefile src/config/config.hpp"
+ac_config_files="$ac_config_files Makefile src/Makefile src/examples/Makefile src/examples/java/Makefile src/examples/python/Makefile src/tests/Makefile src/config/config.hpp"
 
 ac_aux_dir=
 for ac_dir in "$srcdir" "$srcdir/.." "$srcdir/../.."; do
@@ -1735,9 +1742,11 @@ ac_configure="$SHELL $ac_aux_dir/configure"  # Please don't use this var.
 
 subdirs="$subdirs third_party/libprocess"
 
-subdirs="$subdirs third_party/gtest-1.5.0"
-
 subdirs="$subdirs third_party/glog-0.3.1"
+
+subdirs="$subdirs third_party/gmock-1.5.0"
+
+subdirs="$subdirs third_party/sqlite-3.6.23.1"
 
 subdirs="$subdirs third_party/zookeeper-3.3.1/src/c"
 
@@ -1897,7 +1906,6 @@ case "${target_os}" in
     CFLAGS="${CFLAGS} -pthreads -march=i586"
     CXXFLAGS="${CXXFLAGS} -pthreads -march=i586"
     LIBS="-lsocket -lnsl -lproject -lproc"
-    PYTHON="python2.6"
     OS_NAME=solaris
     ;;
   *)
@@ -1907,6 +1915,25 @@ echo "$as_me: error: $UNSUPPORTED_OS" >&2;}
   esac
 
 # Export OS name to Makefiles
+
+
+JAVA_HEADERS=""
+
+# Check whether --with-java-headers was given.
+if test "${with_java_headers+set}" = set; then
+  withval=$with_java_headers; case "$with_java_headers" in
+		    yes)
+                      { { echo "$as_me:$LINENO: error:
+*** --with-java-headers requires an argument" >&5
+echo "$as_me: error:
+*** --with-java-headers requires an argument" >&2;}
+   { (exit 1); exit 1; }; } ;;
+		    *)
+                      JAVA_HEADERS="$withval"
+                      ;;
+	          esac
+fi
+
 
 
 JAVA_HOME=""
@@ -1924,6 +1951,9 @@ echo "$as_me: error:
 		    *)
                       JAVA_HOME="$withval"
                       HAS_JAVA="1"
+                      if test -z "$JAVA_HEADERS"; then
+                        JAVA_HEADERS="$JAVA_HOME/include/$OS_NAME"
+                      fi
                       ;;
 	          esac
 fi
@@ -2004,6 +2034,24 @@ echo "$as_me: error:
 *** --with-swig requires an argument" >&2;}
    { (exit 1); exit 1; }; } ;;
 		    *) SWIG="$withval" ;;
+	          esac
+fi
+
+
+
+WITH_INCLUDED_SQLITE="0"
+
+# Check whether --with-included-sqlite was given.
+if test "${with_included_sqlite+set}" = set; then
+  withval=$with_included_sqlite; case "$with_included_sqlite" in
+		    yes) WITH_SQLITE="1"
+                         WITH_INCLUDED_SQLITE="1" ;;
+                    no) WITH_INCLUDED_SQLITE="0" ;;
+		    *) { { echo "$as_me:$LINENO: error:
+*** --with-included-sqlite does not take arguments" >&5
+echo "$as_me: error:
+*** --with-included-sqlite does not take arguments" >&2;}
+   { (exit 1); exit 1; }; } ;;
 	          esac
 fi
 
@@ -3703,6 +3751,8 @@ do
     "Makefile") CONFIG_FILES="$CONFIG_FILES Makefile" ;;
     "src/Makefile") CONFIG_FILES="$CONFIG_FILES src/Makefile" ;;
     "src/examples/Makefile") CONFIG_FILES="$CONFIG_FILES src/examples/Makefile" ;;
+    "src/examples/java/Makefile") CONFIG_FILES="$CONFIG_FILES src/examples/java/Makefile" ;;
+    "src/examples/python/Makefile") CONFIG_FILES="$CONFIG_FILES src/examples/python/Makefile" ;;
     "src/tests/Makefile") CONFIG_FILES="$CONFIG_FILES src/tests/Makefile" ;;
     "src/config/config.hpp") CONFIG_FILES="$CONFIG_FILES src/config/config.hpp" ;;
 
@@ -3816,6 +3866,7 @@ target_cpu!$target_cpu$ac_delim
 target_vendor!$target_vendor$ac_delim
 target_os!$target_os$ac_delim
 OS_NAME!$OS_NAME$ac_delim
+JAVA_HEADERS!$JAVA_HEADERS$ac_delim
 JAVA_HOME!$JAVA_HOME$ac_delim
 HAS_JAVA!$HAS_JAVA$ac_delim
 PYTHON_HEADERS!$PYTHON_HEADERS$ac_delim
@@ -3826,6 +3877,7 @@ WEBUI_CFLAGS!$WEBUI_CFLAGS$ac_delim
 WEBUI_CXXFLAGS!$WEBUI_CXXFLAGS$ac_delim
 WEBUI_LDFLAGS!$WEBUI_LDFLAGS$ac_delim
 SWIG!$SWIG$ac_delim
+WITH_INCLUDED_SQLITE!$WITH_INCLUDED_SQLITE$ac_delim
 WITH_ZOOKEEPER!$WITH_ZOOKEEPER$ac_delim
 WITH_INCLUDED_ZOOKEEPER!$WITH_INCLUDED_ZOOKEEPER$ac_delim
 CXX!$CXX$ac_delim
@@ -3842,7 +3894,7 @@ LIBOBJS!$LIBOBJS$ac_delim
 LTLIBOBJS!$LTLIBOBJS$ac_delim
 _ACEOF
 
-  if test `sed -n "s/.*$ac_delim\$/X/p" conf$$subs.sed | grep -c X` = 75; then
+  if test `sed -n "s/.*$ac_delim\$/X/p" conf$$subs.sed | grep -c X` = 77; then
     break
   elif $ac_last_try; then
     { { echo "$as_me:$LINENO: error: could not make $CONFIG_STATUS" >&5

@@ -40,8 +40,6 @@ enum MessageType {
   F2M_KILL_TASK,
   F2M_FRAMEWORK_MESSAGE,
 
-  F2F_SLOT_OFFER_REPLY,
-  F2F_FRAMEWORK_MESSAGE,
   F2F_TASK_RUNNING_STATUS,
   
   /* From master to framework. */
@@ -49,7 +47,6 @@ enum MessageType {
   M2F_SLOT_OFFER,
   M2F_RESCIND_OFFER,
   M2F_STATUS_UPDATE,
-  M2F_FT_STATUS_UPDATE,
   M2F_LOST_SLAVE,
   M2F_FRAMEWORK_MESSAGE,
   M2F_ERROR,
@@ -59,7 +56,6 @@ enum MessageType {
   S2M_REREGISTER_SLAVE,
   S2M_UNREGISTER_SLAVE,
   S2M_STATUS_UPDATE,
-  S2M_FT_STATUS_UPDATE,
   S2M_FRAMEWORK_MESSAGE,
   S2M_LOST_EXECUTOR,
 
@@ -111,10 +107,8 @@ enum MessageType {
   M2M_SHUTDOWN,          // Used in tests to shut down master
 
   /* Internal to slave */
-  S2S_GOT_MASTER,        // Used when looking up master with ZooKeeper
   S2S_GET_STATE,         // Used by web UI
   S2S_GET_STATE_REPLY,
-  S2S_CHILD_EXIT,        // Sent by reaper process
   S2S_SHUTDOWN,          // Used in tests to shut down slave
 
   MESOS_MSGID,
@@ -132,6 +126,12 @@ enum MessageType {
 class MesosProcess : public ReliableProcess
 {
 public:
+  static void post(const PID &to, MSGID id)
+  {
+    const std::string &data = MESOS_MESSAGING_VERSION + "|";
+    ReliableProcess::post(to, id, data.data(), data.size());
+  }
+
   template <MSGID ID>
   static void post(const PID &to, const tuple<ID> &t)
   {
@@ -150,11 +150,24 @@ protected:
     return data.substr(index + 1);
   }
 
+  static void send(const PID &to, MSGID id)
+  {
+    const std::string &data = MESOS_MESSAGING_VERSION + "|";
+    ReliableProcess::post(to, id, data.data(), data.size());
+  }
+
   template <MSGID ID>
   void send(const PID &to, const tuple<ID> &t)
   {
     const std::string &data = MESOS_MESSAGING_VERSION + "|" + std::string(t);
     ReliableProcess::send(to, ID, data.data(), data.size());
+  }
+
+  template <MSGID ID>
+  bool forward(const PID &to, const tuple<ID> &t)
+  {
+    const std::string &data = MESOS_MESSAGING_VERSION + "|" + std::string(t);
+    ReliableProcess::forward(to, ID, data.data(), data.size());
   }
 
   template <MSGID ID>
@@ -171,9 +184,7 @@ protected:
     return ReliableProcess::rsend(via, to, ID, data.data(), data.size());
   }
 
-  virtual MSGID receive() { return receive(0); }
-
-  virtual MSGID receive(double secs)
+  virtual MSGID receive(double secs = 0)
   {
     bool indefinite = secs == 0;
     double now = elapsed();
@@ -236,14 +247,6 @@ TUPLE(F2M_FRAMEWORK_MESSAGE,
       (FrameworkID,
        FrameworkMessage));
 
-TUPLE(F2F_SLOT_OFFER_REPLY,
-      (OfferID,
-       std::vector<TaskDescription>,
-       Params));
-
-TUPLE(F2F_FRAMEWORK_MESSAGE,
-      (FrameworkMessage));
-
 TUPLE(F2F_TASK_RUNNING_STATUS,
       ());
 
@@ -263,11 +266,6 @@ TUPLE(M2F_STATUS_UPDATE,
        TaskState,
        std::string));
 
-TUPLE(M2F_FT_STATUS_UPDATE,
-      (TaskID,
-       TaskState,
-       std::string));
-
 TUPLE(M2F_LOST_SLAVE,
       (SlaveID));
 
@@ -281,13 +279,13 @@ TUPLE(M2F_ERROR,
 
 TUPLE(S2M_REGISTER_SLAVE,
       (std::string /*name*/,
-       std::string /*publicDns*/,
+       std::string /*webUIUrl*/,
        Resources));
 
 TUPLE(S2M_REREGISTER_SLAVE,
       (SlaveID,
        std::string /*name*/,
-       std::string /*publicDns*/,
+       std::string /*webuiUrl*/,
        Resources,
        std::vector<Task>));
 
@@ -295,13 +293,6 @@ TUPLE(S2M_UNREGISTER_SLAVE,
       (SlaveID));
 
 TUPLE(S2M_STATUS_UPDATE,
-      (SlaveID,
-       FrameworkID,
-       TaskID,
-       TaskState,
-       std::string));
-
-TUPLE(S2M_FT_STATUS_UPDATE,
       (SlaveID,
        FrameworkID,
        TaskID,
@@ -431,18 +422,11 @@ TUPLE(M2M_FRAMEWORK_EXPIRED,
 TUPLE(M2M_SHUTDOWN,
       ());
 
-TUPLE(S2S_GOT_MASTER,
-      ());
-
 TUPLE(S2S_GET_STATE,
       ());
 
 TUPLE(S2S_GET_STATE_REPLY,
       (slave::state::SlaveState *));
-
-TUPLE(S2S_CHILD_EXIT,
-      (int32_t /*OS PID*/,
-       int32_t /*exitStatus*/));
 
 TUPLE(S2S_SHUTDOWN,
       ());
