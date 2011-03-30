@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import tempfile
 from optparse import OptionParser
 from sys import stderr
 from boto.ec2.blockdevicemapping import BlockDeviceMapping, EBSBlockDeviceType
@@ -19,7 +20,7 @@ from boto.ec2.blockdevicemapping import BlockDeviceMapping, EBSBlockDeviceType
 # Configure and parse our command-line arguments
 def parse_args():
   parser = OptionParser(usage="mesos-ec2 [options] <action> <cluster_name>"
-      + "\n\n<action> can be: launch, destroy, login, stop, start, get-master",
+      + "\n\n<action> can be: launch, destroy, login, stop, start, get-master, add-keys",
       add_help_option=False)
   parser.add_option("-h", "--help", action="help",
                     help="Show this help message and exit")
@@ -30,7 +31,8 @@ def parse_args():
   parser.add_option("-k", "--key-pair",
       help="Key pair to use on instances")
   parser.add_option("-p", "--public-keys",
-      help="Additional public keys to be installed on the masters and the slaves")
+      help="Additional public keys to be installed on the masters and the slaves. "+
+        "The argument is a list of files separated by a comma, each containing one or more SSH keys.")
   parser.add_option("-i", "--identity-file", 
       help="SSH private key file to use for logging into instances")
   parser.add_option("-t", "--instance-type", default="m1.large",
@@ -135,6 +137,7 @@ def launch_cluster(conn, opts, cluster_name):
     master_group.authorize('tcp', 50070, 50070, '0.0.0.0/0')
     master_group.authorize('tcp', 60070, 60070, '0.0.0.0/0')
     master_group.authorize('tcp', 38090, 38090, '0.0.0.0/0')
+    master_group.authorize('tcp', 25334, 25334, '0.0.0.0/0')
   if slave_group.rules == []: # Group was just now created
     slave_group.authorize(src_group=master_group)
     slave_group.authorize(src_group=slave_group)
@@ -273,18 +276,27 @@ def setup_cluster(conn, master_nodes, slave_nodes, zoo_nodes, opts, deploy_ssh_k
   print "Done!"
 
 
-def add_keys(conn, master_res, slave_res, opts):
-  print "Deploying an additional SSH public key"
-  public_key_fname = opts.public_keys
-  f = open(public_key_fname)
-  public_keys = "".join(f.readlines())
-  for i in master_res.instances:
-    master = i.public_dns_name
-    ssh(master, opts, "echo \"%s\" >> ~/.ssh/authorized_keys" % public_keys)
-  for i in slave_res.instances:
-    slave = i.public_dns_name
-    ssh(slave, opts, "echo \"%s\" >> ~/.ssh/authorized_keys" % public_keys)
-  print "Done!"
+def add_keys(conn, master_nodes, slave_nodes, opts):
+  """ Deploys additional SSH keys to the nodes.
+  """
+  print("Deploying additional SSH public keys.")
+  public_key_fnames = opts.public_keys
+  # The temporary local file containing all the keys together
+  with tempfile.NamedTemporaryFile() as tempf:
+    for public_key_fname in public_key_fnames.split(','):
+      f = open(public_key_fname)
+      for l in f:
+        tempf.write(l)
+    tempf.flush()
+    # Send the file to all the masters:
+    for node in master_nodes:
+      master = node.public_dns_name
+      # scp does not support append, so do it manually
+      scp(master, opts, tempf.name, '/root/.ssh/authorized_keys_tmp')
+      ssh(master, opts, 'cat /root/.ssh/authorized_keys_tmp >> /root/.ssh/authorized_keys')
+    # Have the master copy the keys to all the slaves
+    ssh(master, opts, "/root/mesos-ec2/copy-dir /root/.ssh/authorized_keys")
+    print "Done!"
 
 # Wait for a whole cluster (masters, slaves and ZooKeeper) to start up
 def wait_for_cluster(conn, wait_secs, master_nodes, slave_nodes, zoo_nodes):
@@ -416,9 +428,9 @@ def main():
           inst.terminate()
 
   elif action == "add-keys":
-    (master_res, slave_res, zoo_res) = get_existing_cluster(
+    (master_nodes, slave_nodes, zoo_nodes) = get_existing_cluster(
         conn, opts, cluster_name)
-    add_keys(conn, master_res, slave_res, opts)
+    add_keys(conn, master_nodes, slave_nodes, opts)
 
   elif action == "login":
     (master_nodes, slave_nodes, zoo_nodes) = get_existing_cluster(
