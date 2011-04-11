@@ -1,11 +1,6 @@
-#include <unistd.h>
-
 #include <process.hpp>
 
-#include <iostream>
-#include <climits>
-#include <cstdlib>
-#include <stdexcept>
+#include <vector>
 
 #include <glog/logging.h>
 
@@ -15,22 +10,26 @@
 
 #include "common/fatal.hpp"
 #include "common/foreach.hpp"
+#ifdef WITH_ZOOKEEPER
+#include "common/zookeeper.hpp"
+#endif
 
 #include "messaging/messages.hpp"
 
 #include "detector.hpp"
 #include "url_processor.hpp"
 
-#ifdef WITH_ZOOKEEPER
-#include "zookeeper.hpp"
-#endif
-
 using namespace mesos;
 using namespace mesos::internal;
 
-using namespace std;
-
 using boost::lexical_cast;
+
+using process::Process;
+using process::UPID;
+
+using std::pair;
+using std::string;
+using std::vector;
 
 
 #ifdef WITH_ZOOKEEPER
@@ -50,9 +49,9 @@ public:
    * for slaves and frameworks)
    * @param quiet verbosity logging level for undelying ZooKeeper library
    */
-  ZooKeeperMasterDetector(const std::string &servers,
-			  const std::string &znode,
-			  const PID &pid,
+  ZooKeeperMasterDetector(const string& servers,
+			  const string& znode,
+			  const UPID& pid,
 			  bool contend = false,
 			  bool quiet = false);
 
@@ -61,71 +60,51 @@ public:
   /** 
    * ZooKeeper watcher callback.
    */
-  virtual void process(ZooKeeper *zk, int type, int state,
-		       const std::string &path);
-
-  /**
-   * @return unique id of the current master
-   */
-  virtual std::string getCurrentMasterId();
-
-  /**
-   * @return libprocess PID of the current master
-   */
-  virtual PID getCurrentMasterPID();
+  virtual void process(ZooKeeper *zk, int type, int state, const string &path);
 
 private:
-  /**
-   * @param s sequence id
-   */
-  void setId(const std::string &s);
-
-  /**
-   * @return current sequence id if contending to be a master
-   */
-  std::string getId();
+  void connected();
+  void reconnecting();
+  void reconnected();
+  void expired();
+  void updated(const string& path);
 
   /**
    * Attempts to detect a master.
    */
   void detectMaster();
 
-  /**
-   * @param seq sequence id of a master
-   * @return PID corresponding to a master
-   */
-  PID lookupMasterPID(const std::string &seq) const;
-
-  std::string servers;
-  std::string znode;
-  PID pid;
+  const string servers;
+  const string znode;
+  const UPID pid;
   bool contend;
   bool reconnect;
 
   ZooKeeper *zk;
 
   // Our sequence string if contending to be a master.
-  std::string mySeq;
+  string mySeq;
 
-  std::string currentMasterSeq;
-  PID currentMasterPID;
+  string currentMasterSeq;
+  UPID currentMasterPID;
 };
-#endif /* #ifdef WITH_ZOOKEEPER */
+#endif // WITH_ZOOKEEPER
 
 
 MasterDetector::~MasterDetector() {}
 
 
-MasterDetector * MasterDetector::create(const std::string &url,
-					const PID &pid,
-					bool contend,
-					bool quiet)
+MasterDetector* MasterDetector::create(const string &url,
+                                       const UPID &pid,
+                                       bool contend,
+                                       bool quiet)
 {
   if (url == "")
-    if (contend)
+    if (contend) {
       return new BasicMasterDetector(pid);
-    else
+    } else {
       fatal("cannot use specified url to detect master");
+    }
 
   MasterDetector *detector = NULL;
 
@@ -139,16 +118,22 @@ MasterDetector * MasterDetector::create(const std::string &url,
       // TODO(benh): Consider actually using the chroot feature of
       // ZooKeeper, rather than just using it's syntax.
       size_t index = urlPair.second.find("/");
-      if (index == string::npos)
+      if (index == string::npos) {
 	fatal("expecting chroot path for ZooKeeper");
-      const string &znode = urlPair.second.substr(index);
-      if (znode == "/")
-	fatal("expecting chroot path for ZooKeeper ('/' is not supported)");
+      }
+
       const string &servers = urlPair.second.substr(0, index);
+
+      const string &znode = urlPair.second.substr(index);
+      if (znode == "/") {
+	fatal("expecting chroot path for ZooKeeper ('/' is not supported)");
+      }
+
       detector = new ZooKeeperMasterDetector(servers, znode, pid, contend, quiet);
 #else
-      fatal("ZooKeeper not supported in this build");
-#endif /* #ifdef WITH_ZOOKEEPER */
+      fatal("Cannot detect masters with 'zoo://', "
+            "ZooKeeper is not supported in this build");
+#endif // WITH_ZOOKEEPER
       break;
     }
 
@@ -162,7 +147,7 @@ MasterDetector * MasterDetector::create(const std::string &url,
 	// to contend (at least not right now).
 	fatal("cannot contend to be a master with specified url");
       } else {
-	PID master(urlPair.second);
+	UPID master(urlPair.second);
 	if (!master)
 	  fatal("cannot use specified url to detect master");
 	detector = new BasicMasterDetector(master, pid);
@@ -182,77 +167,94 @@ void MasterDetector::destroy(MasterDetector *detector)
 }
 
 
-BasicMasterDetector::BasicMasterDetector(const PID &_master)
+BasicMasterDetector::BasicMasterDetector(const UPID& _master)
   : master(_master)
 {
-  // Send a master id.
-  MesosProcess::post(master, pack<GOT_MASTER_ID>("0"));
+  // Send a master token.
+  {
+    MSG<GOT_MASTER_TOKEN> msg;
+    msg.set_token("0");
+    MesosProcess<class T>::post(master, msg);
+  }
 
   // Elect the master.
-  MesosProcess::post(master, pack<NEW_MASTER_DETECTED>("0", master));
+  {
+    MSG<NEW_MASTER_DETECTED> msg;
+    msg.set_pid(master);
+    MesosProcess<class T>::post(master, msg);
+  }
 }
 
 
-BasicMasterDetector::BasicMasterDetector(const PID &_master,
-					 const PID &pid,
+BasicMasterDetector::BasicMasterDetector(const UPID& _master,
+					 const UPID& pid,
 					 bool elect)
   : master(_master)
 {
   if (elect) {
-    // Send a master id.
-    MesosProcess::post(master, pack<GOT_MASTER_ID>("0"));
+    // Send a master token.
+    {
+      MSG<GOT_MASTER_TOKEN> msg;
+      msg.set_token("0");
+      MesosProcess<class T>::post(master, msg);
+    }
 
     // Elect the master.
-    MesosProcess::post(master, pack<NEW_MASTER_DETECTED>("0", master));
+    {
+      MSG<NEW_MASTER_DETECTED> msg;
+      msg.set_pid(master);
+      MesosProcess<class T>::post(master, msg);
+    }
   }
 
   // Tell the pid about the master.
-  MesosProcess::post(pid, pack<NEW_MASTER_DETECTED>("0", master));
+  MSG<NEW_MASTER_DETECTED> msg;
+  msg.set_pid(master);
+  MesosProcess<class T>::post(pid, msg);
 }
 
 
-BasicMasterDetector::BasicMasterDetector(const PID &_master,
-					 const vector<PID> &pids,
+BasicMasterDetector::BasicMasterDetector(const UPID& _master,
+					 const vector<UPID>& pids,
 					 bool elect)
   : master(_master)
 {
   if (elect) {
-    // Send a master id.
-    MesosProcess::post(master, pack<GOT_MASTER_ID>("0"));
+    // Send a master token.
+    {
+      MSG<GOT_MASTER_TOKEN> msg;
+      msg.set_token("0");
+      MesosProcess<class T>::post(master, msg);
+    }
 
     // Elect the master.
-    MesosProcess::post(master, pack<NEW_MASTER_DETECTED>("0", master));
+    {
+      MSG<NEW_MASTER_DETECTED> msg;
+      msg.set_pid(master);
+      MesosProcess<class T>::post(master, msg);
+    }
   }
 
   // Tell each pid about the master.
-  foreach (const PID &pid, pids)
-    MesosProcess::post(pid, pack<NEW_MASTER_DETECTED>("0", master));
+  foreach (const UPID& pid, pids) {
+    MSG<NEW_MASTER_DETECTED> msg;
+    msg.set_pid(master);
+    MesosProcess<class T>::post(pid, msg);
+  }
 }
 
 
 BasicMasterDetector::~BasicMasterDetector() {}
 
 
-string BasicMasterDetector::getCurrentMasterId()
-{
-  return "0";
-}
-
-
-PID BasicMasterDetector::getCurrentMasterPID()
-{
-  return master;
-}
-
-
 #ifdef WITH_ZOOKEEPER
-ZooKeeperMasterDetector::ZooKeeperMasterDetector(const string &_servers,
-						 const string &_znode,
-						 const PID &_pid,
-						 bool _contend,
+ZooKeeperMasterDetector::ZooKeeperMasterDetector(const string& servers,
+						 const string& znode,
+						 const UPID& pid,
+						 bool contend,
 						 bool quiet)
-  : servers(_servers), znode(_znode), pid(_pid),
-    contend(_contend), reconnect(false)
+  : servers(servers), znode(znode), pid(pid),
+    contend(contend), reconnect(false)
 {
   // Set verbosity level for underlying ZooKeeper library logging.
   // TODO(benh): Put this in the C++ API.
@@ -267,126 +269,178 @@ ZooKeeperMasterDetector::~ZooKeeperMasterDetector()
 {
   if (zk != NULL) {
     delete zk;
-    zk = NULL;
   }
 }
 
 
-void ZooKeeperMasterDetector::process(ZooKeeper *zk, int type, int state,
-				      const string &path)
+void ZooKeeperMasterDetector::connected()
 {
+  LOG(INFO) << "Master detector connected to ZooKeeper ...";
+
   int ret;
   string result;
 
   static const string delimiter = "/";
 
-  if ((state == ZOO_CONNECTED_STATE) && (type == ZOO_SESSION_EVENT)) {
-    // Check if this is a reconnect.
-    if (!reconnect) {
-      // Assume the znode that was created does not end with a "/".
-      CHECK(znode.at(znode.length() - 1) != '/');
+  // Assume the znode that was created does not end with a "/".
+  CHECK(znode.at(znode.length() - 1) != '/');
 
-      // Create directory path znodes as necessary.
-      size_t index = znode.find(delimiter, 0);
+  // Create directory path znodes as necessary.
+  size_t index = znode.find(delimiter, 0);
 
-      while (index < string::npos) {
-	// Get out the prefix to create.
-	index = znode.find(delimiter, index + 1);
-	string prefix = znode.substr(0, index);
+  while (index < string::npos) {
+    // Get out the prefix to create.
+    index = znode.find(delimiter, index + 1);
+    string prefix = znode.substr(0, index);
 
-	// Create the node (even if it already exists).
-	ret = zk->create(prefix, "", ZOO_OPEN_ACL_UNSAFE, // ZOO_CREATOR_ALL_ACL, // needs authentication
-			 0, &result);
+    LOG(INFO) << "Trying to create znode '" << prefix << "' in ZooKeeper";
 
-	if (ret != ZOK && ret != ZNODEEXISTS)
-	  fatal("failed to create ZooKeeper znode! (%s)", zk->error(ret));
-      }
+    // Create the node (even if it already exists).
+    ret = zk->create(prefix, "", ZOO_OPEN_ACL_UNSAFE,
+		     // ZOO_CREATOR_ALL_ACL, // needs authentication
+		     0, &result);
 
-      // Wierdness in ZooKeeper timing, let's check that everything is created.
-      ret = zk->get(znode, false, &result, NULL);
-
-      if (ret != ZOK)
-	fatal("ZooKeeper not responding correctly (%s). "
-	      "Make sure ZooKeeper is running on: %s",
-	      zk->error(ret), servers.c_str());
-
-      if (contend) {
-	// We contend with the pid given in constructor.
-	ret = zk->create(znode + "/", pid, ZOO_OPEN_ACL_UNSAFE, // ZOO_CREATOR_ALL_ACL, // needs authentication
-			 ZOO_SEQUENCE | ZOO_EPHEMERAL, &result);
-
-	if (ret != ZOK)
-	  fatal("ZooKeeper not responding correctly (%s). "
-		"Make sure ZooKeeper is running on: %s",
-		zk->error(ret), servers.c_str());
-
-	setId(result);
-	LOG(INFO) << "Created ephemeral/sequence:" << getId();
-
-        MesosProcess::post(pid, pack<GOT_MASTER_ID>(getId()));
-      }
-
-      // Now determine who the master is (it may be us).
-      detectMaster();
-    } else {
-      // Reconnected.
-      if (contend) {
-	// Contending for master, confirm our ephemeral sequence znode exists.
-	ret = zk->get(znode + "/" + mySeq, false, &result, NULL);
-
-	// We might no longer be the master! Commit suicide for now
-	// (hoping another master is on standbye), but in the future
-	// it would be nice if we could go back on standbye.
-	if (ret == ZNONODE)
-	  fatal("failed to reconnect to ZooKeeper quickly enough "
-		"(our ephemeral sequence znode is gone), commiting suicide!");
-
-	if (ret != ZOK)
-	  fatal("ZooKeeper not responding correctly (%s). "
-		"Make sure ZooKeeper is running on: %s",
-		zk->error(ret), servers.c_str());
-
-	// We are still the master!
-	LOG(INFO) << "Reconnected to Zookeeper, still acting as master.";
-      } else {
-	// Reconnected, but maybe the master changed?
-	detectMaster();
-      }
-
-      reconnect = false;
+    if (ret != ZOK && ret != ZNODEEXISTS) {
+      fatal("failed to create ZooKeeper znode! (%s)", zk->error(ret));
     }
-  } else if ((state == ZOO_CONNECTED_STATE) && (type == ZOO_CHILD_EVENT)) {
-    // A new master might have showed up and created a sequence
-    // identifier or a master may have died, determine who the master is now!
-    detectMaster();
-  } else if ((state == ZOO_CONNECTING_STATE) && (type == ZOO_SESSION_EVENT)) {
-    // The client library automatically reconnects, taking into
-    // account failed servers in the connection string,
-    // appropriately handling the "herd effect", etc.
-    LOG(INFO) << "Lost Zookeeper connection. Retrying (automagically).";
-    reconnect = true;
+  }
+
+  // Wierdness in ZooKeeper timing, let's check that everything is created.
+  ret = zk->get(znode, false, &result, NULL);
+
+  if (ret != ZOK) {
+    fatal("ZooKeeper not responding correctly (%s). "
+	  "Make sure ZooKeeper is running on: %s",
+	  zk->error(ret), servers.c_str());
+  }
+
+  if (contend) {
+    // We contend with the pid given in constructor.
+    ret = zk->create(znode + "/", pid, ZOO_OPEN_ACL_UNSAFE,
+		     // ZOO_CREATOR_ALL_ACL, // needs authentication
+		     ZOO_SEQUENCE | ZOO_EPHEMERAL, &result);
+
+    if (ret != ZOK) {
+      fatal("ZooKeeper not responding correctly (%s). "
+	    "Make sure ZooKeeper is running on: %s",
+	    zk->error(ret), servers.c_str());
+    }
+
+    // Save the sequnce id but only grab the basename, e.g.,
+    // "/path/to/znode/000000131" => "000000131".
+    size_t index;
+    if ((index = result.find_last_of('/')) != string::npos) {  
+      mySeq = result.erase(0, index + 1);
+    } else {
+      mySeq = "";
+    }
+
+    LOG(INFO) << "Created ephemeral/sequence:" << mySeq;
+
+    MSG<GOT_MASTER_TOKEN> msg;
+    msg.set_token(mySeq);
+    MesosProcess<class T>::post(pid, msg);
+  }
+
+  // Now determine who the master is (it may be us).
+  detectMaster();
+}
+
+
+void ZooKeeperMasterDetector::reconnecting()
+{
+  LOG(INFO) << "Master detector lost connection to ZooKeeper, "
+	    << "attempting to reconnect ...";
+}
+
+
+void ZooKeeperMasterDetector::reconnected()
+{
+  LOG(INFO) << "Master detector reconnected ...";
+
+  int ret;
+  string result;
+
+  static const string delimiter = "/";
+
+  if (contend) {
+    // Contending for master, confirm our ephemeral sequence znode exists.
+    ret = zk->get(znode + "/" + mySeq, false, &result, NULL);
+
+    // We might no longer be the master! Commit suicide for now
+    // (hoping another master is on standbye), but in the future
+    // it would be nice if we could go back on standbye.
+    if (ret == ZNONODE) {
+      fatal("failed to reconnect to ZooKeeper quickly enough "
+	    "(our ephemeral sequence znode is gone), commiting suicide!");
+    }
+
+    if (ret != ZOK) {
+      fatal("ZooKeeper not responding correctly (%s). "
+	    "Make sure ZooKeeper is running on: %s",
+	    zk->error(ret), servers.c_str());
+    }
+
+    // We are still the master!
+    LOG(INFO) << "Still acting as master";
   } else {
-    LOG(INFO) << "Unimplemented watch event: (state is "
-	      << state << " and type is " << type << ")";
+    // Reconnected, but maybe the master changed?
+    detectMaster();
   }
 }
 
 
-void ZooKeeperMasterDetector::setId(const string &s)
+void ZooKeeperMasterDetector::expired()
 {
-  string seq = s;
-  // Converts "/path/to/znode/000000131" to "000000131".
-  int pos;
-  if ((pos = seq.find_last_of('/')) != string::npos) {  
-    mySeq = seq.erase(0, pos + 1);
-  } else
-    mySeq = "";
+  LOG(WARNING) << "Master detector ZooKeeper session expired!";
+
+  CHECK(zk != NULL);
+  delete zk;
+
+  zk = new ZooKeeper(servers, 10000, this);
 }
 
 
-string ZooKeeperMasterDetector::getId() 
+void ZooKeeperMasterDetector::updated(const string& path)
 {
-  return mySeq;
+  // A new master might have showed up and created a sequence
+  // identifier or a master may have died, determine who the master is now!
+  detectMaster();
+}
+
+
+void ZooKeeperMasterDetector::process(ZooKeeper* zk, int type, int state,
+				      const string& path)
+{
+  if ((state == ZOO_CONNECTED_STATE) && (type == ZOO_SESSION_EVENT)) {
+    // Check if this is a reconnect.
+    if (!reconnect) {
+      // Initial connect.
+      connected();
+    } else {
+      // Reconnected.
+      reconnected();
+    }
+  } else if ((state == ZOO_CONNECTING_STATE) && (type == ZOO_SESSION_EVENT)) {
+    // The client library automatically reconnects, taking into
+    // account failed servers in the connection string,
+    // appropriately handling the "herd effect", etc.
+    reconnect = true;
+    reconnecting();
+  } else if ((state == ZOO_EXPIRED_SESSION_STATE) && (type == ZOO_SESSION_EVENT)) {
+    // Session expiration. Let the manager take care of it.
+    expired();
+
+    // If this watcher is reused, the next connect won't be a reconnect.
+    reconnect = false;
+  } else if ((state == ZOO_CONNECTED_STATE) && (type == ZOO_CHILD_EVENT)) {
+    updated(path);
+  } else if ((state == ZOO_CONNECTED_STATE) && (type == ZOO_CHANGED_EVENT)) {
+    updated(path);
+  } else {
+    LOG(WARNING) << "Unimplemented watch event: (state is "
+		 << state << " and type is " << type << ")";
+  }
 }
 
 
@@ -396,14 +450,17 @@ void ZooKeeperMasterDetector::detectMaster()
 
   int ret = zk->getChildren(znode, true, &results);
 
-  if (ret != ZOK)
-    LOG(ERROR) << "failed to get masters: " << zk->error(ret);
-  else
-    LOG(INFO) << "found " << results.size() << " registered masters";
+  if (ret != ZOK) {
+    LOG(ERROR) << "Master detector failed to get masters: "
+	       << zk->error(ret);
+  } else {
+    LOG(INFO) << "Master detector found " << results.size()
+	      << " registered masters";
+  }
 
   string masterSeq;
   long min = LONG_MAX;
-  foreach (const string &result, results) {
+  foreach (const string& result, results) {
     int i = lexical_cast<int>(result);
     if (i < min) {
       min = i;
@@ -413,49 +470,40 @@ void ZooKeeperMasterDetector::detectMaster()
 
   // No master present (lost or possibly hasn't come up yet).
   if (masterSeq.empty()) {
-    MesosProcess::post(pid, pack<NO_MASTER_DETECTED>());
+    process::post(pid, NO_MASTER_DETECTED);
   } else if (masterSeq != currentMasterSeq) {
-    currentMasterSeq = masterSeq;
-    currentMasterPID = lookupMasterPID(masterSeq); 
+    // Okay, let's fetch the master pid from ZooKeeper.
+    string result;
+    ret = zk->get(znode + "/" + masterSeq, false, &result, NULL);
 
-    // While trying to get the master PID, master might have crashed,
-    // so PID might be empty.
-    if (currentMasterPID == PID())
-      MesosProcess::post(pid, pack<NO_MASTER_DETECTED>());
-    else
-      MesosProcess::post(pid, pack<NEW_MASTER_DETECTED>(currentMasterSeq,
-                                                        currentMasterPID));
+    if (ret != ZOK) {
+      // This is possible because the master might have failed since
+      // the invocation of ZooKeeper::getChildren above.
+      LOG(ERROR) << "Master detector failed to fetch new master pid: "
+		 << zk->error(ret);
+      process::post(pid, NO_MASTER_DETECTED);
+    } else {
+      // Now let's parse what we fetched from ZooKeeper.
+      LOG(INFO) << "Master detector got new master pid: " << result;
+
+      UPID masterPid = result;
+
+      if (masterPid == UPID()) {
+	// TODO(benh): Maybe we should try again then!?!? Parsing
+	// might have failed because of DNS, and whoever is using the
+	// detector might sit "unconnected" indefinitely!
+	LOG(ERROR) << "Failed to parse new master pid!";
+	process::post(pid, NO_MASTER_DETECTED);
+      } else {
+	currentMasterSeq = masterSeq;
+	currentMasterPID = masterPid;
+
+	MSG<NEW_MASTER_DETECTED> msg;
+	msg.set_pid(currentMasterPID);
+	MesosProcess<class T>::post(pid, msg);
+      }
+    }
   }
 }
 
-
-PID ZooKeeperMasterDetector::lookupMasterPID(const string &seq) const
-{
-  CHECK(!seq.empty());
-
-  int ret;
-  string result;
-
-  ret = zk->get(znode + "/" + seq, false, &result, NULL);
-
-  if (ret != ZOK)
-    LOG(ERROR) << "failed to fetch new master pid: " << zk->error(ret);
-  else
-    LOG(INFO) << "got new master pid: " << result;
-
-  // TODO(benh): Automatic cast!
-  return PID(result);
-}
-
-
-string ZooKeeperMasterDetector::getCurrentMasterId()
-{
-  return currentMasterSeq;
-}
-
-
-PID ZooKeeperMasterDetector::getCurrentMasterPID()
-{
-  return currentMasterPID;
-}
-#endif /* #ifdef WITH_ZOOKEEPER */
+#endif // WITH_ZOOKEEPER

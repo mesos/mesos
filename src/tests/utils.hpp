@@ -10,6 +10,8 @@
 
 #include <gmock/gmock.h>
 
+#include <messaging/messages.hpp>
+
 
 namespace mesos { namespace internal { namespace test {
 
@@ -43,6 +45,28 @@ void enterTestDirectory(const char* testCase, const char* testName);
 
 
 /**
+ * Macros to get a "default" dummy ExecutorInfo object for testing or
+ * create one out of an ExecutorID and string.
+ */
+#define DEFAULT_EXECUTOR_INFO                                           \
+  ({ ExecutorInfo executor;                                             \
+    executor.mutable_executor_id()->set_value("default");               \
+    executor.set_uri("noexecutor");                                     \
+    executor; })
+
+
+#define CREATE_EXECUTOR_INFO(executorId, uri)                           \
+  ({ ExecutorInfo executor;                                             \
+    executor.mutable_executor_id()->MergeFrom(executorId);              \
+    executor.set_uri(uri);                                              \
+    executor; })
+
+
+#define DEFAULT_EXECUTOR_ID						\
+      DEFAULT_EXECUTOR_INFO.executor_id()
+
+
+/**
  * Definition of a mock Scheduler to be used in tests with gmock.
  */
 class MockScheduler : public Scheduler
@@ -50,14 +74,16 @@ class MockScheduler : public Scheduler
 public:
   MOCK_METHOD1(getFrameworkName, std::string(SchedulerDriver*));
   MOCK_METHOD1(getExecutorInfo, ExecutorInfo(SchedulerDriver*));
-  MOCK_METHOD2(registered, void(SchedulerDriver*, FrameworkID));
-  MOCK_METHOD3(resourceOffer, void(SchedulerDriver*, OfferID,
+  MOCK_METHOD2(registered, void(SchedulerDriver*, const FrameworkID&));
+  MOCK_METHOD3(resourceOffer, void(SchedulerDriver*, const OfferID&,
                                    const std::vector<SlaveOffer>&));
-  MOCK_METHOD2(offerRescinded, void(SchedulerDriver*, OfferID));
+  MOCK_METHOD2(offerRescinded, void(SchedulerDriver*, const OfferID&));
   MOCK_METHOD2(statusUpdate, void(SchedulerDriver*, const TaskStatus&));
-  MOCK_METHOD2(frameworkMessage, void(SchedulerDriver*,
-                                      const FrameworkMessage&));
-  MOCK_METHOD2(slaveLost, void(SchedulerDriver*, SlaveID));
+  MOCK_METHOD4(frameworkMessage, void(SchedulerDriver*,
+				      const SlaveID&,
+				      const ExecutorID&,
+                                      const std::string&));
+  MOCK_METHOD2(slaveLost, void(SchedulerDriver*, const SlaveID&));
   MOCK_METHOD3(error, void(SchedulerDriver*, int, const std::string&));
 };
 
@@ -70,8 +96,8 @@ class MockExecutor : public Executor
 public:
   MOCK_METHOD2(init, void(ExecutorDriver*, const ExecutorArgs&));
   MOCK_METHOD2(launchTask, void(ExecutorDriver*, const TaskDescription&));
-  MOCK_METHOD2(killTask, void(ExecutorDriver*, TaskID));
-  MOCK_METHOD2(frameworkMessage, void(ExecutorDriver*, const FrameworkMessage&));
+  MOCK_METHOD2(killTask, void(ExecutorDriver*, const TaskID&));
+  MOCK_METHOD2(frameworkMessage, void(ExecutorDriver*, const std::string&));
   MOCK_METHOD1(shutdown, void(ExecutorDriver*));
   MOCK_METHOD3(error, void(ExecutorDriver*, int, const std::string&));
 };
@@ -80,10 +106,10 @@ public:
 /**
  * Definition of a mock Filter so that messages can act as triggers.
  */
-class MockFilter : public Filter
+class MockFilter : public process::Filter
 {
- public:
-  MOCK_METHOD1(filter, bool(struct msg *));
+public:
+  MOCK_METHOD1(filter, bool(process::Message *));
 };
 
 
@@ -91,11 +117,11 @@ class MockFilter : public Filter
  * A message can be matched against in conjunction with the MockFilter
  * (see above) to perform specific actions based for messages.
  */
-MATCHER_P3(MsgMatcher, id, from, to, "")
+MATCHER_P3(MsgMatcher, name, from, to, "")
 {
-  return (testing::Matcher<MSGID>(id).Matches(arg->id) &&
-          testing::Matcher<PID>(from).Matches(arg->from) &&
-          testing::Matcher<PID>(to).Matches(arg->to));
+  return (testing::Matcher<std::string>(name).Matches(arg->name) &&
+          testing::Matcher<process::UPID>(from).Matches(arg->from) &&
+          testing::Matcher<process::UPID>(to).Matches(arg->to));
 }
 
 
@@ -104,8 +130,8 @@ MATCHER_P3(MsgMatcher, id, from, to, "")
  * using the message matcher (see above) as well as the MockFilter
  * (see above).
  */
-#define EXPECT_MSG(filter, id, from, to)                \
-  EXPECT_CALL(filter, filter(MsgMatcher(id, from, to)))
+#define EXPECT_MSG(filter, name, from, to)                \
+  EXPECT_CALL(filter, filter(MsgMatcher(name, from, to)))
 
 
 /**
@@ -142,7 +168,8 @@ ACTION_P(Trigger, trigger) { trigger->value = true; }
         break;                                                          \
       usleep(10);                                                       \
       if (sleeps++ >= 200000) {                                         \
-        ADD_FAILURE() << "Waited too long for trigger!";                \
+        FAIL() << "Waited too long for trigger!";                       \
+        abort; /* TODO(benh): Don't abort here ... */                   \
         break;                                                          \
       }                                                                 \
     } while (true);                                                     \

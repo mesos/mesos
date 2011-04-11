@@ -1,8 +1,11 @@
+#include <errno.h>
 #include <netdb.h>
 #include <stdio.h>
 #include <string.h>
 
 #include <arpa/inet.h>
+
+#include <glog/logging.h>
 
 #include <iostream>
 #include <string>
@@ -11,6 +14,8 @@
 
 #include "config.hpp"
 #include "pid.hpp"
+#include "process.hpp"
+
 
 using std::istream;
 using std::ostream;
@@ -18,21 +23,54 @@ using std::size_t;
 using std::string;
 
 
-ostream & operator << (ostream &stream, const PID &pid)
+namespace process {
+
+UPID::UPID(const char* s)
+{
+  std::istringstream in(s);
+  in >> *this;
+}
+
+
+UPID::UPID(const std::string& s)
+{
+  std::istringstream in(s);
+  in >> *this;
+}
+
+
+// TODO(benh): Make this inline-able (cyclic dependency issues).
+UPID::UPID(const ProcessBase& process)
+{
+  id = process.self().id;
+  ip = process.self().ip;
+  port = process.self().port;
+}
+
+
+UPID::operator std::string() const
+{
+  std::ostringstream out;
+  out << *this;
+  return out.str();
+}
+
+
+ostream& operator << (ostream& stream, const UPID& pid)
 {
   // Call inet_ntop since inet_ntoa is not thread-safe!
   char ip[INET_ADDRSTRLEN];
   if (inet_ntop(AF_INET, (in_addr *) &pid.ip, ip, INET_ADDRSTRLEN) == NULL)
     memset(ip, 0, INET_ADDRSTRLEN);
 
-  stream << pid.pipe << "@" << ip << ":" << pid.port;
+  stream << pid.id << "@" << ip << ":" << pid.port;
   return stream;
 }
 
 
-istream & operator >> (istream &stream, PID &pid)
+istream& operator >> (istream& stream, UPID& pid)
 {
-  pid.pipe = 0;
+  pid.id = "";
   pid.ip = 0;
   pid.port = 0;
 
@@ -42,37 +80,97 @@ istream & operator >> (istream &stream, PID &pid)
     return stream;
   }
 
-  if (str.size() > 500) {
+  VLOG(2) << "Attempting to parse '" << str << "' into a PID";
+
+  if (str.size() == 0) {
     stream.setstate(std::ios_base::badbit);
     return stream;
   }
 
-  char host[512];
-  int id;
-  unsigned short port;
-  if (sscanf(str.c_str(), "%d@%[^:]:%hu", &id, host, &port) != 3) {
+  string id;
+  string host;
+  uint32_t ip;
+  uint16_t port;
+
+  size_t index = str.find('@');
+
+  if (index != string::npos) {
+    id = str.substr(0, index);
+  } else {
     stream.setstate(std::ios_base::badbit);
     return stream;
   }
 
-  hostent *he = gethostbyname2(host, AF_INET);
-  if (!he) {
+  str = str.substr(index + 1);
+
+  index = str.find(':');
+
+  if (index != string::npos) {
+    host = str.substr(0, index);
+  } else {
     stream.setstate(std::ios_base::badbit);
     return stream;
   }
 
-  pid.pipe = id;
-  pid.ip = *((uint32_t *) he->h_addr);
+  hostent he, *hep;
+  char* temp;
+  size_t length;
+  int result;
+  int herrno;
+
+  // Allocate temporary buffer for gethostbyname2_r.
+  length = 1024;
+  temp = new char[length];
+
+  while ((result = gethostbyname2_r(host.c_str(), AF_INET, &he,
+				    temp, length, &hep, &herrno)) == ERANGE) {
+    // Enlarge the buffer.
+    delete[] temp;
+    length *= 2;
+    temp = new char[length];
+  }
+
+  if (result != 0 || hep == NULL) {
+    VLOG(2) << "Failed to parse host '" << host
+	    << "' because " << hstrerror(herrno);
+    stream.setstate(std::ios_base::badbit);
+    delete[] temp;
+    return stream;
+  }
+
+  if (hep->h_addr_list[0] == NULL) {
+    VLOG(2) << "Got no addresses for '" << host << "'";
+    stream.setstate(std::ios_base::badbit);
+    delete[] temp;
+    return stream;
+  }
+
+  ip = *((uint32_t*) hep->h_addr_list[0]);
+
+  delete[] temp;
+
+  str = str.substr(index + 1);
+
+  if (sscanf(str.c_str(), "%hu", &port) != 1) {
+    stream.setstate(std::ios_base::badbit);
+    return stream;
+  }
+
+  pid.id = id;
+  pid.ip = ip;
   pid.port = port;
+
   return stream;
 }
 
 
-size_t hash_value(const PID& pid)
+size_t hash_value(const UPID& pid)
 {
   size_t seed = 0;
-  boost::hash_combine(seed, pid.pipe);
+  boost::hash_combine(seed, pid.id);
   boost::hash_combine(seed, pid.ip);
   boost::hash_combine(seed, pid.port);
   return seed;
 }
+
+} // namespace process {

@@ -1,7 +1,7 @@
-#include <mesos_exec.h>
 #include <signal.h>
 
-#include <cerrno>
+#include <glog/logging.h>
+
 #include <iostream>
 #include <string>
 #include <sstream>
@@ -15,137 +15,158 @@
 #include "common/fatal.hpp"
 #include "common/lock.hpp"
 #include "common/logging.hpp"
+#include "common/type_utils.hpp"
 
 #include "messaging/messages.hpp"
-
-using std::cerr;
-using std::endl;
-using std::string;
-
-using boost::bind;
-using boost::ref;
-using boost::unordered_map;
 
 using namespace mesos;
 using namespace mesos::internal;
 
+using boost::bind;
+using boost::cref;
+using boost::unordered_map;
+
+using process::UPID;
+
+using std::string;
+
 
 namespace mesos { namespace internal {
 
-class ExecutorProcess : public MesosProcess
+class ExecutorProcess : public MesosProcess<ExecutorProcess>
 {
 public:
-  friend class mesos::MesosExecutorDriver;
-  
+  ExecutorProcess(const UPID& _slave, MesosExecutorDriver* _driver,
+                  Executor* _executor, const FrameworkID& _frameworkId,
+                  const ExecutorID& _executorId, bool _local)
+    : slave(_slave), driver(_driver), executor(_executor),
+      frameworkId(_frameworkId), executorId(_executorId),
+      local(_local), terminate(false)
+  {
+    install(S2E_REGISTER_REPLY, &ExecutorProcess::registerReply,
+            &ExecutorRegisteredMessage::args);
+
+    install(S2E_RUN_TASK, &ExecutorProcess::runTask,
+            &RunTaskMessage::task);
+
+    install(S2E_KILL_TASK, &ExecutorProcess::killTask,
+            &KillTaskMessage::task_id);
+
+    install(S2E_FRAMEWORK_MESSAGE, &ExecutorProcess::frameworkMessage,
+	    &FrameworkMessageMessage::slave_id,
+	    &FrameworkMessageMessage::framework_id,
+	    &FrameworkMessageMessage::executor_id,
+	    &FrameworkMessageMessage::data);
+
+    install(S2E_KILL_EXECUTOR, &ExecutorProcess::killExecutor);
+
+    install(process::EXITED, &ExecutorProcess::exited);
+  }
+
+  virtual ~ExecutorProcess() {}
+
 protected:
-  PID slave;
+  virtual void operator () ()
+  {
+    VLOG(1) << "Executor started at: " << self();
+
+    link(slave);
+
+    // Register with slave.
+    MSG<E2S_REGISTER_EXECUTOR> out;
+    out.mutable_framework_id()->MergeFrom(frameworkId);
+    out.mutable_executor_id()->MergeFrom(executorId);
+    send(slave, out);
+
+    while(true) {
+      // Check for terminate in the same way as SchedulerProcess. See
+      // comments there for an explanation of why this is necessary.
+      if (terminate) return;
+
+      serve(0, true);
+    }
+  }
+
+  void registerReply(const ExecutorArgs& args)
+  {
+    VLOG(1) << "Executor registered on slave " << args.slave_id();
+    slaveId = args.slave_id();
+    process::invoke(bind(&Executor::init, executor, driver, cref(args)));
+  }
+
+  void runTask(const TaskDescription& task)
+  {
+    VLOG(1) << "Executor asked to run a task " << task.task_id();
+
+    MSG<E2S_STATUS_UPDATE> out;
+    out.mutable_framework_id()->MergeFrom(frameworkId);
+    TaskStatus* status = out.mutable_status();
+    status->mutable_task_id()->MergeFrom(task.task_id());
+    status->mutable_slave_id()->MergeFrom(slaveId);
+    status->set_state(TASK_RUNNING);
+    send(slave, out);
+
+    process::invoke(bind(&Executor::launchTask, executor, driver, cref(task)));
+  }
+
+  void killTask(const TaskID& taskId)
+  {
+    VLOG(1) << "Executor asked to kill task " << taskId;
+    process::invoke(bind(&Executor::killTask, executor, driver, cref(taskId)));
+  }
+
+  void frameworkMessage(const SlaveID& slaveId,
+			const FrameworkID& frameworkId,
+			const ExecutorID& executorId,
+			const string& data)
+  {
+    VLOG(1) << "Executor received framework message";
+    process::invoke(bind(&Executor::frameworkMessage, executor, driver,
+                         cref(data)));
+  }
+
+  void killExecutor()
+  {
+    VLOG(1) << "Executor asked to shutdown";
+    process::invoke(bind(&Executor::shutdown, executor, driver));
+    if (!local) {
+      exit(0);
+    } else {
+      return;
+    }
+  }
+
+  void exited()
+  {
+    VLOG(1) << "Slave exited, trying to shutdown";
+
+    // TODO: Pass an argument to shutdown to tell it this is abnormal?
+    process::invoke(bind(&Executor::shutdown, executor, driver));
+
+    // This is a pretty bad state ... no slave is left. Rather
+    // than exit lets kill our process group (which includes
+    // ourself) hoping to clean up any processes this executor
+    // launched itself.
+    // TODO(benh): Maybe do a SIGTERM and then later do a SIGKILL?
+    if (!local) {
+      killpg(0, SIGKILL);
+    } else {
+      terminate = true;
+    }
+  }
+
+private:
+  friend class mesos::MesosExecutorDriver;
+
+  UPID slave;
   MesosExecutorDriver* driver;
   Executor* executor;
-  FrameworkID fid;
-  SlaveID sid;
+  FrameworkID frameworkId;
+  ExecutorID executorId;
+  SlaveID slaveId;
   bool local;
 
   volatile bool terminate;
-
-public:
-  ExecutorProcess(const PID& _slave,
-                  MesosExecutorDriver* _driver,
-                  Executor* _executor,
-                  FrameworkID _fid,
-                  bool _local)
-    : slave(_slave), driver(_driver), executor(_executor),
-      fid(_fid), local(_local), terminate(false) {}
-
-protected:
-  void operator() ()
-  {
-    link(slave);
-    send(slave, pack<E2S_REGISTER_EXECUTOR>(fid));
-    while(true) {
-      // TODO(benh): Is there a better way to architect this code? In
-      // particular, if the executor blocks in a callback, we can't
-      // process any other messages. This is especially tricky if a
-      // slave dies since we won't handle the PROCESS_EXIT message in
-      // a timely manner (if at all).
-
-      // Check for terminate in the same way as SchedulerProcess. See
-      // comments there for an explanation of why this is necessary.
-      if (terminate)
-        return;
-
-      switch(receive(2)) {
-        case S2E_REGISTER_REPLY: {
-          string host;
-          string fwName;
-          string args;
-          tie(sid, host, fwName, args) = unpack<S2E_REGISTER_REPLY>(body());
-          ExecutorArgs execArg(sid, host, fid, fwName, args);
-          invoke(bind(&Executor::init, executor, driver, ref(execArg)));
-          break;
-        }
-
-        case S2E_RUN_TASK: {
-          TaskID tid;
-          string name;
-          string args;
-          Params params;
-          tie(tid, name, args, params) = unpack<S2E_RUN_TASK>(body());
-          TaskDescription task(tid, sid, name, params.getMap(), args);
-          send(slave, pack<E2S_STATUS_UPDATE>(fid, tid, TASK_RUNNING, ""));
-          invoke(bind(&Executor::launchTask, executor, driver, ref(task)));
-          break;
-        }
-
-        case S2E_KILL_TASK: {
-          TaskID tid;
-          tie(tid) = unpack<S2E_KILL_TASK>(body());
-          invoke(bind(&Executor::killTask, executor, driver, tid));
-          break;
-        }
-
-        case S2E_FRAMEWORK_MESSAGE: {
-          FrameworkMessage msg;
-          tie(msg) = unpack<S2E_FRAMEWORK_MESSAGE>(body());
-          invoke(bind(&Executor::frameworkMessage, executor, driver, ref(msg)));
-          break;
-        }
-
-        case S2E_KILL_EXECUTOR: {
-          invoke(bind(&Executor::shutdown, executor, driver));
-          if (!local)
-            exit(0);
-          else
-            return;
-        }
-
-        case PROCESS_EXIT: {
-          // TODO: Pass an argument to shutdown to tell it this is abnormal?
-          invoke(bind(&Executor::shutdown, executor, driver));
-
-          // This is a pretty bad state ... no slave is left. Rather
-          // than exit lets kill our process group (which includes
-          // ourself) hoping to clean up any processes this executor
-          // launched itself.
-          // TODO(benh): Maybe do a SIGTERM and then later do a SIGKILL?
-          if (!local)
-            killpg(0, SIGKILL);
-          else
-            return;
-        }
-
-        case PROCESS_TIMEOUT: {
-          break;
-        }
-
-        default: {
-          // TODO: Is this serious enough to exit?
-          cerr << "Received unknown message ID " << msgid()
-               << " from " << from() << endl;
-          break;
-        }
-      }
-    }
-  }
 };
 
 }} /* namespace mesos { namespace internal { */
@@ -154,15 +175,6 @@ protected:
 /*
  * Implementation of C++ API.
  */
-
-
-// Default implementation of error() that logs to stderr and exits
-void Executor::error(ExecutorDriver* driver, int code, const string &message)
-{
-  cerr << "Mesos error: " << message
-       << " (error code: " << code << ")" << endl;
-  driver->stop();
-}
 
 
 MesosExecutorDriver::MesosExecutorDriver(Executor* _executor)
@@ -175,12 +187,19 @@ MesosExecutorDriver::MesosExecutorDriver(Executor* _executor)
   pthread_mutex_init(&mutex, &attr);
   pthread_mutexattr_destroy(&attr);
   pthread_cond_init(&cond, 0);
+
+  // TODO(benh): Initialize glog.
+
+  // Initialize libprocess library (but not glog, done above).
+  process::initialize(false);
 }
 
 
 MesosExecutorDriver::~MesosExecutorDriver()
 {
-  Process::wait(process->self());
+  // Just as in SchedulerProcess, we might wait here indefinitely if
+  // MesosExecutorDriver::stop has not been invoked.
+  process::wait(process->self());
   delete process;
 
   pthread_mutex_destroy(&mutex);
@@ -203,8 +222,9 @@ int MesosExecutorDriver::start()
 
   bool local;
 
-  PID slave;
-  FrameworkID fid;
+  UPID slave;
+  FrameworkID frameworkId;
+  ExecutorID executorId;
 
   char* value;
   std::istringstream iss;
@@ -212,36 +232,47 @@ int MesosExecutorDriver::start()
   /* Check if this is local (for example, for testing). */
   value = getenv("MESOS_LOCAL");
 
-  if (value != NULL)
+  if (value != NULL) {
     local = true;
-  else
+  } else {
     local = false;
+  }
 
   /* Get slave PID from environment. */
   value = getenv("MESOS_SLAVE_PID");
 
-  if (value == NULL)
+  if (value == NULL) {
     fatal("expecting MESOS_SLAVE_PID in environment");
+  }
 
-  slave = PID(value);
+  slave = UPID(value);
 
-  if (!slave)
+  if (!slave) {
     fatal("cannot parse MESOS_SLAVE_PID");
+  }
 
   /* Get framework ID from environment. */
   value = getenv("MESOS_FRAMEWORK_ID");
 
-  if (value == NULL)
+  if (value == NULL) {
     fatal("expecting MESOS_FRAMEWORK_ID in environment");
+  }
 
-  iss.str(value);
+  frameworkId.set_value(value);
 
-  if (!(iss >> fid))
-    fatal("cannot parse MESOS_FRAMEWORK_ID");
+  /* Get executor ID from environment. */
+  value = getenv("MESOS_EXECUTOR_ID");
 
-  process = new ExecutorProcess(slave, this, executor, fid, local);
+  if (value == NULL) {
+    fatal("expecting MESOS_EXECUTOR_ID in environment");
+  }
 
-  Process::spawn(process);
+  executorId.set_value(value);
+
+  process =
+    new ExecutorProcess(slave, this, executor, frameworkId, executorId, local);
+
+  process::spawn(process);
 
   running = true;
 
@@ -257,7 +288,10 @@ int MesosExecutorDriver::stop()
     return -1;
   }
 
+  CHECK(process != NULL);
+
   process->terminate = true;
+  process::post(process->self(), process::TERMINATE);
 
   running = false;
 
@@ -270,8 +304,10 @@ int MesosExecutorDriver::stop()
 int MesosExecutorDriver::join()
 {
   Lock lock(&mutex);
-  while (running)
+
+  while (running) {
     pthread_cond_wait(&cond, &mutex);
+  }
 
   return 0;
 }
@@ -284,7 +320,7 @@ int MesosExecutorDriver::run()
 }
 
 
-int MesosExecutorDriver::sendStatusUpdate(const TaskStatus &status)
+int MesosExecutorDriver::sendStatusUpdate(const TaskStatus& status)
 {
   Lock lock(&mutex);
 
@@ -293,17 +329,24 @@ int MesosExecutorDriver::sendStatusUpdate(const TaskStatus &status)
     return -1;
   }
 
-  process->send(process->slave,
-                pack<E2S_STATUS_UPDATE>(process->fid,
-                                        status.taskId,
-                                        status.state,
-                                        status.data));
+  CHECK(process != NULL);
+
+  // Validate that they set the correct slave ID.
+  if (!(process->slaveId == status.slave_id())) {
+    return -1;
+  }
+
+  // TODO(benh): Do a dispatch to Executor first?
+  MSG<E2S_STATUS_UPDATE> out;
+  out.mutable_framework_id()->MergeFrom(process->frameworkId);
+  out.mutable_status()->MergeFrom(status);
+  process->send(process->slave, out);
 
   return 0;
 }
 
 
-int MesosExecutorDriver::sendFrameworkMessage(const FrameworkMessage &message)
+int MesosExecutorDriver::sendFrameworkMessage(const string& data)
 {
   Lock lock(&mutex);
 
@@ -312,151 +355,15 @@ int MesosExecutorDriver::sendFrameworkMessage(const FrameworkMessage &message)
     return -1;
   }
 
-  process->send(process->slave,
-                pack<E2S_FRAMEWORK_MESSAGE>(process->fid, message));
+  CHECK(process != NULL);
+
+  // TODO(benh): Do a dispatch to Executor first?
+  MSG<E2S_FRAMEWORK_MESSAGE> out;
+  out.mutable_slave_id()->MergeFrom(process->slaveId);
+  out.mutable_framework_id()->MergeFrom(process->frameworkId);
+  out.mutable_executor_id()->MergeFrom(process->executorId);
+  out.set_data(data);
+  process->send(process->slave, out);
 
   return 0;
 }
-
-
-/*
- * Implementation of C API.
- */
-
-
-namespace mesos { namespace internal {
-
-/*
- * We wrap calls from the C API into the C++ API with the following
- * specialized implementation of Executor.
- */
-class CExecutor : public Executor {
-public:
-  mesos_exec* exec;
-  ExecutorDriver* driver; // Set externally after object is created
-  
-  CExecutor(mesos_exec* _exec) : exec(_exec), driver(NULL) {}
-
-  virtual ~CExecutor() {}
-
-  virtual void init(ExecutorDriver*, const ExecutorArgs& args)
-  {
-    exec->init(exec,
-               args.slaveId.c_str(),
-               args.host.c_str(),
-               args.frameworkId.c_str(),
-               args.frameworkName.c_str(),
-               args.data.data(),
-               args.data.size());
-  }
-
-  virtual void launchTask(ExecutorDriver*, const TaskDescription& task)
-  {
-    // Convert params to key=value list
-    Params paramsObj(task.params);
-    string paramsStr = paramsObj.str();
-    mesos_task_desc td = { task.taskId,
-                           task.slaveId.c_str(),
-                           task.name.c_str(),
-                           paramsStr.c_str(),
-                           task.arg.data(),
-                           task.arg.size() };
-    exec->launch_task(exec, &td);
-  }
-
-  virtual void killTask(ExecutorDriver*, TaskID taskId)
-  {
-    exec->kill_task(exec, taskId);
-  }
-  
-  virtual void frameworkMessage(ExecutorDriver*,
-                                const FrameworkMessage& message)
-  {
-    mesos_framework_message msg = { message.slaveId.c_str(),
-                                    message.taskId,
-                                    message.data.data(),
-                                    message.data.size() };
-    exec->framework_message(exec, &msg);
-  }
-  
-  virtual void shutdown(ExecutorDriver*)
-  {
-    exec->shutdown(exec);
-  }
-  
-  virtual void error(ExecutorDriver*, int code, const std::string& message)
-  {
-    exec->error(exec, code, message.c_str());
-  }
-};
-
-
-/*
- * A single CExecutor instance used with the C API.
- *
- * TODO: Is this a good idea? How can one unit-test C frameworks? It might
- *       be better to have a hashtable as in the scheduler API eventually.
- */
-CExecutor* c_executor = NULL;
-
-}} /* namespace mesos { namespace internal {*/
-
-
-extern "C" {
-
-
-int mesos_exec_run(struct mesos_exec* exec)
-{
-  if (exec == NULL || c_executor != NULL) {
-    errno = EINVAL;
-    return -1;
-  }
-
-  CExecutor executor(exec);
-  c_executor = &executor;
-  
-  MesosExecutorDriver driver(&executor);
-  executor.driver = &driver;
-  driver.run();
-
-  c_executor = NULL;
-
-  return 0;
-}
-
-
-int mesos_exec_send_message(struct mesos_exec* exec,
-                            struct mesos_framework_message* msg)
-{
-  if (exec == NULL || c_executor == NULL || msg == NULL) {
-    errno = EINVAL;
-    return -1;
-  }
-
-  string data((char*) msg->data, msg->data_len);
-  FrameworkMessage message(string(msg->sid), msg->tid, data);
-
-  c_executor->driver->sendFrameworkMessage(message);
-
-  return 0;
-}
-
-
-int mesos_exec_status_update(struct mesos_exec* exec,
-                             struct mesos_task_status* status)
-{
-
-  if (exec == NULL || c_executor == NULL || status == NULL) {
-    errno = EINVAL;
-    return -1;
-  }
-
-  string data((char*) status->data, status->data_len);
-  TaskStatus ts(status->tid, status->state, data);
-
-  c_executor->driver->sendStatusUpdate(ts);
-
-  return 0;
-}
-
-} /* extern "C" */

@@ -7,6 +7,8 @@
 
 #include <string>
 
+#include <process.hpp>
+
 #include <common/fatal.hpp>
 
 #include <configurator/configurator.hpp>
@@ -15,6 +17,8 @@
 
 using namespace mesos::internal;
 using namespace mesos::internal::test;
+
+using std::string;
 
 
 namespace {
@@ -42,6 +46,8 @@ string getMesosHome(int argc, char** argv) {
 
 int main(int argc, char** argv)
 {
+  GOOGLE_PROTOBUF_VERIFY_VERSION;
+
   // Get absolute path to Mesos home directory based on location of alltests
   mesos::internal::test::mesosHome = getMesosHome(argc, argv);
 
@@ -54,5 +60,9 @@ int main(int argc, char** argv)
   testing::FLAGS_gtest_death_test_style = "threadsafe";
   if (argc == 2 && strcmp("-v", argv[1]) == 0)
     google::SetStderrLogging(google::INFO);
+
+  // Initialize libprocess library (but not glog, done above).
+  process::initialize(false);
+
   return RUN_ALL_TESTS();
 }

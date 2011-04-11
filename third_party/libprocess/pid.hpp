@@ -1,5 +1,5 @@
-#ifndef PID_HPP
-#define PID_HPP
+#ifndef __PID_HPP__
+#define __PID_HPP__
 
 #include <stdint.h>
 
@@ -8,56 +8,44 @@
 #include <string>
 
 
-struct PID;
+namespace process {
+
+// Forward declaration to break cyclic dependencies.
+class ProcessBase;
 
 
-/* Outputing PIDs and generating PIDs using streamds. */
-std::ostream & operator << (std::ostream &, const PID &);
-std::istream & operator >> (std::istream &, PID &);
-
-
-/* PID hash value (for example, to use in Boost's unordered maps). */
-std::size_t hash_value(const PID &);
-
-
-struct PID
+struct UPID
 {
-  PID() : pipe(0), ip(0), port(0) {}
+  UPID()
+    : ip(0), port(0) {}
 
+  UPID(const UPID& that)
+    : id(that.id), ip(that.ip), port(that.port) {}
 
-  PID(const char *s) 
-  {
-    std::istringstream iss(s);
-    iss >> *this;
-  }
+  UPID(const char* id_, uint32_t ip_, uint16_t port_)
+    : id(id_), ip(ip_), port(port_) {}
 
+  UPID(const std::string& id_, uint32_t ip_, uint16_t port_)
+    : id(id_), ip(ip_), port(port_) {}
 
-  PID(const std::string &s)
-  {
-    std::istringstream iss(s);
-    iss >> *this;
-  }
+  UPID(const char* s);
 
+  UPID(const std::string& s);
 
-  operator std::string() const
-  {
-    std::ostringstream oss;
-    oss << *this;
-    return oss.str();
-  }
+  UPID(const ProcessBase& process);
 
+  operator std::string() const;
 
   bool operator ! () const
   {
-    return !pipe && !ip && !port;
+    return id == "" && ip == 0 && port == 0;
   }
 
-
-  bool operator < (const PID &that) const
+  bool operator < (const UPID& that) const
   {
     if (this != &that) {
       if (ip == that.ip && port == that.port)
-        return pipe < that.pipe;
+        return id < that.id;
       else if (ip == that.ip && port != that.port)
         return port < that.port;
       else
@@ -67,11 +55,10 @@ struct PID
     return false;
   }
 
-
-  bool operator == (const PID &that) const
+  bool operator == (const UPID& that) const
   {
     if (this != &that) {
-      return (pipe == that.pipe &&
+      return (id == that.id &&
               ip == that.ip &&
               port == that.port);
     }
@@ -79,17 +66,49 @@ struct PID
     return true;
   }
 
-
-  bool operator != (const PID &that) const
+  bool operator != (const UPID& that) const
   {
     return !(this->operator == (that));
   }
 
-
-  uint32_t pipe;
+  std::string id;
   uint32_t ip;
   uint16_t port;
 };
 
 
-#endif /* PID_HPP */
+template <typename T = ProcessBase>
+struct PID : UPID
+{
+  PID() : UPID() {}
+
+  PID(const T& t) : UPID(static_cast<const ProcessBase&>(t)) {}
+
+  template <typename Base>
+  operator PID<Base> ()
+  {
+    // Only allow upcasts!
+    T* t = NULL;
+    Base* base = t;
+    PID<Base> pid;
+    pid.id = id;
+    pid.ip = ip;
+    pid.port = port;
+    return pid;
+  }
+};
+
+
+// Outputing UPIDs and generating UPIDs using streams.
+std::ostream& operator << (std::ostream&, const UPID&);
+std::istream& operator >> (std::istream&, UPID&);
+
+
+// UPID hash value (for example, to use in Boost's unordered maps).
+std::size_t hash_value(const UPID&);
+
+}  // namespace process {
+
+
+
+#endif // __PID_HPP__

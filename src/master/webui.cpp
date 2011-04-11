@@ -3,30 +3,31 @@
 #include <sstream>
 #include <string>
 
-#include "webui.hpp"
 #include "state.hpp"
+#include "webui.hpp"
+
+#include "configurator/configuration.hpp"
 
 #ifdef MESOS_WEBUI
 
 #include <Python.h>
 
+using process::PID;
+
 using std::string;
 
 
-extern "C" void init_master();  // Initializer for the Python master module
+extern "C" void init_master();  // Initializer for the Python master module.
 
-namespace {
-
-PID master;
-string webuiPort;
-string logDir;
-
-}
 
 namespace mesos { namespace internal { namespace master {
 
+static PID<Master> master;
+static string webuiPort;
+static string logDir;
 
-void *runMasterWebUI(void *)
+
+void* runMasterWebUI(void*)
 {
   LOG(INFO) << "Web UI thread started";
   Py_Initialize();
@@ -48,7 +49,7 @@ void *runMasterWebUI(void *)
 }
 
 
-void startMasterWebUI(const PID &master, const Params &params)
+void startMasterWebUI(const PID<Master>& _master, const Configuration& conf)
 {
   // TODO(*): It would be nice if we didn't have to be specifying
   // default values for configuration options in the code like
@@ -57,12 +58,12 @@ void startMasterWebUI(const PID &master, const Params &params)
   // all of the configuration options have been set (from defaults or
   // from the command line, environment, or configuration file) and we
   // can just query what their values are.
-  webuiPort = params.get("webui_port", "8080");
-  logDir = params.get("log_dir", FLAGS_log_dir);
+  webuiPort = conf.get("webui_port", "8080");
+  logDir = conf.get("log_dir", FLAGS_log_dir);
 
   LOG(INFO) << "Starting master web UI on port " << webuiPort;
 
-  ::master = master;
+  master = _master;
   pthread_t thread;
   pthread_create(&thread, 0, runMasterWebUI, NULL);
 }
@@ -70,35 +71,14 @@ void startMasterWebUI(const PID &master, const Params &params)
 
 namespace state {
 
-class StateGetter : public MesosProcess
-{
-public:
-  MasterState *masterState;
-
-  StateGetter() {}
-  ~StateGetter() {}
-
-  void operator () ()
-  {
-    send(::master, pack<M2M_GET_STATE>());
-    receive();
-    CHECK(msgid() == M2M_GET_STATE_REPLY);
-    masterState = unpack<M2M_GET_STATE_REPLY, 0>(body());
-  }
-};
-
-
 // From master_state.hpp
-MasterState *get_master()
+MasterState* get_master()
 {
-  StateGetter getter;
-  PID pid = Process::spawn(&getter);
-  Process::wait(pid);
-  return getter.masterState;
+  return process::call(master, &Master::getState);
 }
 
-} /* namespace state { */
+} // namespace state {
 
-}}} /* namespace mesos { namespace internal { namespace master { */
+}}} // namespace mesos { namespace internal { namespace master {
 
-#endif /* MESOS_WEBUI */
+#endif // MESOS_WEBUI

@@ -1,179 +1,79 @@
-#include "messages.hpp"
+#include "messaging/messages.hpp"
 
-using std::map;
-using std::string;
-
-using process::tuples::serializer;
-using process::tuples::deserializer;
-
+#define ALLOCATE_MESSAGE(name)                    \
+  char name[] = #name
 
 namespace mesos { namespace internal {
 
+// From framework to master.
+ALLOCATE_MESSAGE(F2M_REGISTER_FRAMEWORK);
+ALLOCATE_MESSAGE(F2M_REREGISTER_FRAMEWORK);
+ALLOCATE_MESSAGE(F2M_UNREGISTER_FRAMEWORK);
+ALLOCATE_MESSAGE(F2M_RESOURCE_OFFER_REPLY);
+ALLOCATE_MESSAGE(F2M_REVIVE_OFFERS);
+ALLOCATE_MESSAGE(F2M_KILL_TASK);
+ALLOCATE_MESSAGE(F2M_FRAMEWORK_MESSAGE);
+ALLOCATE_MESSAGE(F2M_STATUS_UPDATE_ACK);
 
-void operator & (serializer& s, const master::state::MasterState *state)
-{
-  s & (intptr_t &) state;
-}
+// From master to framework.
+ALLOCATE_MESSAGE(M2F_REGISTER_REPLY);
+ALLOCATE_MESSAGE(M2F_RESOURCE_OFFER);
+ALLOCATE_MESSAGE(M2F_RESCIND_OFFER);
+ALLOCATE_MESSAGE(M2F_STATUS_UPDATE);
+ALLOCATE_MESSAGE(M2F_LOST_SLAVE);
+ALLOCATE_MESSAGE(M2F_FRAMEWORK_MESSAGE);
+ALLOCATE_MESSAGE(M2F_ERROR);
 
+// From slave to master.
+ALLOCATE_MESSAGE(S2M_REGISTER_SLAVE);
+ALLOCATE_MESSAGE(S2M_REREGISTER_SLAVE);
+ALLOCATE_MESSAGE(S2M_UNREGISTER_SLAVE);
+ALLOCATE_MESSAGE(S2M_STATUS_UPDATE);
+ALLOCATE_MESSAGE(S2M_FRAMEWORK_MESSAGE);
+ALLOCATE_MESSAGE(S2M_EXITED_EXECUTOR);
 
-void operator & (deserializer& d, master::state::MasterState *&state)
-{
-  d & (intptr_t &) state;
-}
+// From slave heart to master.
+ALLOCATE_MESSAGE(SH2M_HEARTBEAT);
 
+// From master to slave.
+ALLOCATE_MESSAGE(M2S_REGISTER_REPLY);
+ALLOCATE_MESSAGE(M2S_REREGISTER_REPLY);
+ALLOCATE_MESSAGE(M2S_RUN_TASK);
+ALLOCATE_MESSAGE(M2S_KILL_TASK);
+ALLOCATE_MESSAGE(M2S_KILL_FRAMEWORK);
+ALLOCATE_MESSAGE(M2S_FRAMEWORK_MESSAGE);
+ALLOCATE_MESSAGE(M2S_UPDATE_FRAMEWORK);
+ALLOCATE_MESSAGE(M2S_STATUS_UPDATE_ACK);
 
-void operator & (serializer& s, const slave::state::SlaveState *state)
-{
-  s & (intptr_t &) state;
-}
+// From executor to slave.
+ALLOCATE_MESSAGE(E2S_REGISTER_EXECUTOR);
+ALLOCATE_MESSAGE(E2S_STATUS_UPDATE);
+ALLOCATE_MESSAGE(E2S_FRAMEWORK_MESSAGE);
 
+// From slave to executor.
+ALLOCATE_MESSAGE(S2E_REGISTER_REPLY);
+ALLOCATE_MESSAGE(S2E_RUN_TASK);
+ALLOCATE_MESSAGE(S2E_KILL_TASK);
+ALLOCATE_MESSAGE(S2E_FRAMEWORK_MESSAGE);
+ALLOCATE_MESSAGE(S2E_KILL_EXECUTOR);
 
-void operator & (deserializer& d, slave::state::SlaveState *&state)
-{
-  d & (intptr_t &) state;
-}
+#ifdef __sun__
+// From projd to slave.
+ALLOCATE_MESSAGE(PD2S_REGISTER_PROJD);
+ALLOCATE_MESSAGE(PD2S_PROJD_READY);
 
+// From slave to projd.
+ALLOCATE_MESSAGE(S2PD_UPDATE_RESOURCES);
+ALLOCATE_MESSAGE(S2PD_KILL_ALL);
+#endif // __sun__
 
-void operator & (serializer& s, const TaskState& state)
-{
-  s & (const int32_t&) state;
-}
+// From master detector to processes.
+ALLOCATE_MESSAGE(GOT_MASTER_TOKEN);
+ALLOCATE_MESSAGE(NEW_MASTER_DETECTED);
+ALLOCATE_MESSAGE(NO_MASTER_DETECTED);
 
+// Generic messages.
+ALLOCATE_MESSAGE(PING);
+ALLOCATE_MESSAGE(PONG);
 
-void operator & (deserializer& s, TaskState& state)
-{
-  s & (int32_t&) state;
-}
-
-
-void operator & (serializer& s, const SlaveOffer& offer)
-{
-  s & offer.slaveId;
-  s & offer.host;
-  s & offer.params;
-}
-
-
-void operator & (deserializer& s, SlaveOffer& offer)
-{
-  s & offer.slaveId;
-  s & offer.host;
-  s & offer.params;
-}
-
-
-void operator & (serializer& s, const TaskDescription& task)
-{  
-  s & task.taskId;
-  s & task.slaveId;
-  s & task.name;
-  s & task.arg;
-  s & task.params;
-}
-
-
-void operator & (deserializer& s, TaskDescription& task)
-{  
-  s & task.taskId;
-  s & task.slaveId;
-  s & task.name;
-  s & task.arg;
-  s & task.params;
-}
-
-
-void operator & (serializer& s, const FrameworkMessage& message)
-{
-  s & message.slaveId;
-  s & message.taskId;
-  s & message.data;
-}
-
-
-void operator & (deserializer& s, FrameworkMessage& message)
-{
-  s & message.slaveId;
-  s & message.taskId;
-  s & message.data;
-}
-
-
-void operator & (serializer& s, const ExecutorInfo& info)
-{
-  s & info.uri;
-  s & info.initArg;
-  s & info.params;
-}
-
-
-void operator & (deserializer& s, ExecutorInfo& info)
-{
-  s & info.uri;
-  s & info.initArg;
-  s & info.params;
-}
-
-
-void operator & (serializer& s, const Params& params)
-{
-  const map<string, string>& map = params.getMap();
-  s & (int32_t) map.size();
-  foreachpair (const string& key, const string& value, map) {
-    s & key;
-    s & value;
-  }
-}
-
-
-void operator & (deserializer& s, Params& params)
-{
-  map<string, string>& map = params.getMap();
-  map.clear();
-  int32_t size;
-  string key;
-  string value;
-  s & size;
-  for (int32_t i = 0; i < size; i++) {
-    s & key;
-    s & value;
-    map[key] = value;
-  }
-}
-
-
-void operator & (serializer& s, const Resources& resources)
-{
-  s & resources.cpus;
-  s & resources.mem;
-}
-
-
-void operator & (deserializer& s, Resources& resources)
-{
-  s & resources.cpus;
-  s & resources.mem;
-}
-
-void operator & (serializer& s, const Task& taskInfo)
-{
-  s & taskInfo.id;
-  s & taskInfo.frameworkId;
-  s & taskInfo.resources;
-  s & taskInfo.state;
-  s & taskInfo.name;
-  s & taskInfo.message;
-  s & taskInfo.slaveId;
-}
-
-void operator & (deserializer& s, Task& taskInfo)
-{
-  s & taskInfo.id;
-  s & taskInfo.frameworkId;
-  s & taskInfo.resources;
-  s & taskInfo.state;
-  s & taskInfo.name;
-  s & taskInfo.message;
-  s & taskInfo.slaveId;
-}
-
-}} /* namespace mesos { namespace internal { */
+}} // namespace mesos { namespace internal {

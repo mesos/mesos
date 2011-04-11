@@ -556,15 +556,9 @@ jenv->ExceptionDescribe();
 
 #endif /* SWIGPYTHON */
 
-/* Rename task_state enum so that the generated class is called TaskState */
-%rename(TaskState) task_state;
-
 /* Make it possible to inherit from Scheduler/Executor in target language */
 %feature("director") mesos::Scheduler;
 %feature("director") mesos::Executor;
 
-%include <mesos_types.h>
-%include <mesos_types.hpp>
-%include <mesos.hpp>
 %include <mesos_sched.hpp>
 %include <mesos_exec.hpp>

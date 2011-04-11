@@ -1,6 +1,5 @@
 #include <dlfcn.h>
 #include <errno.h>
-#include <mesos_sched.h>
 #include <pwd.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -9,92 +8,55 @@
 
 #include <arpa/inet.h>
 
+#include <google/protobuf/descriptor.h>
+
 #include <iostream>
 #include <map>
 #include <string>
 #include <sstream>
 
-#include <mesos_sched.hpp>
-#include <reliable.hpp>
+#include <tr1/functional>
 
-#include <boost/bind.hpp>
+#include <mesos.hpp>
+#include <mesos_sched.hpp>
+#include <process.hpp>
+
 #include <boost/unordered_map.hpp>
+#include <boost/unordered_set.hpp>
+
+#include "configurator/configuration.hpp"
 
 #include "common/fatal.hpp"
 #include "common/lock.hpp"
 #include "common/logging.hpp"
+#include "common/type_utils.hpp"
 
 #include "detector/detector.hpp"
 
 #include "local/local.hpp"
 
-#include "master/master.hpp"
-
 #include "messaging/messages.hpp"
 
-#include "slave/slave.hpp"
+using namespace mesos;
+using namespace mesos::internal;
+
+using boost::cref;
+using boost::unordered_map;
+using boost::unordered_set;
+
+using google::protobuf::RepeatedPtrField;
+
+using process::PID;
+using process::UPID;
 
 using std::map;
 using std::string;
 using std::vector;
 
-using boost::bind;
-using boost::ref;
-using boost::unordered_map;
-
-using namespace mesos;
-using namespace mesos::internal;
-
-using mesos::internal::master::Master;
-using mesos::internal::slave::Slave;
+using std::tr1::bind;
 
 
 namespace mesos { namespace internal {
-
-
-// Unfortunately, when we reply to an offer right now the message
-// might not make it to the master, or even all the way to the
-// slave. So, we preemptively assume the task has been lost if we
-// don't here from it after some timeout (see below). TODO(benh):
-// Eventually, what we would like to do is actually query this state
-// in the master, or possibly even re-launch the task.
-
-#define STATUS_UPDATE_TIMEOUT 120
-
-class StatusUpdateTimer : public MesosProcess
-{
-public:
-  StatusUpdateTimer(const PID &_sched, const TaskID &_tid)
-    : sched(_sched), tid(_tid), terminate(false) {}
-  
-protected:
-  virtual void operator () ()
-  {
-    link(sched);
-    while (!terminate) {
-      switch (receive(STATUS_UPDATE_TIMEOUT)) {
-        case PROCESS_TIMEOUT: {
-          terminate = true;
-          VLOG(1) << "No status updates received for task id:" << tid
-                  << " after " << STATUS_UPDATE_TIMEOUT
-                  << ", assuming task was lost";
-          send(sched, pack<M2F_STATUS_UPDATE>(tid, TASK_LOST, ""));
-          break;
-        }
-        default: {
-          terminate = true;
-          break;
-        }
-      }
-    }
-  }
-
-private:
-  const PID sched;
-  const TaskID tid;
-  bool terminate;
-};
-
 
 // The scheduler process (below) is responsible for interacting with
 // the master and responding to Mesos API calls from scheduler
@@ -102,251 +64,316 @@ private:
 // we allow friend functions to invoke 'send', 'post', etc. Therefore,
 // we must make sure that any necessary synchronization is performed.
 
-class SchedulerProcess : public MesosProcess
+class SchedulerProcess : public MesosProcess<SchedulerProcess>
 {
 public:
-  SchedulerProcess(MesosSchedulerDriver* _driver,
-                   Scheduler* _sched,
-		   FrameworkID _fid,
-                   const string& _frameworkName,
-                   const ExecutorInfo& _execInfo)
-    : driver(_driver),
-      sched(_sched),
-      fid(_fid),
-      frameworkName(_frameworkName),
-      execInfo(_execInfo),
-      generation(0),
-      master(PID()),
-      terminate(false) {}
-
-  ~SchedulerProcess()
+  SchedulerProcess(MesosSchedulerDriver* _driver, Scheduler* _sched,
+		   const FrameworkID& _frameworkId,
+                   const FrameworkInfo& _framework)
+    : driver(_driver), sched(_sched), frameworkId(_frameworkId),
+      framework(_framework), generation(0), master(UPID()), terminate(false)
   {
-    // Cleanup any remaining timers.
-    foreachpair (TaskID tid, StatusUpdateTimer* timer, timers) {
-      send(timer->self(), MESOS_MSGID);
-      wait(timer->self());
-      delete timer;
+    install(NEW_MASTER_DETECTED, &SchedulerProcess::newMasterDetected,
+            &NewMasterDetectedMessage::pid);
+
+    install(NO_MASTER_DETECTED, &SchedulerProcess::noMasterDetected);
+
+    install(M2F_REGISTER_REPLY, &SchedulerProcess::registerReply,
+            &FrameworkRegisteredMessage::framework_id);
+
+    install(M2F_RESOURCE_OFFER, &SchedulerProcess::resourceOffer,
+            &ResourceOfferMessage::offer_id,
+            &ResourceOfferMessage::offers,
+            &ResourceOfferMessage::pids);
+
+    install(M2F_RESCIND_OFFER, &SchedulerProcess::rescindOffer,
+            &RescindResourceOfferMessage::offer_id);
+
+    install(M2F_STATUS_UPDATE, &SchedulerProcess::statusUpdate,
+            &StatusUpdateMessage::framework_id,
+            &StatusUpdateMessage::status);
+
+    install(M2F_LOST_SLAVE, &SchedulerProcess::lostSlave,
+            &LostSlaveMessage::slave_id);
+
+    install(M2F_FRAMEWORK_MESSAGE, &SchedulerProcess::frameworkMessage,
+	    &FrameworkMessageMessage::slave_id,
+	    &FrameworkMessageMessage::framework_id,
+	    &FrameworkMessageMessage::executor_id,
+	    &FrameworkMessageMessage::data);
+
+    install(M2F_ERROR, &SchedulerProcess::error,
+            &FrameworkErrorMessage::code,
+            &FrameworkErrorMessage::message);
+
+    install(process::EXITED, &SchedulerProcess::exited);
+  }
+
+  virtual ~SchedulerProcess() {}
+
+protected:
+  virtual void operator () ()
+  {
+    while (true) {
+      // Sending a message to terminate this process is insufficient
+      // because that message might get queued behind a bunch of other
+      // message. So, when it is time to terminate, we set a flag that
+      // gets re-read by this process after every message. In order to
+      // get this correct we must return from each invocation of
+      // 'serve', to check and see if terminate has been set. In
+      // addition, we need to send a dummy message right after we set
+      // terminate just in case there aren't any messages in the
+      // queue. Note that the terminate field is only read by this
+      // process, so we don't need to protect it in any way. In fact,
+      // using a lock to protect it (or for providing atomicity for
+      // cleanup, for example), might lead to deadlock with the client
+      // code because we already use a lock in SchedulerDriver. That
+      // being said, for now we make terminate 'volatile' to guarantee
+      // that each read is getting a fresh copy.
+      // TODO(benh): Do a coherent read so as to avoid using
+      // 'volatile'.
+      if (terminate) return;
+
+      serve(0, true);
     }
   }
 
-protected:
-  void operator () ()
+  void newMasterDetected(const string& pid)
   {
-    // Get username of current user.
-    struct passwd* passwd;
-    if ((passwd = getpwuid(getuid())) == NULL)
-      fatal("MesosSchedulerDriver failed to get username information");
+    VLOG(1) << "New master at " << pid;
 
-    const string user(passwd->pw_name);
+    master = pid;
+    link(master);
 
-    while (true) {
-      // Rather than send a message to this process when it is time to
-      // terminate, we set a flag that gets re-read. Sending a message
-      // requires some sort of matching or priority reads that
-      // libprocess currently doesn't support. Note that this field is
-      // only read by this process, so we don't need to protect it in
-      // any way. In fact, using a lock to protect it (or for
-      // providing atomicity for cleanup, for example), might lead to
-      // deadlock with the client code because we already use a lock
-      // in SchedulerDriver. That being said, for now we make
-      // terminate 'volatile' to guarantee that each read is getting a
-      // fresh copy.
-      // TODO(benh): Do a coherent read so as to avoid using 'volatile'.
-      if (terminate)
-        return;
+    if (frameworkId == "") {
+      // Touched for the very first time.
+      MSG<F2M_REGISTER_FRAMEWORK> out;
+      out.mutable_framework()->MergeFrom(framework);
+      send(master, out);
+    } else {
+      // Not the first time, or failing over.
+      MSG<F2M_REREGISTER_FRAMEWORK> out;
+      out.mutable_framework()->MergeFrom(framework);
+      out.mutable_framework_id()->MergeFrom(frameworkId);
+      out.set_generation(generation++);
+      send(master, out);
+    }
 
-      // TODO(benh): We need to break the receive every so often to
-      // check if 'terminate' has been set. It would be better to just
-      // send a message rather than have a timeout (see the comment
-      // above for why sending a message will still require us to use
-      // the terminate flag).
-      switch (serve(2)) {
+    active = true;
+  }
 
-      case NEW_MASTER_DETECTED: {
-	string masterSeq;
-	PID masterPid;
-	tie(masterSeq, masterPid) = unpack<NEW_MASTER_DETECTED>(body());
+  void noMasterDetected()
+  {
+    VLOG(1) << "No master detected, waiting for another master";
+    // In this case, we don't actually invoke Scheduler::error
+    // since we might get reconnected to a master imminently.
+    active = false;
+  }
 
-	VLOG(1) << "New master at " << masterPid << " with ID:" << masterSeq;
+  void registerReply(const FrameworkID& frameworkId)
+  {
+    VLOG(1) << "Framework registered with " << frameworkId;
+    this->frameworkId = frameworkId;
+    process::invoke(bind(&Scheduler::registered, sched, driver,
+                         cref(frameworkId)));
+  }
 
-        redirect(master, masterPid);
-	master = masterPid;
-	link(master);
+  void resourceOffer(const OfferID& offerId,
+                     const vector<SlaveOffer>& offers,
+                     const vector<string>& pids)
+  {
+    VLOG(1) << "Received offer " << offerId;
 
-	if (fid == "") {
-	  // Touched for the very first time.
-	  send(master, pack<F2M_REGISTER_FRAMEWORK>(frameworkName, user, execInfo));
-	} else {
-	  // Not the first time, or failing over.
-	  send(master, pack<F2M_REREGISTER_FRAMEWORK>(fid, frameworkName, user,
-						      execInfo, generation++));
-	}
-	break;
+    // Save the pid associated with each slave (one per SlaveOffer) so
+    // later we can send framework messages directly.
+    CHECK(offers.size() == pids.size());
+
+    for (int i = 0; i < offers.size(); i++) {
+      UPID pid(pids[i]);
+      if (pid != UPID()) {
+	VLOG(2) << "Saving PID '" << pids[i] << "'";
+	savedOffers[offerId][offers[i].slave_id()] = pid;
+      } else {
+	// Parsing of a PID may fail due to DNS! 
+	VLOG(2) << "Failed to parse PID '" << pids[i] << "'";
       }
+    }
 
-      case NO_MASTER_DETECTED: {
-	// TODO(benh): We need to convey to the driver that we are
-	// currently not connected (not running?) so that calls such
-	// as sendFrameworkMessage will return with an error (rather
-	// than just getting dropped all together).
-	break;
-      }
+    process::invoke(bind(&Scheduler::resourceOffer, sched, driver,
+                         cref(offerId), cref(offers)));
+  }
 
-      case M2F_REGISTER_REPLY: {
-        tie(fid) = unpack<M2F_REGISTER_REPLY>(body());
-        invoke(bind(&Scheduler::registered, sched, driver, fid));
-        break;
-      }
+  void rescindOffer(const OfferID& offerId)
+  {
+    VLOG(1) << "Rescinded offer " << offerId;
+    savedOffers.erase(offerId);
+    process::invoke(bind(&Scheduler::offerRescinded, sched, driver, 
+                         cref(offerId)));
+  }
 
-      case M2F_SLOT_OFFER: {
-        OfferID oid;
-        vector<SlaveOffer> offs;
-        map<SlaveID, PID> pids;
-        tie(oid, offs, pids) = unpack<M2F_SLOT_OFFER>(body());
-        
-	// Save all the slave PIDs that are part of this ofer so later
-	// we can send framework messages directly.
-        foreachpair (const SlaveID &slaveId, const PID &pid, pids) {
-          if (pid == PID())
-            VLOG(1) << "Received " << pid << " for slave " << slaveId;
+  void statusUpdate(const FrameworkID& frameworkId, const TaskStatus& status)
+  {
+    VLOG(1) << "Status update: task " << status.task_id()
+            << " of framework " << frameworkId
+            << " is now in state "
+            << TaskState_descriptor()->FindValueByNumber(status.state())->name();
 
-          savedOffers[oid][slaveId] = pid;
-        }
+    CHECK(this->frameworkId == frameworkId);
 
-        invoke(bind(&Scheduler::resourceOffer, sched, driver, oid, ref(offs)));
-        break;
-      }
+    // TODO(benh): Note that this maybe a duplicate status update!
+    // Once we get support to try and have a more consistent view
+    // of what's running in the cluster, we'll just let this one
+    // slide. The alternative is possibly dealing with a scheduler
+    // failover and not correctly giving the scheduler it's status
+    // update, which seems worse than giving a status update
+    // multiple times (of course, if a scheduler re-uses a TaskID,
+    // that could be bad.
 
-      case M2F_RESCIND_OFFER: {
-        OfferID oid;
-        tie(oid) = unpack<M2F_RESCIND_OFFER>(body());
-        savedOffers.erase(oid);
-        invoke(bind(&Scheduler::offerRescinded, sched, driver, oid));
-        break;
-      }
+    process::invoke(bind(&Scheduler::statusUpdate, sched, driver,
+                         cref(status)));
 
-      case M2F_STATUS_UPDATE: {
-        TaskID tid;
-        TaskState state;
-        string data;
-        tie(tid, state, data) = unpack<M2F_STATUS_UPDATE>(body());
+    // Acknowledge the message (we do this last, after we process::invoked
+    // the scheduler, if we did at all, in case it causes a crash,
+    // since this way the message might get resent/routed after
+    // the scheduler comes back online).
+    MSG<F2M_STATUS_UPDATE_ACK> out;
+    out.mutable_framework_id()->MergeFrom(frameworkId);
+    out.mutable_slave_id()->MergeFrom(status.slave_id());
+    out.mutable_task_id()->MergeFrom(status.task_id());
+    send(master, out);
+  }
 
-        if (duplicate()) {
-          VLOG(1) << "Received a duplicate status update for tid " << tid
-		     << ", status = " << state;
-          break;
-        }
+  void lostSlave(const SlaveID& slaveId)
+  {
+    VLOG(1) << "Lost slave " << slaveId;
+    savedSlavePids.erase(slaveId);
+    process::invoke(bind(&Scheduler::slaveLost, sched, driver, cref(slaveId)));
+  }
 
-        ack();
+  void frameworkMessage(const SlaveID& slaveId,
+			const FrameworkID& frameworkId,
+			const ExecutorID& executorId,
+			const string& data)
+  {
+    VLOG(1) << "Received framework message";
+    process::invoke(bind(&Scheduler::frameworkMessage, sched, driver,
+                         cref(slaveId), cref(executorId), cref(data)));
+  }
 
-        // Stop any status update timers we might have had running.
-        if (timers.count(tid) > 0) {
-          StatusUpdateTimer* timer = timers[tid];
-          timers.erase(tid);
-          send(timer->self(), MESOS_MSGID);
-          wait(timer->self());
-          delete timer;
-        }
+  void error(int32_t code, const string& message)
+  {
+    VLOG(1) << "Got error '" << message << "' (code: " << code << ")";
+    process::invoke(bind(&Scheduler::error, sched, driver, code,
+                         cref(message)));
+  }
 
-        TaskStatus status(tid, state, data);
-        invoke(bind(&Scheduler::statusUpdate, sched, driver, ref(status)));
-        break;
-      }
-
-      case M2F_FRAMEWORK_MESSAGE: {
-        FrameworkMessage msg;
-        tie(msg) = unpack<M2F_FRAMEWORK_MESSAGE>(body());
-        invoke(bind(&Scheduler::frameworkMessage, sched, driver, ref(msg)));
-        break;
-      }
-
-      case M2F_LOST_SLAVE: {
-        SlaveID sid;
-        tie(sid) = unpack<M2F_LOST_SLAVE>(body());
-	savedSlavePids.erase(sid);
-        invoke(bind(&Scheduler::slaveLost, sched, driver, sid));
-        break;
-      }
-
-      case M2F_ERROR: {
-        int32_t code;
-        string message;
-        tie(code, message) = unpack<M2F_ERROR>(body());
-        invoke(bind(&Scheduler::error, sched, driver, code, ref(message)));
-        break;
-      }
-
-      case PROCESS_EXIT: {
-	// TODO(benh): Don't wait for a new master forever.
-	VLOG(1) << "Connection to master lost .. waiting for new master.";
-        break;
-      }
-
-      case PROCESS_TIMEOUT: {
-        break;
-      }
-
-      default: {
-        ostringstream oss;
-        oss << "SchedulerProcess received unknown message " << msgid()
-            << " from " << from() << endl;
-        invoke(bind(&Scheduler::error, sched, driver, -1, oss.str()));
-        break;
-      }
-      }
+  void exited()
+  {
+    // TODO(benh): Don't wait for a new master forever.
+    if (from() == master) {
+      VLOG(1) << "Connection to master lost .. waiting for new master";
     }
   }
 
   void stop()
   {
-    send(master, pack<F2M_UNREGISTER_FRAMEWORK>(fid));
+    if (!active)
+      return;
+
+    MSG<F2M_UNREGISTER_FRAMEWORK> out;
+    out.mutable_framework_id()->MergeFrom(frameworkId);
+    send(master, out);
   }
 
-  void killTask(TaskID tid)
+  void killTask(const TaskID& taskId)
   {
-    send(master, pack<F2M_KILL_TASK>(fid, tid));
+    if (!active)
+      return;
+
+    MSG<F2M_KILL_TASK> out;
+    out.mutable_framework_id()->MergeFrom(frameworkId);
+    out.mutable_task_id()->MergeFrom(taskId);
+    send(master, out);
   }
 
-  void replyToOffer(OfferID offerId,
+  void replyToOffer(const OfferID& offerId,
                     const vector<TaskDescription>& tasks,
-                    const map<std::string, std::string>& params)
+                    const map<string, string>& params)
   {
-    // Keep only the slave PIDs where we run tasks so we can send
-    // framework messages directly.
-    foreach(const TaskDescription &task, tasks) {
-      savedSlavePids[task.slaveId] = savedOffers[offerId][task.slaveId];
+    if (!active)
+      return;
+
+    MSG<F2M_RESOURCE_OFFER_REPLY> out;
+    out.mutable_framework_id()->MergeFrom(frameworkId);
+    out.mutable_offer_id()->MergeFrom(offerId);
+
+    foreachpair (const string& key, const string& value, params) {
+      Param* param = out.mutable_params()->add_param();
+      param->set_key(key);
+      param->set_value(value);
+    }
+
+    foreach (const TaskDescription& task, tasks) {
+      // Keep only the slave PIDs where we run tasks so we can send
+      // framework messages directly.
+      savedSlavePids[task.slave_id()] = savedOffers[offerId][task.slave_id()];
+
+      out.add_tasks()->MergeFrom(task);
     }
 
     // Remove the offer since we saved all the PIDs we might use.
     savedOffers.erase(offerId);
 
-    // Create timers to ensure we get status updates for these tasks.
-    foreach (const TaskDescription& task, tasks) {
-      StatusUpdateTimer *timer = new StatusUpdateTimer(self(), task.taskId);
-      timers[task.taskId] = timer;
-      spawn(timer);
-    }
-
-    send(master,
-         pack<F2M_SLOT_OFFER_REPLY>(fid, offerId, tasks, Params(params)));
+    send(master, out);
   }
 
   void reviveOffers()
   {
-    send(master, pack<F2M_REVIVE_OFFERS>(fid));
+    if (!active)
+      return;
+
+    MSG<F2M_REVIVE_OFFERS> out;
+    out.mutable_framework_id()->MergeFrom(frameworkId);
+    send(master, out);
   }
 
-  void sendFrameworkMessage(const FrameworkMessage& message)
+  void sendFrameworkMessage(const SlaveID& slaveId,
+			    const ExecutorID& executorId,
+			    const string& data)
   {
-    VLOG(1) << "Asked to send framework message to slave " << message.slaveId;
-    if (savedSlavePids.count(message.slaveId) > 0 &&
-        savedSlavePids[message.slaveId] != PID()) {
-      VLOG(1) << "Saved slave PID is " << savedSlavePids[message.slaveId];
-      send(savedSlavePids[message.slaveId],
-           pack<M2S_FRAMEWORK_MESSAGE>(fid, message));
+    if (!active)
+      return;
+
+    VLOG(1) << "Asked to send framework message to slave "
+	    << slaveId;
+
+    // TODO(benh): After a scheduler has re-registered it won't have
+    // any saved slave PIDs, maybe it makes sense to try and save each
+    // PID that this scheduler tries to send a message to? Or we can
+    // just wait for them to recollect as new offers come in and get
+    // accepted.
+
+    if (savedSlavePids.count(slaveId) > 0) {
+      UPID slave = savedSlavePids[slaveId];
+      CHECK(slave != UPID());
+
+      // TODO(benh): This is kind of wierd, M2S?
+      MSG<M2S_FRAMEWORK_MESSAGE> out;
+      out.mutable_slave_id()->MergeFrom(slaveId);
+      out.mutable_framework_id()->MergeFrom(frameworkId);
+      out.mutable_executor_id()->MergeFrom(executorId);
+      out.set_data(data);
+      send(slave, out);
     } else {
-      VLOG(1) << "No PID is saved for that slave; sending through master";
-      send(master, pack<F2M_FRAMEWORK_MESSAGE>(fid, message));
+      VLOG(1) << "Cannot send directly to slave " << slaveId
+	      << "; sending through master";
+
+      MSG<F2M_FRAMEWORK_MESSAGE> out;
+      out.mutable_slave_id()->MergeFrom(slaveId);
+      out.mutable_framework_id()->MergeFrom(frameworkId);
+      out.mutable_executor_id()->MergeFrom(executorId);
+      out.set_data(data);
+      send(master, out);
     }
   }
 
@@ -355,129 +382,113 @@ private:
 
   MesosSchedulerDriver* driver;
   Scheduler* sched;
-  FrameworkID fid;
-  string frameworkName;
-  ExecutorInfo execInfo;
+  FrameworkID frameworkId;
+  FrameworkInfo framework;
   int32_t generation;
-  PID master;
+  UPID master;
 
+  volatile bool active;
   volatile bool terminate;
 
-  unordered_map<OfferID, unordered_map<SlaveID, PID> > savedOffers;
-  unordered_map<SlaveID, PID> savedSlavePids;
-
-  // Timers to ensure we get a status update for each task we launch.
-  unordered_map<TaskID, StatusUpdateTimer *> timers;
+  unordered_map<OfferID, unordered_map<SlaveID, UPID> > savedOffers;
+  unordered_map<SlaveID, UPID> savedSlavePids;
 };
 
-}} /* namespace mesos { namespace internal { */
+}} // namespace mesos { namespace internal {
 
 
-/*
- * Implementation of C++ API.
- *
- * Notes:
- *
- * (1) Callbacks should be serialized as well as calls into the
- *     class. We do the former because the message reads from
- *     SchedulerProcess are serialized. We do the latter currently by
- *     using locks for certain methods ... but this may change in the
- *     future.
- */
-
-
-/**
- * Default implementations of getFrameworkName that returns a dummy
- * name. We need this because SWIG wouldn't be happy if getFrameworkName
- * was a pure virtual method.
- */
-string Scheduler::getFrameworkName(SchedulerDriver*)
-{
-  return "Unnamed Framework";
-}
-
-
-/**
- * Default implementations of getExecutorInfo that returns a dummy
- * name. We need this because SWIG wouldn't be happy if getExecutorInfo
- * was a pure virtual method.
- */
-ExecutorInfo Scheduler::getExecutorInfo(SchedulerDriver*)
-{
-  return ExecutorInfo("", "");
-}
-
-
-// Default implementation of Scheduler::error that logs to stderr
-void Scheduler::error(SchedulerDriver* driver, int code, const string &message)
-{
-  cerr << "Mesos error: " << message
-       << " (error code: " << code << ")" << endl;
-  driver->stop();
-}
+// Implementation of C++ API.
+//
+// Notes:
+//
+// (1) Callbacks should be serialized as well as calls into the
+//     class. We do the former because the message reads from
+//     SchedulerProcess are serialized. We do the latter currently by
+//     using locks for certain methods ... but this may change in the
+//     future.
+//
+// (2) There are two possible status variables, one called 'active' in
+//     SchedulerProcess and one called 'running' in
+//     MesosSchedulerDriver. The former is used to represent whether
+//     or not we are connected to an active master while the latter is
+//     used to represent whether or not a client has called
+//     MesosSchedulerDriver::start/run or MesosSchedulerDriver::stop.
 
 
 MesosSchedulerDriver::MesosSchedulerDriver(Scheduler* sched,
-					   const string &url,
-					   FrameworkID fid)
+					   const string& url,
+					   const FrameworkID& frameworkId)
 {
   Configurator configurator;
+  // TODO(benh): Only register local options if this is running with
+  // 'local' or 'localquiet'! Perhaps create a registerOptions for the
+  // scheduler?
   local::registerOptions(&configurator);
-  Params* conf;
+  Configuration* conf;
   try {
-    conf = new Params(configurator.load());
+    conf = new Configuration(configurator.load());
   } catch (ConfigurationException& e) {
+    // TODO(benh|matei): Are error callbacks not fatal!?
     string message = string("Configuration error: ") + e.what();
     sched->error(this, 2, message);
-    conf = new Params();
+    conf = new Configuration();
   }
   conf->set("url", url); // Override URL param with the one from the user
-  init(sched, conf, fid);
+  init(sched, conf, frameworkId);
 }
 
 
 MesosSchedulerDriver::MesosSchedulerDriver(Scheduler* sched,
-					   const map<std::string, std::string> &params,
-					   FrameworkID fid)
+					   const map<string, string> &params,
+					   const FrameworkID& frameworkId)
 {
   Configurator configurator;
+  // TODO(benh): Only register local options if this is running with
+  // 'local' or 'localquiet'! Perhaps create a registerOptions for the
+  // scheduler?
   local::registerOptions(&configurator);
+  Configuration* conf;
   try {
-    conf = new Params(configurator.load(params));
+    conf = new Configuration(configurator.load(params));
   } catch (ConfigurationException& e) {
+    // TODO(benh|matei): Are error callbacks not fatal?
     string message = string("Configuration error: ") + e.what();
     sched->error(this, 2, message);
-    conf = new Params();
+    conf = new Configuration();
   }
-  init(sched, conf, fid);
+  init(sched, conf, frameworkId);
 }
 
 
 MesosSchedulerDriver::MesosSchedulerDriver(Scheduler* sched,
 					   int argc,
                                            char** argv,
-					   FrameworkID fid)
+					   const FrameworkID& frameworkId)
 {
   Configurator configurator;
+  // TODO(benh): Only register local options if this is running with
+  // 'local' or 'localquiet'! Perhaps create a registerOptions for the
+  // scheduler?
   local::registerOptions(&configurator);
+  Configuration* conf;
   try {
-    conf = new Params(configurator.load(argc, argv, false));
+    conf = new Configuration(configurator.load(argc, argv, false));
   } catch (ConfigurationException& e) {
     string message = string("Configuration error: ") + e.what();
     sched->error(this, 2, message);
-    conf = new Params();
+    conf = new Configuration();
   }
-  init(sched, conf, fid);
+  init(sched, conf, frameworkId);
 }
 
 
 void MesosSchedulerDriver::init(Scheduler* _sched,
-                                Params* _conf,
-                                FrameworkID _fid)
+                                Configuration* _conf,
+                                const FrameworkID& _frameworkId)
 {
   sched = _sched;
   conf = _conf;
-  fid = _fid;
+  frameworkId = _frameworkId;
   url = conf->get<string>("url", "local");
   process = NULL;
   detector = NULL;
@@ -492,6 +503,9 @@ void MesosSchedulerDriver::init(Scheduler* _sched,
   pthread_cond_init(&cond, 0);
 
   // TODO(benh): Initialize glog.
+
+  // Initialize libprocess library (but not glog, done above).
+  process::initialize(false);
 }
 
 
@@ -505,13 +519,14 @@ MesosSchedulerDriver::~MesosSchedulerDriver()
   // ultimately invokes this destructor). This deadlock is actually a
   // bug in the client code: provided that the SchedulerProcess class
   // _only_ makes calls into instances of Scheduler, then such a
-  // deadlock implies that the destructor got called from within a method
-  // of the Scheduler instance that is being destructed! Note
+  // deadlock implies that the destructor got called from within a
+  // method of the Scheduler instance that is being destructed! Note
   // that we could add a method to libprocess that told us whether or
   // not this was about to be deadlock, and possibly report this back
-  // to the user somehow.
+  // to the user somehow. Note that we will also wait forever if
+  // MesosSchedulerDriver::stop was never called.
   if (process != NULL) {
-    Process::wait(process->self());
+    process::wait(process->self());
     delete process;
   }
 
@@ -526,8 +541,9 @@ MesosSchedulerDriver::~MesosSchedulerDriver()
   delete conf;
 
   // Check and see if we need to shutdown a local cluster.
-  if (url == "local" || url == "localquiet")
+  if (url == "local" || url == "localquiet") {
     local::shutdown();
+  }
 }
 
 
@@ -536,29 +552,51 @@ int MesosSchedulerDriver::start()
   Lock lock(&mutex);
 
   if (running) {
-    //error(1, "cannot call start - scheduler is already running");
-    return - 1;
+    return -1;
   }
 
-  const string& frameworkName = sched->getFrameworkName(this);
-  const ExecutorInfo& executorInfo = sched->getExecutorInfo(this);
+  // We might have been running before, but have since stopped. Don't
+  // allow this driver to be used again (for now)!
+  if (process != NULL) {
+    return -1;
+  }
 
-  process = new SchedulerProcess(this, sched, fid, frameworkName, executorInfo);
-  PID pid = Process::spawn(process);
+  // Set running here so we can recognize an exception from calls into
+  // Java (via getFrameworkName or getExecutorInfo).
+  running = true;
+
+  // Get username of current user.
+  passwd* passwd;
+  if ((passwd = getpwuid(getuid())) == NULL) {
+    fatal("failed to get username information");
+  }
+
+  // Set up framework info.
+  FrameworkInfo framework;
+  framework.set_user(passwd->pw_name);
+  framework.set_name(sched->getFrameworkName(this));
+  framework.mutable_executor()->MergeFrom(sched->getExecutorInfo(this));
+
+  // Something invoked stop while we were in the scheduler, bail.
+  if (!running) {
+    return -1;
+  }
+
+  process = new SchedulerProcess(this, sched, frameworkId, framework);
+
+  UPID pid = process::spawn(process);
 
   // Check and see if we need to launch a local cluster.
   if (url == "local") {
-    PID master = local::launch(*conf, true);
+    const PID<master::Master>& master = local::launch(*conf, true);
     detector = new BasicMasterDetector(master, pid);
   } else if (url == "localquiet") {
     conf->set("quiet", 1);
-    PID master = local::launch(*conf, true);
+    const PID<master::Master>& master = local::launch(*conf, true);
     detector = new BasicMasterDetector(master, pid);
   } else {
-    detector = MasterDetector::create(url, pid, false, true);
+    detector = MasterDetector::create(url, pid, false, false);
   }
-
-  running = true;
 
   return 0;
 }
@@ -573,11 +611,22 @@ int MesosSchedulerDriver::stop()
     return -1;
   }
 
-  Process::dispatch(process, &SchedulerProcess::stop);
-
-  process->terminate = true;
+  // Stop the process if it is running (it might not be because we set
+  // running to be true, then called getFrameworkName or
+  // getExecutorInfo which threw exceptions, or explicitely called
+  // stop. See above in start).
+  if (process != NULL) {
+    process::dispatch(process->self(), &SchedulerProcess::stop);
+    process->terminate = true;
+    process::post(process->self(), process::TERMINATE);
+  }
 
   running = false;
+
+  // TODO: It might make more sense to clean up our local cluster here than in
+  // the destructor. However, what would be even better is to allow multiple
+  // local clusters to exist (i.e. not use global vars in local.cpp) so that
+  // ours can just be an instance variable in MesosSchedulerDriver.
 
   pthread_cond_signal(&cond);
 
@@ -588,8 +637,10 @@ int MesosSchedulerDriver::stop()
 int MesosSchedulerDriver::join()
 {
   Lock lock(&mutex);
-  while (running)
+
+  while (running) {
     pthread_cond_wait(&cond, &mutex);
+  }
 
   return 0;
 }
@@ -602,33 +653,32 @@ int MesosSchedulerDriver::run()
 }
 
 
-int MesosSchedulerDriver::killTask(TaskID tid)
+int MesosSchedulerDriver::killTask(const TaskID& taskId)
 {
   Lock lock(&mutex);
 
-  if (!running) {
-    //error(1, "cannot call killTask - scheduler is not running");
+  if (!running || (process != NULL && !process->active)) {
     return -1;
   }
 
-  Process::dispatch(process, &SchedulerProcess::killTask, tid);
+  process::dispatch(process->self(), &SchedulerProcess::killTask,
+                    taskId);
 
   return 0;
 }
 
 
-int MesosSchedulerDriver::replyToOffer(OfferID offerId,
-				       const vector<TaskDescription> &tasks,
-				       const map<std::string, std::string> &params)
+int MesosSchedulerDriver::replyToOffer(const OfferID& offerId,
+                                       const vector<TaskDescription>& tasks,
+                                       const map<string, string>& params)
 {
   Lock lock(&mutex);
 
-  if (!running) {
-    //error(1, "cannot call replyToOffer - scheduler is not running");
+  if (!running || (process != NULL && !process->active)) {
     return -1;
   }
 
-  Process::dispatch(process, &SchedulerProcess::replyToOffer,
+  process::dispatch(process->self(), &SchedulerProcess::replyToOffer,
                     offerId, tasks, params);
 
   return 0;
@@ -639,44 +689,30 @@ int MesosSchedulerDriver::reviveOffers()
 {
   Lock lock(&mutex);
 
-  if (!running) {
-    //error(1, "cannot call reviveOffers - scheduler is not running");
+  if (!running || (process != NULL && !process->active)) {
     return -1;
   }
 
-  Process::dispatch(process, &SchedulerProcess::reviveOffers);
+  process::dispatch(process->self(), &SchedulerProcess::reviveOffers);
 
   return 0;
 }
 
 
-int MesosSchedulerDriver::sendFrameworkMessage(const FrameworkMessage& message)
+int MesosSchedulerDriver::sendFrameworkMessage(const SlaveID& slaveId,
+					       const ExecutorID& executorId,
+					       const string& data)
 {
   Lock lock(&mutex);
 
-  if (!running) {
-    //error(1, "cannot call sendFrameworkMessage - scheduler is not running");
+  if (!running || (process != NULL && !process->active)) {
     return -1;
   }
 
-  Process::dispatch(process, &SchedulerProcess::sendFrameworkMessage, message);
+  process::dispatch(process->self(), &SchedulerProcess::sendFrameworkMessage,
+                    slaveId, executorId, data);
 
   return 0;
-}
-
-
-int MesosSchedulerDriver::sendHints(const map<std::string, std::string>& hints)
-{
-  Lock lock(&mutex);
-
-  if (!running) {
-    //error(1, "cannot call sendHints - scheduler is not running");
-    return -1;
-  }
-
-  // TODO(*): Send the hints; for now, we do nothing
-  //error(1, "sendHints is not yet implemented");
-  return -1;
 }
 
 
@@ -684,446 +720,3 @@ void MesosSchedulerDriver::error(int code, const string& message)
 {
   sched->error(this, code, message);
 }
-
-
-/*
- * Implementation of C API. We comprimise the performance of the C API
- * in favor of the performance of the C++ API by having the C API call
- * into the C++ API. Having the C++ API call into the C API is slower
- * because the rest of Mesos is written in C++, which means
- * translations are required when going from C++ to C and then back to
- * C++ when having the C++ API call into the C API.
- */
-
-
-namespace mesos { namespace internal {
-
-/*
- * We wrap calls from the C API into the C++ API with the following
- * specialized implementation of SchedulerDriver.
- */
-class CScheduler : public Scheduler
-{
-public:
-  string frameworkName;
-  ExecutorInfo execInfo;
-  mesos_sched* sched;
-  SchedulerDriver* driver; // Set externally after object is created
-
-  CScheduler(string fwName,
-                      string execUri,
-                      string execArg,
-                      mesos_sched* _sched)
-    : frameworkName(fwName),
-      execInfo(execUri, execArg),
-      sched(_sched),
-      driver(NULL) {}
-
-  virtual ~CScheduler() {}
-
-  virtual string getFrameworkName(SchedulerDriver*)
-  {
-    return frameworkName;
-  }
-
-  virtual ExecutorInfo getExecutorInfo(SchedulerDriver*)
-  {
-    return execInfo;
-  }
-
-  virtual void registered(SchedulerDriver*, FrameworkID frameworkId)
-  {
-    sched->registered(sched, frameworkId.c_str());
-  }
-
-  virtual void resourceOffer(SchedulerDriver*,
-                             OfferID offerId,
-                             const vector<SlaveOffer> &offers)
-  {
-    // Convert parameters to key=value strings to give C pointers into them
-    vector<string> paramStrs(offers.size());
-    for (size_t i = 0; i < offers.size(); i++) {
-      ostringstream oss;
-      foreachpair (const string& k, const string& v, offers[i].params)
-        oss << k << "=" << v << "\n";
-      paramStrs[i] = oss.str();
-    }
-
-    // Create C offer structs
-    mesos_slot* c_offers = new mesos_slot[offers.size()];
-    for (size_t i = 0; i < offers.size(); i++) {
-      mesos_slot offer = { offers[i].slaveId.c_str(),
-                           offers[i].host.c_str(),
-                           paramStrs[i].c_str() };
-      c_offers[i] = offer;
-    }
-
-    sched->slot_offer(sched, offerId.c_str(), c_offers, offers.size());
-    delete[] c_offers;
-  }
-
-  virtual void offerRescinded(SchedulerDriver*, OfferID offerId)
-  {
-    sched->slot_offer_rescinded(sched, offerId.c_str());
-  }
-
-  virtual void statusUpdate(SchedulerDriver*, TaskStatus &status)
-  {
-    mesos_task_status c_status = { status.taskId,
-                                   status.state,
-                                   status.data.data(),
-                                   status.data.size() };
-    sched->status_update(sched, &c_status);
-  }
-
-  virtual void frameworkMessage(SchedulerDriver*, FrameworkMessage &message)
-  {
-    mesos_framework_message c_message = { message.slaveId.c_str(),
-                                          message.taskId,
-                                          message.data.data(),
-                                          message.data.size() };
-    sched->framework_message(sched, &c_message);
-  }
-
-  virtual void slaveLost(SchedulerDriver*, SlaveID sid)
-  {
-    sched->slave_lost(sched, sid.c_str());
-  }
-
-  virtual void error(SchedulerDriver*, int code, const std::string &message)
-  {
-    sched->error(sched, code, message.c_str());
-  }
-};
-
-
-/*
- * We record the mapping from mesos_sched to CScheduler. It would
- * be preferable to somehow link the two without requiring any extra data
- * structures, but without adding some random field to mesos_sched (or
- * doing some object prefix approach), this is the best we got.
- *
- * TODO(benh): Make access to these thread safe once we have some
- * locking mechanism that abstracts away if we are using pthreads or
- * libprocess.
- */
-unordered_map<mesos_sched* , CScheduler*> c_schedulers;
-
-
-CScheduler* lookupCScheduler(mesos_sched* sched)
-{
-  assert(sched != NULL);
-
-  // TODO(benh): Protect 'c_schedulers' (see above).
-  unordered_map<mesos_sched*, CScheduler*>::iterator it =
-    c_schedulers.find(sched);
-
-  CScheduler* cs = it == c_schedulers.end() ? NULL : it->second;
-
-  if (cs == NULL) {
-    string fw_name = sched->framework_name;
-    string exec_name = sched->executor_name;
-    string init_arg((char*) sched->init_arg, sched->init_arg_len);
-    cs = new CScheduler(fw_name, exec_name, init_arg, sched);
-    c_schedulers[sched] = cs;
-  }
-
-  assert(cs != NULL);
-
-  return cs;
-}
-
-
-void removeCScheduler(mesos_sched* sched)
-{
-  // TODO(benh): Protect 'c_schedulers' (see above).
-  unordered_map<mesos_sched*, CScheduler*>::iterator it =
-    c_schedulers.find(sched);
-
-  CScheduler* cs = it == c_schedulers.end() ? NULL : it->second;
-
-  if (cs != NULL) {
-    c_schedulers.erase(sched);
-    if (cs->driver != NULL)
-      delete cs->driver;
-    delete cs;
-  }
-}
-
-
-}} /* namespace mesos { namespace internal { */
-
-
-extern "C" {
-
-// TODO(*): For safety, it would be better if we allocate the
-// mesos_sched objects (that way we won't ever call into them and
-// segfault in our code), but that's not the C way, probably because
-// it means mesos_sched objects can't get put on the stack.
-
-int mesos_sched_init(struct mesos_sched* sched)
-{
-  if (sched == NULL) {
-    errno = EINVAL;
-    return -1;
-  }
-
-  return 0;
-}
-
-
-int mesos_sched_destroy(struct mesos_sched* sched)
-{
-  if (sched == NULL) {
-    errno = EINVAL;
-    return -1;
-  }
-
-  removeCScheduler(sched);
-
-  return 0;
-}
-
-
-int mesos_sched_reg(struct mesos_sched* sched, const char* master)
-{
-  if (sched == NULL || master == NULL) {
-    errno = EINVAL;
-    return -1;
-  }
-
-  CScheduler* cs = lookupCScheduler(sched);
-
-  if (cs->driver != NULL) {
-    errno = EINVAL;
-    return -1;
-  }
-
-  try {
-    cs->driver = new MesosSchedulerDriver(cs, master);
-  } catch (ConfigurationException& e) {
-    string message = string("Configuration error: ") + e.what();
-    sched->error(sched, 2, message.c_str());
-    errno = EINVAL;
-    return -2;
-  }
-
-  cs->driver->start();
-
-  return 0;
-}
-
-
-int mesos_sched_reg_with_params(struct mesos_sched* sched, const char* params)
-{
-  if (sched == NULL || params == NULL) {
-    errno = EINVAL;
-    return -1;
-  }
-
-  CScheduler* cs = lookupCScheduler(sched);
-
-  if (cs->driver != NULL) {
-    errno = EINVAL;
-    return -1;
-  }
-
-  try {
-    Params paramsObj(params);
-    cs->driver = new MesosSchedulerDriver(cs, paramsObj.getMap());
-  } catch (ConfigurationException& e) {
-    string message = string("Configuration error: ") + e.what();
-    sched->error(sched, 2, message.c_str());
-    errno = EINVAL;
-    return -2;
-  }
-
-  cs->driver->start();
-
-  return 0;
-}
-
-
-int mesos_sched_reg_with_cmdline(struct mesos_sched* sched,
-                                 int argc,
-                                 char** argv)
-{
-  if (sched == NULL || argc < 0 || argv == NULL) {
-    errno = EINVAL;
-    return -1;
-  }
-
-  CScheduler* cs = lookupCScheduler(sched);
-
-  if (cs->driver != NULL) {
-    errno = EINVAL;
-    return -1;
-  }
-
-  try {
-    cs->driver = new MesosSchedulerDriver(cs, argc, argv);
-  } catch (ConfigurationException& e) {
-    string message = string("Configuration error: ") + e.what();
-    sched->error(sched, 2, message.c_str());
-    errno = EINVAL;
-    return -2;
-  }
-
-  cs->driver->start();
-
-  return 0;
-}
-
-
-int mesos_sched_unreg(struct mesos_sched* sched)
-{
-  if (sched == NULL) {
-    errno = EINVAL;
-    return -1;
-  }
-
-  CScheduler* cs = lookupCScheduler(sched);
-
-  if (cs->driver == NULL) {
-    errno = EINVAL;
-    return -1;
-  }
-
-  cs->driver->stop();
-
-  return 0;
-}
-
-
-int mesos_sched_send_message(struct mesos_sched* sched,
-                             struct mesos_framework_message* msg)
-{
-  if (sched == NULL || msg == NULL) {
-    errno = EINVAL;
-    return -1;
-  }
-
-  FrameworkMessage message(string(msg->sid), msg->tid,
-                           string((char*) msg->data, msg->data_len));
-
-  CScheduler* cs = lookupCScheduler(sched);
-
-  if (cs->driver == NULL) {
-    errno = EINVAL;
-    return -1;
-  }
-
-  cs->driver->sendFrameworkMessage(message);
-
-  return 0;
-}
-
-
-int mesos_sched_kill_task(struct mesos_sched* sched, task_id tid)
-{
-  if (sched == NULL) {
-    errno = EINVAL;
-    return -1;
-  }
-
-  CScheduler* cs = lookupCScheduler(sched);
-
-  if (cs->driver == NULL) {
-    errno = EINVAL;
-    return -1;
-  }
-
-  cs->driver->killTask(tid);
-
-  return 0;
-}
-
-
-int mesos_sched_reply_to_offer(struct mesos_sched* sched,
-                               offer_id oid,
-                               struct mesos_task_desc* tasks,
-                               int num_tasks,
-                               const char* params)
-{
-  if (sched == NULL || tasks == NULL || num_tasks < 0) {
-    errno = EINVAL;
-    return -1;
-  }
-
-  vector<TaskDescription> wrapped_tasks(num_tasks);
-
-  for (int i = 0; i < num_tasks; i++) {
-    // Convert task's params from key=value pairs to map<string, string>
-    map<string, string> params;
-    try {
-      Params paramsObj(tasks[i].params);
-      params = paramsObj.getMap();
-    } catch(const ParseException& e) {
-      errno = EINVAL;
-      return -1;
-    }
-
-    // Get task argument as a STL string
-    string taskArg((char*) tasks[i].arg, tasks[i].arg_len);
-
-    wrapped_tasks[i] = TaskDescription(tasks[i].tid,
-                                       string(tasks[i].sid),
-                                       string(tasks[i].name),
-                                       params,
-                                       taskArg);
-  }
-
-  CScheduler* cs = lookupCScheduler(sched);
-
-  if (cs->driver == NULL) {
-    errno = EINVAL;
-    return -1;
-  }
-
-  Params paramsObj(params);
-  cs->driver->replyToOffer(oid, wrapped_tasks, paramsObj.getMap());
-
-  return 0;
-}
-
-
-int mesos_sched_revive_offers(struct mesos_sched* sched)
-{
-  if (sched == NULL) {
-    errno = EINVAL;
-    return -1;
-  }
-
-  CScheduler* cs = lookupCScheduler(sched);
-
-  if (cs->driver == NULL) {
-    errno = EINVAL;
-    return -1;
-  }
-
-  cs->driver->reviveOffers();
-
-  return 0;
-}
-
-
-int mesos_sched_join(struct mesos_sched* sched)
-{
-  if (sched == NULL) {
-    errno = EINVAL;
-    return -1;
-  }
-
-  CScheduler* cs = lookupCScheduler(sched);
-
-  if (cs->driver == NULL) {
-    errno = EINVAL;
-    return -1;
-  }
-
-  cs->driver->join();
-
-  return 0;
-}
-
-} /* extern "C" */
