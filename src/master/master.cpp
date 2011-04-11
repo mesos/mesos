@@ -1,5 +1,4 @@
 #include <iomanip>
-#include <sys/time.h>
 
 #include <glog/logging.h>
 
@@ -78,15 +77,12 @@ protected:
       pause(1);
 
       send(master, pack<M2M_GET_STATE>());
-	      receive();
+      receive();
       CHECK(msgid() == M2M_GET_STATE_REPLY);
       state::MasterState *state = unpack<M2M_GET_STATE_REPLY, 0>(body());
 
       uint32_t total_cpus = 0;
       uint32_t total_mem = 0;
-      struct timeval curr_time;
-      struct timezone tzp;
-      gettimeofday(&curr_time, &tzp);
 
       foreach (state::Slave *s, state->slaves) {
         total_cpus += s->cpus;
@@ -100,9 +96,7 @@ protected:
           double cpu_share = f->cpus / (double) total_cpus;
           double mem_share = f->mem / (double) total_mem;
           double max_share = max(cpu_share, mem_share);
-          file << tick << "#" 
-               << (curr_time.tv_sec * 1000000 + curr_time.tv_usec) << "#" 
-               << f->id << "#" << f->name << "#" 
+          file << tick << "#" << f->id << "#" << f->name << "#" 
                << f->cpus << "#" << f->mem << "#"
                << cpu_share << "#" << mem_share << "#" << max_share << endl;
         }
@@ -121,17 +115,15 @@ public:
 }
 
 
-Master::Master(EventLogger* evLogger_)
-  : evLogger(evLogger_), nextFrameworkId(0), nextSlaveId(0), 
-    nextSlotOfferId(0)
+Master::Master()
+  : nextFrameworkId(0), nextSlaveId(0), nextSlotOfferId(0)
 {
   allocatorType = "simple";
 }
 
 
-Master::Master(const Params& conf_, EventLogger* evLogger_)
-  : conf(conf_), evLogger(evLogger_), nextFrameworkId(0), nextSlaveId(0), 
-    nextSlotOfferId(0)
+Master::Master(const Params& conf_)
+  : conf(conf_), nextFrameworkId(0), nextSlaveId(0), nextSlotOfferId(0)
 {
   allocatorType = conf.get("allocator", "simple");
 }
@@ -176,7 +168,7 @@ state::MasterState * Master::getState()
     new state::MasterState(BUILD_DATE, BUILD_USER, oss.str());
 
   foreachpair (_, Slave *s, slaves) {
-    state::Slave *slave = new state::Slave(s->id, s->hostname, s->webUIUrl,
+    state::Slave *slave = new state::Slave(s->id, s->hostname, s->publicDns,
         s->resources.cpus, s->resources.mem, s->connectTime);
     state->slaves.push_back(slave);
   }
@@ -272,7 +264,7 @@ void Master::operator () ()
   }
   string faultToleranceId;
   tie(faultToleranceId) = unpack<GOT_MASTER_ID>(body());
-  masterId = DateUtils::humanReadableDate() + "-" + faultToleranceId;
+  masterId = DateUtils::currentDate() + "-" + faultToleranceId;
   LOG(INFO) << "Master ID: " << masterId;
 
   // Create the allocator (we do this after the constructor because it
@@ -324,11 +316,8 @@ void Master::operator () ()
               1, "Root is not allowed to submit jobs on this cluster"));
         delete framework;
         break;
-
       }
 
-      evLogger->logFrameworkRegistered(fid, framework->user);
-      LOG(INFO) << "Logged framework registered to event history" << endl;
       addFramework(framework);
       break;
     }
@@ -417,10 +406,8 @@ void Master::operator () ()
       tie(fid) = unpack<F2M_UNREGISTER_FRAMEWORK>(body());
       LOG(INFO) << "Asked to unregister framework " << fid;
       Framework *framework = lookupFramework(fid);
-      if (framework != NULL && framework->pid == from()) {
+      if (framework != NULL && framework->pid == from())
         removeFramework(framework);
-        //evLogger->logFrameworkUnregistered(fid);
-      }
       else
         LOG(WARNING) << "Non-authoratative PID attempting framework "
                      << "unregistration ... ignoring";
@@ -472,10 +459,9 @@ void Master::operator () ()
         if (task != NULL) {
           LOG(INFO) << "Asked to kill " << task << " by its framework";
           killTask(task);
-          evLogger->logTaskStateUpdated(tid, fid, TASK_KILLED);
-        } else {
-          LOG(INFO) << "Asked to kill UNKNOWN task by its framework";
-          send(framework->pid, pack<M2F_STATUS_UPDATE>(tid, TASK_LOST, ""));
+	} else {
+	  LOG(INFO) << "Asked to kill UNKNOWN task by its framework";
+	  send(framework->pid, pack<M2F_STATUS_UPDATE>(tid, TASK_LOST, ""));
         }
       }
       break;
@@ -497,7 +483,7 @@ void Master::operator () ()
     case S2M_REGISTER_SLAVE: {
       string slaveId = masterId + "-" + lexical_cast<string>(nextSlaveId++);
       Slave *slave = new Slave(from(), slaveId, elapsed());
-      tie(slave->hostname, slave->webUIUrl, slave->resources) =
+      tie(slave->hostname, slave->publicDns, slave->resources) =
         unpack<S2M_REGISTER_SLAVE>(body());
       LOG(INFO) << "Registering " << slave << " at " << slave->pid;
       slaves[slave->id] = slave;
@@ -512,7 +498,7 @@ void Master::operator () ()
     case S2M_REREGISTER_SLAVE: {
       Slave *slave = new Slave(from(), "", elapsed());
       vector<Task> tasks;
-      tie(slave->id, slave->hostname, slave->webUIUrl,
+      tie(slave->id, slave->hostname, slave->publicDns,
           slave->resources, tasks) = unpack<S2M_REREGISTER_SLAVE>(body());
 
       if (slave->id == "") {
@@ -581,7 +567,6 @@ void Master::operator () ()
           if (task != NULL) {
             LOG(INFO) << "Status update: " << task << " is in state " << state;
             task->state = state;
-            evLogger->logTaskStateUpdated(tid, fid, state);
             // Remove the task if it finished or failed
             if (state == TASK_FINISHED || state == TASK_FAILED ||
                 state == TASK_KILLED || state == TASK_LOST) {
@@ -841,16 +826,6 @@ void Master::processOfferReply(SlotOffer *offer,
 
   // Launch the tasks in the response
   foreach (const TaskDescription &t, tasks) {
-    // Record the resources in event_history
-    Params params(t.params);
-    Resources res(params.getInt32("cpus", -1),
-                  params.getInt64("mem", -1));
-
-    Slave *slave = lookupSlave(t.slaveId);
-    evLogger->logTaskCreated(t.taskId, framework->id, t.slaveId, 
-                             slave->webUIUrl, res);
-
-    // Launch the tasks in the response
     launchTask(framework, t);
   }
 

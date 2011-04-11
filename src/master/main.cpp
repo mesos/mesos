@@ -13,7 +13,6 @@ using boost::lexical_cast;
 using boost::bad_lexical_cast;
 
 using namespace mesos::internal::master;
-using mesos::internal::eventhistory::EventLogger;
 
 
 void usage(const char* progName, const Configurator& conf)
@@ -40,7 +39,6 @@ int main(int argc, char **argv)
 #endif
   Logging::registerOptions(&conf);
   Master::registerOptions(&conf);
-  EventLogger::registerOptions(&conf);
 
   if (argc == 2 && string("--help") == argv[1]) {
     usage(argv[0], conf);
@@ -57,9 +55,6 @@ int main(int argc, char **argv)
 
   Logging::init(argv[0], params);
 
-  LOG(INFO) << "Creating event logger." << endl;
-  EventLogger evLogger(params);
-
   if (params.contains("port"))
     setenv("LIBPROCESS_PORT", params["port"].c_str(), 1);
 
@@ -74,7 +69,7 @@ int main(int argc, char **argv)
   if (chdir(dirname(argv[0])) != 0)
     fatalerror("Could not chdir into %s", dirname(argv[0]));
 
-  Master *master = new Master(params, &evLogger);
+  Master *master = new Master(params);
   PID pid = Process::spawn(master);
 
   bool quiet = Logging::isQuiet(params);

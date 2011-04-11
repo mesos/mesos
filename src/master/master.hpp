@@ -33,8 +33,6 @@
 
 #include "detector/detector.hpp"
 
-#include "event_history/event_logger.hpp"
-
 #include "messaging/messages.hpp"
 
 
@@ -53,7 +51,6 @@ using std::vector;
 using boost::unordered_map;
 using boost::unordered_set;
 
-using mesos::internal::eventhistory::EventLogger;
 using foreach::_;
 
 
@@ -243,7 +240,7 @@ struct Slave
   SlaveID id;
   bool active; // Turns false when slave is being removed
   string hostname;
-  string webUIUrl;
+  string publicDns;
   double connectTime;
   double lastHeartbeat;
   
@@ -315,7 +312,6 @@ class Master : public MesosProcess
 {
 protected:
   Params conf;
-  EventLogger* evLogger;
 
   unordered_map<FrameworkID, Framework *> frameworks;
   unordered_map<SlaveID, Slave *> slaves;
@@ -336,9 +332,9 @@ protected:
                    // Used in framework and slave IDs created by this master.
 
 public:
-  Master(EventLogger* evLogger);
+  Master();
 
-  Master(const Params& conf, EventLogger* evLogger);
+  Master(const Params& conf);
   
   ~Master();
 

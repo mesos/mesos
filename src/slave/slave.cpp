@@ -154,19 +154,13 @@ void Slave::operator () ()
   hostent *he = gethostbyname2(buf, AF_INET);
   string hostname = he->h_name;
 
-  // Get our public Web UI URL. Normally this is our hostname, but on EC2
+  // Get our public DNS name. Normally this is our hostname, but on EC2
   // we look for the MESOS_PUBLIC_DNS environment variable. This allows
   // the master to display our public name in its web UI.
-  LOG(INFO) << "setting up webUIUrl on port " << conf["webui_port"];
-  string webUIUrl;
+  string publicDns = hostname;
   if (getenv("MESOS_PUBLIC_DNS") != NULL) {
-    webUIUrl = getenv("MESOS_PUBLIC_DNS");
-  } else {
-    webUIUrl = hostname;
+    publicDns = getenv("MESOS_PUBLIC_DNS");
   }
-#ifdef MESOS_WEBUI
-  webUIUrl += ":" + conf["webui_port"];
-#endif
 
   // Initialize isolation module.
   isolationModule->initialize(this);
@@ -186,7 +180,7 @@ void Slave::operator () ()
 
 	if (id.empty()) {
 	  // Slave started before master.
-	  send(master, pack<S2M_REGISTER_SLAVE>(hostname, webUIUrl, resources));
+	  send(master, pack<S2M_REGISTER_SLAVE>(hostname, publicDns, resources));
 	} else {
 	  // Reconnecting, so reconstruct resourcesInUse for the master.
 	  Resources resourcesInUse; 
@@ -201,7 +195,7 @@ void Slave::operator () ()
 	    }
 	  }
 
-	  send(master, pack<S2M_REREGISTER_SLAVE>(id, hostname, webUIUrl, resources, taskVec));
+	  send(master, pack<S2M_REREGISTER_SLAVE>(id, hostname, publicDns, resources, taskVec));
 	}
 	break;
       }

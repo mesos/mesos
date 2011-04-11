@@ -5,8 +5,6 @@
 
 #include <boost/lexical_cast.hpp>
 
-#include <event_history/event_logger.hpp>
-
 #include <local/local.hpp>
 
 #include <master/master.hpp>
@@ -23,7 +21,6 @@ using namespace mesos::internal::test;
 
 using boost::lexical_cast;
 
-using mesos::internal::eventhistory::EventLogger;
 using mesos::internal::master::Master;
 using mesos::internal::slave::Slave;
 using mesos::internal::slave::Framework;
@@ -287,8 +284,7 @@ TEST(MasterTest, SlaveLost)
 {
   ASSERT_TRUE(GTEST_IS_THREADSAFE);
 
-  EventLogger el;
-  Master m(&el);
+  Master m;
   PID master = Process::spawn(&m);
 
   ProcessBasedIsolationModule isolationModule;
@@ -485,8 +481,7 @@ TEST(MasterTest, TaskRunning)
 {
   ASSERT_TRUE(GTEST_IS_THREADSAFE);
 
-  EventLogger el;
-  Master m(&el);
+  Master m;
   PID master = Process::spawn(&m);
 
   MockExecutor exec;
@@ -583,8 +578,7 @@ TEST(MasterTest, SchedulerFailoverStatusUpdate)
 
   LocalIsolationModule isolationModule(&exec);
 
-  EventLogger el;
-  Master m(&el);
+  Master m;
   PID master = Process::spawn(&m);
 
   Slave s(Resources(2, 1 * Gigabyte), true, &isolationModule);
@@ -715,8 +709,7 @@ TEST(MasterTest, FrameworkMessage)
 
   LocalIsolationModule isolationModule(&exec);
 
-  EventLogger el;
-  Master m(&el);
+  Master m;
   PID master = Process::spawn(&m);
 
   Slave s(Resources(2, 1 * Gigabyte), true, &isolationModule);
@@ -816,8 +809,7 @@ TEST(MasterTest, SchedulerFailoverFrameworkMessage)
 
   LocalIsolationModule isolationModule(&exec);
 
-  EventLogger el;
-  Master m(&el);
+  Master m;
   PID master = Process::spawn(&m);
 
   Slave s(Resources(2, 1 * Gigabyte), true, &isolationModule);

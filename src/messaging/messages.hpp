@@ -279,13 +279,13 @@ TUPLE(M2F_ERROR,
 
 TUPLE(S2M_REGISTER_SLAVE,
       (std::string /*name*/,
-       std::string /*webUIUrl*/,
+       std::string /*publicDns*/,
        Resources));
 
 TUPLE(S2M_REREGISTER_SLAVE,
       (SlaveID,
        std::string /*name*/,
-       std::string /*webuiUrl*/,
+       std::string /*publicDns*/,
        Resources,
        std::vector<Task>));
 

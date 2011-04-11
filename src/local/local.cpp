@@ -10,8 +10,6 @@
 
 #include "configurator/configurator.hpp"
 
-#include "event_history/event_logger.hpp"
- 
 #include "master/master.hpp"
 
 #include "slave/process_based_isolation_module.hpp"
@@ -20,7 +18,6 @@
 using std::map;
 using std::vector;
 
-using mesos::internal::eventhistory::EventLogger;
 using mesos::internal::master::Master;
 using mesos::internal::slave::Slave;
 using mesos::internal::slave::IsolationModule;
@@ -43,7 +40,6 @@ void initialize_glog() {
 
 namespace mesos { namespace internal { namespace local {
 
-static EventLogger* evLogger = NULL;
 static Master *master = NULL;
 static map<IsolationModule*, Slave*> slaves;
 static MasterDetector *detector = NULL;
@@ -52,7 +48,6 @@ static MasterDetector *detector = NULL;
 void registerOptions(Configurator* conf)
 {
   conf->addOption<int>("slaves", 's', "Number of slaves", 1);
-  EventLogger::registerOptions(conf);
   Logging::registerOptions(conf);
   Master::registerOptions(conf);
   Slave::registerOptions(conf);
@@ -88,9 +83,7 @@ PID launch(const Params& conf, bool initLogging)
       google::SetStderrLogging(google::INFO);
   }
 
-  evLogger = new EventLogger(conf);
-
-  master = new Master(conf, evLogger);
+  master = new Master(conf);
 
   PID pid = Process::spawn(master);
 
@@ -116,7 +109,6 @@ void shutdown()
   MesosProcess::post(master->self(), pack<M2M_SHUTDOWN>());
   Process::wait(master->self());
   delete master;
-  delete evLogger;
   master = NULL;
 
   // TODO(benh): Ugh! Because the isolation module calls back into the
