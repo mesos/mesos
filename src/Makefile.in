@@ -70,8 +70,8 @@ CXXFLAGS += -I@top_srcdir@/$(GLOG)/src -I@top_builddir@/$(GLOG)/src
 LDFLAGS += -L@top_builddir@/$(GLOG)/.libs
 
 # Add libprocess to CFLAGS, CXXFLAGS, and LDFLAGS.
-CFLAGS += -I@top_srcdir@/$(LIBPROCESS)
-CXXFLAGS += -I@top_srcdir@/$(LIBPROCESS)
+CFLAGS += -I@top_srcdir@/$(LIBPROCESS)/include
+CXXFLAGS += -I@top_srcdir@/$(LIBPROCESS)/include
 LDFLAGS += -L@top_builddir@/$(LIBPROCESS)
 
 # Add libev to LDFLAGS.
@@ -238,8 +238,8 @@ WEBUI_DIRECTORIES = $(BINDIR)/webui/common $(BINDIR)/webui/master	\
                     $(BINDIR)/webui/master/swig				\
                     $(BINDIR)/webui/slave/swig
 
-DIRECTORIES = $(INCLUDEDIR) $(BINDIR) $(LIBDIR) $(LIBDIR)/java	\
-              $(LIBDIR)/python $(CONFDIR) $(DEPLOYDIR)		\
+DIRECTORIES = $(INCLUDEDIR) $(INCLUDEDIR)/mesos $(BINDIR) $(LIBDIR)	\
+              $(LIBDIR)/java $(LIBDIR)/python $(CONFDIR) $(DEPLOYDIR)	\
               $(OBJ_DIRECTORIES) $(WEBUI_DIRECTORIES)
 
 
@@ -251,21 +251,21 @@ default: all
 $(DIRECTORIES): %:
 	mkdir -p $@
 
-mesos.pb.cc: @top_srcdir@/include/mesos.proto
+mesos.pb.cc: @top_srcdir@/include/mesos/mesos.proto
 	mkdir -p java/generated
-	$(PROTOC) -I@top_srcdir@/include --cpp_out=. --java_out=java/generated @top_srcdir@/include/mesos.proto
+	$(PROTOC) -I@top_srcdir@/include/mesos --cpp_out=. --java_out=java/generated @top_srcdir@/include/mesos/mesos.proto
 
-$(INCLUDEDIR)/mesos.hpp: mesos.pb.cc | $(INCLUDEDIR)
-	cp mesos.pb.h $(INCLUDEDIR)/mesos.hpp
+$(INCLUDEDIR)/mesos/mesos.hpp: mesos.pb.cc | $(INCLUDEDIR) $(INCLUDEDIR)/mesos
+	cp mesos.pb.h $(INCLUDEDIR)/mesos/mesos.hpp
 
 messaging/messages.pb.cc: $(SRCDIR)/messaging/messages.proto
 	mkdir -p messaging
-	$(PROTOC) -I$(SRCDIR)/messaging -I@top_srcdir@/include --cpp_out=messaging $(SRCDIR)/messaging/messages.proto
+	$(PROTOC) -I$(SRCDIR)/messaging -I@top_srcdir@/include/mesos --cpp_out=messaging $(SRCDIR)/messaging/messages.proto
 
 common/build.o: $(SRCDIR)/common/build.cpp force | common
 	$(CXX) -c $(CXXFLAGS) -DBUILD_DATE="\"$$(date '+%Y-%m-%d %H:%M:%S')\"" -DBUILD_USER="\"$$USER\"" -DBUILD_FLAGS="\"$(CFLAGS) $(CXXFLAGS)\"" -o $@ $<
 
-$(PROTOBUF_OBJ): %.pb.o: %.pb.cc $(INCLUDEDIR)/mesos.hpp
+$(PROTOBUF_OBJ): %.pb.o: %.pb.cc $(INCLUDEDIR)/mesos/mesos.hpp
 	$(CXX) -c $(CXXFLAGS) -I@top_srcdir@/$(PROTOBUF)/src -I. -o $@ $<
 
 $(BASIC_OBJ): %.o: $(SRCDIR)/%.cpp $(PROTOBUF_OBJ) | $(OBJ_DIRECTORIES)
@@ -328,7 +328,7 @@ $(MESOS_PROJD_EXE): $(SRCDIR)/slave/projd.cpp $(COMMON_OBJ) $(PROTOBUF_OBJ)
 
 java: $(MESOS_JAVA_LIB) $(MESOS_JAVA_JAR)
 
-$(MESOS_JAVA_JAR): $(SRCDIR)/java/src/org/apache/mesos/*.java @top_srcdir@/include/mesos.proto | $(LIBDIR)/java
+$(MESOS_JAVA_JAR): $(SRCDIR)/java/src/org/apache/mesos/*.java @top_srcdir@/include/mesos/mesos.proto | $(LIBDIR)/java
 ifdef JAVA_HOME
 	mkdir -p @top_builddir@/$(PROTOBUF)/java/src/main/java
 	$(PROTOC) --java_out=@top_builddir@/$(PROTOBUF)/java/src/main/java -I@top_srcdir@/$(PROTOBUF)/src @top_srcdir@/$(PROTOBUF)/src/google/protobuf/descriptor.proto
@@ -363,12 +363,14 @@ ifdef PYTHON_HEADERS
 	$(CXX) $(CXXFLAGS) -shared -o $@ $(MESOS_PYTHON_LIB_OBJ) $(MESOS_SCHED_LIB) $(MESOS_EXEC_LIB) $(LDFLAGS) $(PYTHON_LDFLAGS) $(LIBS)
 endif
 
-$(MESOS_PYTHON_FILE): $(SRCDIR)/python/src/mesos.py @top_srcdir@/include/mesos.proto | $(LIBDIR)/python
+$(MESOS_PYTHON_FILE): $(SRCDIR)/python/src/mesos.py @top_srcdir@/include/mesos/mesos.proto | $(LIBDIR)/python
 ifdef PYTHON_HEADERS
+ifneq (@top_srcdir@, @top_builddir@)
 	cp -r @top_srcdir@/$(PROTOBUF)/python @top_builddir@/$(PROTOBUF)/python
+endif
 	cp $< $@
 	$(PROTOC) --python_out=@top_builddir@/$(PROTOBUF)/python -I@top_srcdir@/$(PROTOBUF)/src @top_srcdir@/$(PROTOBUF)/src/google/protobuf/descriptor.proto
-	$(PROTOC) --python_out=$(LIBDIR)/python -I@top_srcdir@/include @top_srcdir@/include/mesos.proto
+	$(PROTOC) --python_out=$(LIBDIR)/python -I@top_srcdir@/include @top_srcdir@/include/mesos/mesos.proto
 endif
 
 $(WEBUI_FILES): $(BINDIR)/%: $(SRCDIR)/% | $(WEBUI_DIRECTORIES)
@@ -388,8 +390,7 @@ $(CONFDIR)/deploy-env.sh: | $(SRCDIR)/conf/deploy-env.sh.template $(CONFDIR)
 test: all
 	$(MAKE) -C tests test
 
-#all: $(MESOS_LIBS) $(MESOS_EXES) java python $(WEBUI_FILES) $(CONF_FILES) $(DEPLOY_FILES)
-all: $(MESOS_LIBS) $(MESOS_EXES) java $(WEBUI_FILES) $(CONF_FILES) $(DEPLOY_FILES)
+all: $(MESOS_LIBS) $(MESOS_EXES) java python $(WEBUI_FILES) $(CONF_FILES) $(DEPLOY_FILES)
 	$(MAKE) -C examples
 	$(MAKE) -C tests
 
@@ -414,6 +415,12 @@ clean:
 	rm -f swig/*/*.d
 	rm -f swig/java/mesos/*
 	rm -f swig/python/mesos.py
+	rm -f java/jni/org_apache_mesos_MesosSchedulerDriver.h
+	rm -f java/jni/org_apache_mesos_MesosSchedulerDriver.o
+	rm -f java/jni/org_apache_mesos_MesosSchedulerDriver.d
+	rm -f java/jni/org_apache_mesos_MesosExecutorDriver.h
+	rm -f java/jni/org_apache_mesos_MesosExecutorDriver.o
+	rm -f java/jni/org_apache_mesos_MesosExecutorDriver.d
 	rm -f $(LIBDIR)/python/mesos.py
 	rm -f $(LIBDIR)/python/mesos.pyc
 	rm -f webui/master/swig/master_wrap.h
@@ -431,7 +438,7 @@ clean:
 	rm -f $(BINDIR)/webui/master/swig/master.py
 	rm -f $(BINDIR)/webui/master/swig/master.pc
 	rm -f $(DEPLOY_FILES)
-	rm -f $(INCLUDEDIR)/mesos.hpp
+	rm -f $(INCLUDEDIR)/mesos/mesos.hpp
 	rm -f mesos.pb.cc
 	rm -f mesos.pb.h
 	rm -f TAGS

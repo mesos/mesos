@@ -2,11 +2,11 @@
 #include <fstream>
 #include <sstream>
 
-#include <run.hpp>
-
 #include <glog/logging.h>
 
 #include <google/protobuf/descriptor.h>
+
+#include <process/run.hpp>
 
 #include "config/config.hpp"
 

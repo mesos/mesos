@@ -10,10 +10,11 @@
 
 #include <tr1/functional>
 
-#include <mesos.hpp>
-#include <process.hpp>
-
 #include <boost/unordered_map.hpp>
+
+#include <mesos/mesos.hpp>
+
+#include <process/process.hpp>
 
 #include "common/utils.hpp"
 

@@ -4,12 +4,12 @@
 #include <string>
 #include <vector>
 
-#include <process.hpp>
-
 #include <glog/logging.h>
 
 #include <boost/unordered_map.hpp>
 #include <boost/unordered_set.hpp>
+
+#include <process/process.hpp>
 
 #include "state.hpp"
 
