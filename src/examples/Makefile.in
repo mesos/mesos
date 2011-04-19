@@ -79,10 +79,12 @@ ifeq ($(WITH_ZOOKEEPER),1)
 endif
 
 SCHED_EXES = $(BINDIR)/examples/cpp-test-framework	\
+	     $(BINDIR)/examples/long-lived-framework	\
              $(BINDIR)/examples/memhog			\
              $(BINDIR)/examples/scheduled-memhog
 
 EXEC_EXES = $(BINDIR)/examples/cpp-test-executor	\
+            $(BINDIR)/examples/long-lived-executor	\
             $(BINDIR)/examples/memhog-executor
 
 EXAMPLES_EXES = $(SCHED_EXES) $(EXEC_EXES)
@@ -114,6 +116,12 @@ $(BINDIR)/examples/cpp-test-framework: @srcdir@/cpp_test_framework.cpp $(MESOS_S
 	$(CXX) $(CXXFLAGS) -o $@ $< $(MESOS_SCHED_LIB) $(LDFLAGS) $(LIBS)
 
 $(BINDIR)/examples/cpp-test-executor: @srcdir@/cpp_test_executor.cpp $(MESOS_EXEC_LIB)
+	$(CXX) $(CXXFLAGS) -o $@ $< $(MESOS_EXEC_LIB) $(LDFLAGS) $(LIBS)
+
+$(BINDIR)/examples/long-lived-framework: @srcdir@/long_lived_framework.cpp $(MESOS_SCHED_LIB)
+	$(CXX) $(CXXFLAGS) -o $@ $< $(MESOS_SCHED_LIB) $(LDFLAGS) $(LIBS)
+
+$(BINDIR)/examples/long-lived-executor: @srcdir@/long_lived_executor.cpp $(MESOS_EXEC_LIB)
 	$(CXX) $(CXXFLAGS) -o $@ $< $(MESOS_EXEC_LIB) $(LDFLAGS) $(LIBS)
 
 $(BINDIR)/examples/memhog: @srcdir@/memhog.cpp $(MESOS_SCHED_LIB)
