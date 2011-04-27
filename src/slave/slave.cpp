@@ -11,6 +11,8 @@
 #include "slave.hpp"
 #include "webui.hpp"
 
+#include "common/utils.hpp"
+
 // There's no gethostbyname2 on Solaris, so fake it by calling gethostbyname
 #ifdef __sun__
 #define gethostbyname2(name, _) gethostbyname(name)
@@ -20,9 +22,13 @@ using namespace mesos;
 using namespace mesos::internal;
 using namespace mesos::internal::slave;
 
+using boost::lexical_cast;
 using boost::unordered_map;
 using boost::unordered_set;
 
+using process::HttpOKResponse;
+using process::HttpResponse;
+using process::HttpRequest;
 using process::Promise;
 using process::UPID;
 
@@ -37,8 +43,8 @@ using std::vector;
 
 Slave::Slave(const Resources& _resources, bool _local,
              IsolationModule *_isolationModule)
-  : resources(_resources), local(_local),
-    isolationModule(_isolationModule)
+  : MesosProcess<Slave>("slave"),
+    resources(_resources), local(_local), isolationModule(_isolationModule)
 {
   initialize();
 }
@@ -46,8 +52,8 @@ Slave::Slave(const Resources& _resources, bool _local,
 
 Slave::Slave(const Configuration& _conf, bool _local,
              IsolationModule* _isolationModule)
-  : conf(_conf), local(_local),
-    isolationModule(_isolationModule)
+  : MesosProcess<Slave>("slave"),
+    conf(_conf), local(_local), isolationModule(_isolationModule)
 {
   resources =
     Resources::parse(conf.get<string>("resources", "cpus:1;mem:1024"));
@@ -152,49 +158,21 @@ Promise<state::SlaveState*> Slave::getState()
 }
 
 
-void Slave::operator () ()
-{
-  LOG(INFO) << "Slave started at " << self();
-  LOG(INFO) << "Slave resources: " << resources;
-
-  // Get our hostname
-  char buf[512];
-  gethostname(buf, sizeof(buf));
-  hostent* he = gethostbyname2(buf, AF_INET);
-  string hostname = he->h_name;
-
-  // Check and see if we have a different public DNS name. Normally
-  // this is our hostname, but on EC2 we look for the MESOS_PUBLIC_DNS
-  // environment variable. This allows the master to display our
-  // public name in its web UI.
-  string public_hostname = hostname;
-  if (getenv("MESOS_PUBLIC_DNS") != NULL) {
-    public_hostname = getenv("MESOS_PUBLIC_DNS");
-  }
-
-  // Initialize slave info.
-  slave.set_hostname(hostname);
-  slave.set_public_hostname(public_hostname);
-  slave.mutable_resources()->MergeFrom(resources);
-
-  // Initialize isolation module.
-  isolationModule->initialize(this);
-
-  while (true) {
-    serve(1);
-    if (name() == process::TERMINATE) {
-      LOG(INFO) << "Asked to shut down by " << from();
-      foreachpaircopy (_, Framework* framework, frameworks) {
-        killFramework(framework);
-      }
-      return;
-    }
-  }
-}
-
-
 void Slave::initialize()
 {
+  // Start all the statistics at 0.
+  statistics.launched_tasks = 0;
+  statistics.finished_tasks = 0;
+  statistics.killed_tasks = 0;
+  statistics.failed_tasks = 0;
+  statistics.lost_tasks = 0;
+  statistics.valid_status_updates = 0;
+  statistics.invalid_status_updates = 0;
+  statistics.valid_framework_messages = 0;
+  statistics.invalid_framework_messages = 0;
+
+  startTime = elapsedTime();
+
   install(NEW_MASTER_DETECTED, &Slave::newMasterDetected,
           &NewMasterDetectedMessage::pid);
 
@@ -253,6 +231,53 @@ void Slave::initialize()
   install(process::TIMEOUT, &Slave::timeout);
 
   install(process::EXITED, &Slave::exited);
+
+  installHttpHandler("info.json", &Slave::http_info_json);
+  installHttpHandler("frameworks.json", &Slave::http_frameworks_json);
+  installHttpHandler("tasks.json", &Slave::http_tasks_json);
+  installHttpHandler("stats.json", &Slave::http_stats_json);
+  installHttpHandler("vars", &Slave::http_vars);
+}
+
+
+void Slave::operator () ()
+{
+  LOG(INFO) << "Slave started at " << self();
+  LOG(INFO) << "Slave resources: " << resources;
+
+  // Get our hostname
+  char buf[512];
+  gethostname(buf, sizeof(buf));
+  hostent* he = gethostbyname2(buf, AF_INET);
+  string hostname = he->h_name;
+
+  // Check and see if we have a different public DNS name. Normally
+  // this is our hostname, but on EC2 we look for the MESOS_PUBLIC_DNS
+  // environment variable. This allows the master to display our
+  // public name in its web UI.
+  string public_hostname = hostname;
+  if (getenv("MESOS_PUBLIC_DNS") != NULL) {
+    public_hostname = getenv("MESOS_PUBLIC_DNS");
+  }
+
+  // Initialize slave info.
+  slave.set_hostname(hostname);
+  slave.set_public_hostname(public_hostname);
+  slave.mutable_resources()->MergeFrom(resources);
+
+  // Initialize isolation module.
+  isolationModule->initialize(this);
+
+  while (true) {
+    serve(1);
+    if (name() == process::TERMINATE) {
+      LOG(INFO) << "Asked to shut down by " << from();
+      foreachpaircopy (_, Framework* framework, frameworks) {
+        killFramework(framework);
+      }
+      return;
+    }
+  }
 }
 
 
@@ -388,7 +413,7 @@ void Slave::killTask(const FrameworkID& frameworkId,
       status->set_state(TASK_LOST);
       send(master, out);
 
-      double deadline = elapsed() + STATUS_UPDATE_RETRY_TIMEOUT;
+      double deadline = elapsedTime() + STATUS_UPDATE_RETRY_TIMEOUT;
       framework->statuses[deadline][status->task_id()] = *status;
     } else {
       // Otherwise, send a message to the executor and wait for
@@ -411,7 +436,7 @@ void Slave::killTask(const FrameworkID& frameworkId,
     status->set_state(TASK_LOST);
     send(master, out);
 
-    double deadline = elapsed() + STATUS_UPDATE_RETRY_TIMEOUT;
+    double deadline = elapsedTime() + STATUS_UPDATE_RETRY_TIMEOUT;
     framework->statuses[deadline][status->task_id()] = *status;
   }
 }
@@ -440,6 +465,7 @@ void Slave::schedulerMessage(const SlaveID& slaveId,
       LOG(WARNING) << "Dropping message for executor '"
                    << executorId << "' of framework " << frameworkId
                    << " because executor does not exist";
+      statistics.invalid_framework_messages++;
     } else if (!executor->pid) {
       // TODO(*): If executor is not started, queue framework message?
       // (It's probably okay to just drop it since frameworks can have
@@ -447,6 +473,7 @@ void Slave::schedulerMessage(const SlaveID& slaveId,
       LOG(WARNING) << "Dropping message for executor '"
                    << executorId << "' of framework " << frameworkId
                    << " because executor is not running";
+      statistics.invalid_framework_messages++;
     } else {
       MSG<S2E_FRAMEWORK_MESSAGE> out;
       out.mutable_slave_id()->MergeFrom(slaveId);
@@ -454,10 +481,13 @@ void Slave::schedulerMessage(const SlaveID& slaveId,
       out.mutable_executor_id()->MergeFrom(executorId);
       out.set_data(data);
       send(executor->pid, out);
+
+      statistics.valid_framework_messages++;
     }
   } else {
     LOG(WARNING) << "Dropping message for framework "<< frameworkId
-                 << " because it does not exist";
+                 << " because framework does not exist";
+    statistics.invalid_framework_messages++;
   }
 }
 
@@ -557,12 +587,29 @@ void Slave::statusUpdate(const FrameworkID& frameworkId,
     Executor* executor = framework->getExecutor(status.task_id());
     if (executor != NULL) {
       executor->updateTaskState(status.task_id(), status.state());
-      if (status.state() == TASK_FINISHED ||
-          status.state() == TASK_FAILED ||
-          status.state() == TASK_KILLED ||
-          status.state() == TASK_LOST) {
-        executor->removeTask(status.task_id());
-        isolationModule->resourcesChanged(framework, executor);
+
+      // Remove the task if necessary, and update statistics.
+      switch (status.state()) {
+        case TASK_FINISHED:
+          statistics.finished_tasks++;
+          executor->removeTask(status.task_id());
+          isolationModule->resourcesChanged(framework, executor);
+          break;
+        case TASK_FAILED:
+          statistics.failed_tasks++;
+          executor->removeTask(status.task_id());
+          isolationModule->resourcesChanged(framework, executor);
+          break;
+       case TASK_KILLED:
+         statistics.killed_tasks++;
+         executor->removeTask(status.task_id());
+         isolationModule->resourcesChanged(framework, executor);
+         break;
+        case TASK_LOST:
+          statistics.lost_tasks++;
+          executor->removeTask(status.task_id());
+          isolationModule->resourcesChanged(framework, executor);
+          break;
       }
 
       // Send message and record the status for possible resending.
@@ -571,15 +618,19 @@ void Slave::statusUpdate(const FrameworkID& frameworkId,
       out.mutable_status()->MergeFrom(status);
       send(master, out);
 
-      double deadline = elapsed() + STATUS_UPDATE_RETRY_TIMEOUT;
+      double deadline = elapsedTime() + STATUS_UPDATE_RETRY_TIMEOUT;
       framework->statuses[deadline][status.task_id()] = status;
+
+      statistics.valid_status_updates++;
     } else {
       LOG(WARNING) << "Status update error: couldn't lookup "
                    << "executor for framework " << frameworkId;
+      statistics.invalid_status_updates++;
     }
   } else {
     LOG(WARNING) << "Status update error: couldn't lookup "
                  << "framework " << frameworkId;
+    statistics.invalid_status_updates++;
   }
 }
 
@@ -601,6 +652,13 @@ void Slave::executorMessage(const SlaveID& slaveId,
     out.mutable_executor_id()->MergeFrom(executorId);
     out.set_data(data);
     send(framework->pid, out);
+
+    statistics.valid_framework_messages++;
+  } else {
+    LOG(WARNING) << "Cannot send framework message from slave "
+                 << slaveId << " to framework " << frameworkId
+                 << " because framework does not exist";
+    statistics.invalid_framework_messages++;
   }
 }
 
@@ -616,7 +674,7 @@ void Slave::timeout()
   // Check and see if we should re-send any status updates.
   foreachpair (_, Framework* framework, frameworks) {
     foreachpair (double deadline, _, framework->statuses) {
-      if (deadline <= elapsed()) {
+      if (deadline <= elapsedTime()) {
         foreachpair (_, const TaskStatus& status, framework->statuses[deadline]) {
           LOG(WARNING) << "Resending status update"
                        << " for task " << status.task_id()
@@ -643,6 +701,172 @@ void Slave::exited()
 }
 
 
+Promise<HttpResponse> Slave::http_info_json(const HttpRequest& request)
+{
+  LOG(INFO) << "HTTP request for '/slave/info.json'";
+
+  ostringstream out;
+
+  out <<
+    "{" <<
+    "\"built_date\":\"" << build::DATE << "\"," <<
+    "\"build_user\":\"" << build::USER << "\"," <<
+    "\"start_time\":\"" << startTime << "\"," <<
+    "\"pid\":\"" << self() << "\"" <<
+    "}";
+
+  HttpOKResponse response;
+  response.headers["Content-Type"] = "text/x-json;charset=UTF-8";
+  response.headers["Content-Length"] = lexical_cast<string>(out.str().size());
+  response.body = out.str().data();
+  return response;
+}
+
+
+Promise<HttpResponse> Slave::http_frameworks_json(const HttpRequest& request)
+{
+  LOG(INFO) << "HTTP request for '/slave/frameworks.json'";
+
+  ostringstream out;
+
+  out << "[";
+
+  foreachpair (_, Framework* framework, frameworks) {
+    out <<
+      "{" <<
+      "\"id\":\"" << framework->frameworkId << "\"," <<
+      "\"name\":\"" << framework->info.name() << "\"," <<
+      "\"user\":\"" << framework->info.user() << "\""
+      "},";
+  }
+
+  // Backup the put pointer to overwrite the last comma (hack).
+  if (frameworks.size() > 0) {
+    long pos = out.tellp();
+    out.seekp(pos - 1);
+  }
+
+  out << "]";
+
+  HttpOKResponse response;
+  response.headers["Content-Type"] = "text/x-json;charset=UTF-8";
+  response.headers["Content-Length"] = lexical_cast<string>(out.str().size());
+  response.body = out.str().data();
+  return response;
+}
+
+
+Promise<HttpResponse> Slave::http_tasks_json(const HttpRequest& request)
+{
+  LOG(INFO) << "HTTP request for '/slave/tasks.json'";
+
+  ostringstream out;
+
+  out << "[";
+
+  foreachpair (_, Framework* framework, frameworks) {
+    foreachpair (_, Executor* executor, framework->executors) {
+      foreachpair (_, Task* task, executor->tasks) {
+        // TODO(benh): Send all of the resources (as JSON).
+        Resources resources(task->resources());
+        Resource::Scalar cpus = resources.getScalar("cpus", Resource::Scalar());
+        Resource::Scalar mem = resources.getScalar("mem", Resource::Scalar());
+        const string& state =
+          TaskState_descriptor()->FindValueByNumber(task->state())->name();
+        out <<
+          "{" <<
+          "\"task_id\":\"" << task->task_id() << "\"," <<
+          "\"framework_id\":\"" << task->framework_id() << "\"," <<
+          "\"slave_id\":\"" << task->slave_id() << "\"," <<
+          "\"name\":\"" << task->name() << "\"," <<
+          "\"state\":\"" << state << "\"," <<
+          "\"cpus\":" << cpus.value() << "," <<
+          "\"mem\":" << mem.value() <<
+          "},";
+      }
+    }
+  }
+
+  // Backup the put pointer to overwrite the last comma (hack).
+  if (frameworks.size() > 0) {
+    long pos = out.tellp();
+    out.seekp(pos - 1);
+  }
+
+  out << "]";
+
+  HttpOKResponse response;
+  response.headers["Content-Type"] = "text/x-json;charset=UTF-8";
+  response.headers["Content-Length"] = lexical_cast<string>(out.str().size());
+  response.body = out.str().data();
+  return response;
+}
+
+
+Promise<HttpResponse> Slave::http_stats_json(const HttpRequest& request)
+{
+  LOG(INFO) << "Http request for '/slave/stats.json'";
+
+  ostringstream out;
+
+  out <<
+    "{" <<
+    "\"uptime\":" << elapsedTime() - startTime << "," <<
+    "\"total_frameworks\":" << frameworks.size() << "," <<
+    "\"launched_tasks\":" << statistics.launched_tasks << "," <<
+    "\"finished_tasks\":" << statistics.finished_tasks << "," <<
+    "\"killed_tasks\":" << statistics.killed_tasks << "," <<
+    "\"failed_tasks\":" << statistics.failed_tasks << "," <<
+    "\"lost_tasks\":" << statistics.lost_tasks << "," <<
+    "\"valid_status_updates\":" << statistics.valid_status_updates << "," <<
+    "\"invalid_status_updates\":" << statistics.invalid_status_updates << "," <<
+    "\"valid_framework_messages\":" << statistics.valid_framework_messages << "," <<
+    "\"invalid_framework_messages\":" << statistics.invalid_framework_messages <<
+    "}";
+
+  HttpOKResponse response;
+  response.headers["Content-Type"] = "text/x-json;charset=UTF-8";
+  response.headers["Content-Length"] = lexical_cast<string>(out.str().size());
+  response.body = out.str().data();
+  return response;
+}
+
+
+Promise<HttpResponse> Slave::http_vars(const HttpRequest& request)
+{
+  LOG(INFO) << "HTTP request for '/slave/vars'";
+
+  ostringstream out;
+
+  out <<
+    "build_date " << build::DATE << "\n" <<
+    "build_user " << build::USER << "\n" <<
+    "build_flags " << build::FLAGS << "\n";
+
+  // Also add the configuration values.
+  foreachpair (const string& key, const string& value, conf.getMap()) {
+    out << key << " " << value << "\n";
+  }
+
+  out <<
+    "uptime " << elapsedTime() - startTime << "\n" <<
+    "total_frameworks " << frameworks.size() << "\n" <<
+    "launched_tasks " << statistics.launched_tasks << "\n" <<
+    "finished_tasks " << statistics.finished_tasks << "\n" <<
+    "killed_tasks " << statistics.killed_tasks << "\n" <<
+    "failed_tasks " << statistics.failed_tasks << "\n" <<
+    "lost_tasks " << statistics.lost_tasks << "\n" <<
+    "valid_status_updates " << statistics.valid_status_updates << "\n" <<
+    "invalid_status_updates " << statistics.invalid_status_updates << "\n" <<
+    "valid_framework_messages " << statistics.valid_framework_messages << "\n" <<
+    "invalid_framework_messages " << statistics.invalid_framework_messages << "\n";
+
+  HttpOKResponse response;
+  response.headers["Content-Type"] = "text/plain";
+  response.headers["Content-Length"] = lexical_cast<string>(out.str().size());
+  response.body = out.str().data();
+  return response;
+}
 
 
 Framework* Slave::getFramework(const FrameworkID& frameworkId)
@@ -752,14 +976,14 @@ void Slave::executorExited(const FrameworkID& frameworkId, const ExecutorID& exe
 string Slave::getUniqueWorkDirectory(const FrameworkID& frameworkId,
                                      const ExecutorID& executorId)
 {
-  string workDir;
+  string workDir = ".";
   if (conf.contains("work_dir")) {
-    workDir = conf["work_dir"];
+    workDir = conf.get("work_dir", workDir);
   } else if (conf.contains("home")) {
-    workDir = conf["home"] + "/work";
-  } else {
-    workDir = "work";
+    workDir = conf.get("home", workDir);
   }
+
+  workDir = workDir + "/work";
 
   ostringstream os(std::ios_base::app | std::ios_base::out);
   os << workDir << "/slave-" << slaveId
