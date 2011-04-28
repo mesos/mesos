@@ -47,16 +47,16 @@ struct SlotOffer
 struct Slave
 {
   Slave(std::string id_, const std::string& host_,
-        const std::string& public_dns_,
+        const std::string& web_ui_url_,
 	int32_t cpus_, int64_t mem_, time_t connect_)
-    : id(id_), host(host_), public_dns(public_dns_),
+    : id(id_), host(host_), web_ui_url(web_ui_url_),
       cpus(cpus_), mem(mem_), connect_time(connect_) {}
 
   Slave() {}
 
   std::string id;
   std::string host;
-  std::string public_dns;
+  std::string web_ui_url;
   int32_t cpus;
   int64_t mem;
   int64_t connect_time;
