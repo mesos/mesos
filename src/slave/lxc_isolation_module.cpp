@@ -117,7 +117,7 @@ void LxcIsolationModule::launchExecutor(Framework* framework, Executor* executor
     int status;
   } else {
     // Create an ExecutorLauncher to set up the environment for executing
-    // an extrernal launcher_main.cpp process (inside of lxc-execute).
+    // an external launcher_main.cpp process (inside of lxc-execute).
 
     const Configuration& conf = slave->getConfiguration();
 

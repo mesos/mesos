@@ -47,6 +47,9 @@ namespace mesos { namespace internal { namespace slave {
 
 using foreach::_;
 
+// Forward declarations.
+class ExecutorReaper;
+
 
 const double STATUS_UPDATE_RETRY_TIMEOUT = 10;
 
@@ -56,6 +59,7 @@ struct Executor
 {
   Executor(const FrameworkID& _frameworkId, const ExecutorInfo& _info)
     : frameworkId(_frameworkId), info(_info), pid(process::UPID()) {}
+//       handler(NULL) {}
 
   ~Executor()
   {
@@ -63,6 +67,12 @@ struct Executor
     foreachpair (_, Task *task, tasks) {
       delete task;
     }
+
+//     if (handler != NULL) {
+//       process::post(handler->self(), process::TERMINATE);
+//       process::wait(handler->self());
+//       delete handler;
+//     }
   }
 
   Task* addTask(const TaskDescription& task)
@@ -123,9 +133,7 @@ struct Executor
 
   Resources resources;
 
-  // Information about the status of the executor for this framework, set by
-  // the isolation module. For example, this might include a PID, a VM ID, etc.
-  std::string executorStatus;
+//   ExecutorHandler* handler;
 };
 
 
@@ -280,12 +288,15 @@ private:
   SlaveInfo slave;
 
   process::UPID master;
+
   Resources resources;
 
   // Invariant: framework will exist if executor exists.
   boost::unordered_map<FrameworkID, Framework*> frameworks;
 
-  IsolationModule *isolationModule;
+  IsolationModule* isolationModule;
+
+  ExecutorReaper* reaper;
 
   // Statistics (initialized in Slave::initialize).
   struct {

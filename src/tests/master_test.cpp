@@ -57,22 +57,27 @@ public:
 
   virtual ~TestingIsolationModule() {}
 
-  virtual void initialize(Slave* _slave)
+  virtual void initialize(const PID<Slave>& slave,
+                          const Configuration& conf,
+                          bool local)
   {
-    slave = _slave;
+    this->slave = slave;
   }
 
-  virtual void launchExecutor(slave::Framework* f, slave::Executor* e)
+  virtual pid_t launchExecutor(const FrameworkID& frameworkId,
+                               const FrameworkInfo& frameworkInfo,
+                               const ExecutorInfo& executorInfo,
+                               const string& directory)
   {
-    if (executors.count(e->info.executor_id()) > 0) {
-      Executor* executor = executors[e->info.executor_id()];
+    if (executors.count(executorInfo.executor_id()) > 0) {
+      Executor* executor = executors[executorInfo.executor_id()];
       MesosExecutorDriver* driver = new MesosExecutorDriver(executor);
-      drivers[e->info.executor_id()] = driver;
+      drivers[executorInfo.executor_id()] = driver;
 
       setenv("MESOS_LOCAL", "1", 1);
-      setenv("MESOS_SLAVE_PID", string(slave->self()).c_str(), 1);
-      setenv("MESOS_FRAMEWORK_ID", f->frameworkId.value().c_str(), 1);
-      setenv("MESOS_EXECUTOR_ID", e->info.executor_id().value().c_str(), 1);
+      setenv("MESOS_SLAVE_PID", string(slave).c_str(), 1);
+      setenv("MESOS_FRAMEWORK_ID", frameworkId.value().c_str(), 1);
+      setenv("MESOS_EXECUTOR_ID", executorInfo.executor_id().value().c_str(), 1);
 
       driver->start();
 
@@ -81,27 +86,37 @@ public:
       unsetenv("MESOS_FRAMEWORK_ID");
       unsetenv("MESOS_EXECUTOR_ID");
     } else {
-      FAIL() << "Cannot launch executor";
+      ADD_FAILURE() << "Cannot launch executor";
     }
+
+    return 0;
   }
 
-  virtual void killExecutor(slave::Framework* f, slave::Executor* e)
+  virtual void killExecutor(const FrameworkID& frameworkId,
+                            const FrameworkInfo& frameworkInfo,
+                            const ExecutorInfo& executorInfo)
   {
-    if (drivers.count(e->info.executor_id()) > 0) {
-      MesosExecutorDriver* driver = drivers[e->info.executor_id()];
+    if (drivers.count(executorInfo.executor_id()) > 0) {
+      MesosExecutorDriver* driver = drivers[executorInfo.executor_id()];
       driver->stop();
       driver->join();
       delete driver;
-      drivers.erase(e->info.executor_id());
+      drivers.erase(executorInfo.executor_id());
     } else {
-      FAIL() << "Cannot kill executor";
+      ADD_FAILURE() << "Cannot kill executor";
     }
   }
+
+  virtual void resourcesChanged(const FrameworkID& frameworkId,
+                                const FrameworkInfo& frameworkInfo,
+                                const ExecutorInfo& executorInfo,
+                                const Resources& resources)
+  {}
 
 private:
   map<ExecutorID, Executor*> executors;
   map<ExecutorID, MesosExecutorDriver*> drivers;
-  Slave* slave;
+  PID<Slave> slave;
 };
 
 

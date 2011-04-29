@@ -29,6 +29,8 @@ using boost::unordered_set;
 using process::HttpOKResponse;
 using process::HttpResponse;
 using process::HttpRequest;
+using process::PID;
+using process::Process;
 using process::Promise;
 using process::UPID;
 
@@ -39,6 +41,102 @@ using std::pair;
 using std::queue;
 using std::string;
 using std::vector;
+
+
+namespace mesos { namespace internal { namespace slave {
+
+class ExecutorReaper : public Process<ExecutorReaper>
+{
+public:
+  ExecutorReaper(const PID<Slave>& _slave)
+    : slave(_slave) {}
+
+  void reap(const FrameworkID& frameworkId, 
+            const ExecutorID& executorId,
+            pid_t pid)
+  {
+    LOG(INFO) << "Monitoring process " << pid << " for reaping";
+    pids[pid] = make_pair(frameworkId, executorId);
+  }
+
+protected:
+  virtual void operator () ()
+  {
+    link(slave);
+    while (true) {
+      serve(1);
+      if (name() == process::TIMEOUT) {
+        // Check whether any child process has exited.
+        pid_t pid;
+        int status;
+        if ((pid = waitpid((pid_t) -1, &status, WNOHANG)) > 0) {
+          if (pids.count(pid) > 0) {
+            const FrameworkID& frameworkId = pids[pid].first;
+            const ExecutorID& executorId = pids[pid].second;
+
+            LOG(INFO) << "Telling slave of exited executor " << executorId
+                      << " of framework " << frameworkId;
+            process::dispatch(slave, &Slave::executorExited,
+                              frameworkId, executorId, status);
+
+            pids.erase(pid);
+          }
+        } else {
+          std::cout << "waitpid returned nothing" << std::endl;
+        }
+      } else if (name() == process::TERMINATE || name() == process::EXITED) {
+        return;
+      }
+    }
+  }
+
+private:
+  const PID<Slave> slave;
+  unordered_map<pid_t, pair<FrameworkID, ExecutorID> > pids;
+};
+
+
+// class ExecutorHandler : public Process<ExecutorHandler>
+// {
+// public:
+//   ExecutorHandler(const PID<Slave>& slave,
+//                   const FrameworkID& frameworkId,
+//                   const FrameworkInfo& frameworkInfo,
+//                   const ExecutorInfo& executorInfo,
+//                   const string& directory, 
+//                   pid_t pid)
+//   {
+
+//   }
+
+// public:
+// //   void acknowledged(const TaskID& taskId)
+// //   {
+
+// //   }
+
+// protected:
+//   void operator () ()
+//   {
+//     // write pid into 'directory/pid'
+
+//     // loop forever reading from 'directory/statuses'
+
+//     // pass the status information back to the slave, get a future
+//     // that tells us if/when that status has been acknowledged
+
+//     // wait on that future (regardless of writes into statuses)
+
+//     pause(1);
+//     // read from statuses
+//   }
+
+// private:
+//   const PID<Slave> slave;
+  
+// };
+
+}}} // namespace mesos { namespace internal { namespace slave {
 
 
 Slave::Slave(const Resources& _resources, bool _local,
@@ -90,8 +188,15 @@ void Slave::registerOptions(Configurator* configurator)
 
 Slave::~Slave()
 {
+  // TODO(benh): Shut down and free frameworks?
+
   // TODO(benh): Shut down and free executors? The executor should get
   // an "exited" event and initiate shutdown itself.
+
+  CHECK(reaper != NULL);
+  process::post(reaper->self(), process::TERMINATE);
+  process::wait(reaper->self());
+  delete reaper;
 }
 
 
@@ -131,7 +236,7 @@ Promise<state::SlaveState*> Slave::getState()
 
       state::Framework* framework =
         new state::Framework(id, f->info.name(),
-                             e->info.uri(), e->executorStatus,
+                             e->info.uri(), "",
                              cpus.value(), mem.value());
 
       state->frameworks.push_back(framework);
@@ -161,6 +266,10 @@ Promise<state::SlaveState*> Slave::getState()
 
 void Slave::initialize()
 {
+  // Setup the executor reaper.
+  reaper = new ExecutorReaper(self());
+  process::spawn(reaper);
+
   // Start all the statistics at 0.
   statistics.launched_tasks = 0;
   statistics.finished_tasks = 0;
@@ -267,7 +376,7 @@ void Slave::operator () ()
   slave.mutable_resources()->MergeFrom(resources);
 
   // Initialize isolation module.
-  isolationModule->initialize(this);
+  isolationModule->initialize(self(), conf, local);
 
   while (true) {
     serve(1);
@@ -370,7 +479,8 @@ void Slave::runTask(const FrameworkInfo& frameworkInfo,
       out.set_pid(framework->pid);
       out.mutable_task()->MergeFrom(task);
       send(executor->pid, out);
-      isolationModule->resourcesChanged(framework, executor);
+      isolationModule->resourcesChanged(framework->frameworkId, framework->info,
+                                        executor->info, executor->resources);
     }
   } else {
     // Launch an executor for this task.
@@ -383,8 +493,32 @@ void Slave::runTask(const FrameworkInfo& frameworkInfo,
     // Queue task until the executor starts up.
     executor->queuedTasks.push_back(task);
 
-    // Tell the isolation module to launch the executor.
-    isolationModule->launchExecutor(framework, executor);
+    // Determine the working directory for this executor.
+    const string& directory = getUniqueWorkDirectory(framework->frameworkId,
+                                                     executor->info.executor_id());
+
+    // Tell the isolation module to launch the executor. (TODO(benh):
+    // Let the isolation module possibly block by calling this from the executor handler.)
+    pid_t pid = isolationModule->launchExecutor(framework->frameworkId, framework->info,
+                                                executor->info, directory);
+
+    // For now, an isolation module returning 0 effectively indicates
+    // that the slave shouldn't try and reap it to determine if it has
+    // exited, but instead that will be done another way.
+
+    // Tell the executor reaper to monitor/reap this process.
+    if (pid != 0) {
+      process::dispatch(reaper->self(), &ExecutorReaper::reap,
+                        framework->frameworkId, executor->info.executor_id(), pid);
+    }
+
+//     // Create an executor handler to monitor the process(es) and read
+//     // it's task statuses, etc.
+//     executor->handler =
+//       new ExecutorHandler(framework->frameworkId, framework->info,
+//                           executor->info, directory, pid);
+
+//     process::spawn(executor->handler);
   }
 }
 
@@ -404,7 +538,8 @@ void Slave::killTask(const FrameworkID& frameworkId,
       // Update the resources locally, if an executor comes up
       // after this then it just won't receive this task.
       executor->removeTask(taskId);
-      isolationModule->resourcesChanged(framework, executor);
+      isolationModule->resourcesChanged(framework->frameworkId, framework->info,
+                                        executor->info, executor->resources);
 
       MSG<S2M_STATUS_UPDATE> out;
       out.mutable_framework_id()->MergeFrom(frameworkId);
@@ -549,7 +684,8 @@ void Slave::registerExecutor(const FrameworkID& frameworkId,
       executor->pid = from();
 
       // Now that the executor is up, set its resource limits.
-      isolationModule->resourcesChanged(framework, executor);
+      isolationModule->resourcesChanged(framework->frameworkId, framework->info,
+                                        executor->info, executor->resources);
 
       // Tell executor it's registered and give it any queued tasks.
       MSG<S2E_REGISTER_REPLY> out;
@@ -594,22 +730,26 @@ void Slave::statusUpdate(const FrameworkID& frameworkId,
         case TASK_FINISHED:
           statistics.finished_tasks++;
           executor->removeTask(status.task_id());
-          isolationModule->resourcesChanged(framework, executor);
+          isolationModule->resourcesChanged(framework->frameworkId, framework->info,
+                                            executor->info, executor->resources);
           break;
         case TASK_FAILED:
           statistics.failed_tasks++;
           executor->removeTask(status.task_id());
-          isolationModule->resourcesChanged(framework, executor);
+          isolationModule->resourcesChanged(framework->frameworkId, framework->info,
+                                            executor->info, executor->resources);
           break;
        case TASK_KILLED:
          statistics.killed_tasks++;
          executor->removeTask(status.task_id());
-         isolationModule->resourcesChanged(framework, executor);
+         isolationModule->resourcesChanged(framework->frameworkId, framework->info,
+                                           executor->info, executor->resources);
          break;
         case TASK_LOST:
           statistics.lost_tasks++;
           executor->removeTask(status.task_id());
-          isolationModule->resourcesChanged(framework, executor);
+          isolationModule->resourcesChanged(framework->frameworkId, framework->info,
+                                            executor->info, executor->resources);
           break;
       }
 
@@ -923,7 +1063,9 @@ void Slave::killFramework(Framework *framework, bool killExecutors)
       // module goes and kills it. We should really think about making
       // the semantics of this better.
 
-      isolationModule->killExecutor(framework, executor);
+      isolationModule->killExecutor(framework->frameworkId,
+                                    framework->info,
+                                    executor->info);
     }
 
     framework->destroyExecutor(executorId);
@@ -934,9 +1076,7 @@ void Slave::killFramework(Framework *framework, bool killExecutors)
 }
 
 
-// Called by isolation module when an executor process exits
-// TODO(benh): Make this callback be a message so that we can avoid
-// race conditions.
+// Called by the ExecutorReaper when an executor process exits.
 void Slave::executorExited(const FrameworkID& frameworkId, const ExecutorID& executorId, int result)
 {
   Framework* framework = getFramework(frameworkId);
@@ -953,6 +1093,10 @@ void Slave::executorExited(const FrameworkID& frameworkId, const ExecutorID& exe
       out.mutable_executor_id()->MergeFrom(executorId);
       out.set_result(result);
       send(master, out);
+
+      isolationModule->killExecutor(framework->frameworkId,
+                                    framework->info,
+                                    executor->info);
 
       framework->destroyExecutor(executorId);
 

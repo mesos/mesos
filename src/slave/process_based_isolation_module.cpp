@@ -1,100 +1,88 @@
 #include <map>
-#include <vector>
 
 #include "process_based_isolation_module.hpp"
-
-#include "common/foreach.hpp"
 
 using namespace mesos;
 using namespace mesos::internal;
 using namespace mesos::internal::slave;
 
-using boost::lexical_cast;
 using boost::unordered_map;
-using boost::unordered_set;
 
 using launcher::ExecutorLauncher;
 
-using std::cerr;
-using std::cout;
-using std::endl;
-using std::list;
-using std::make_pair;
+using process::PID;
+
 using std::map;
-using std::ostringstream;
-using std::pair;
-using std::queue;
 using std::string;
-using std::vector;
 
 
 ProcessBasedIsolationModule::ProcessBasedIsolationModule()
   : initialized(false) {}
 
 
-ProcessBasedIsolationModule::~ProcessBasedIsolationModule()
-{
-  // We need to wait until the reaper has completed because it
-  // accesses 'this' in order to make callbacks ... deleting 'this'
-  // could thus lead to a seg fault!
-  if (initialized) {
-    CHECK(reaper != NULL);
-    process::post(reaper->self(), process::TERMINATE);
-    process::wait(reaper->self());
-    delete reaper;
-  }
-}
+ProcessBasedIsolationModule::~ProcessBasedIsolationModule() {}
 
 
-void ProcessBasedIsolationModule::initialize(Slave *slave)
+void ProcessBasedIsolationModule::initialize(const PID<Slave>& slave,
+                                             const Configuration& conf,
+                                             bool local)
 {
   this->slave = slave;
-  reaper = new Reaper(this);
-  process::spawn(reaper);
-  initialized = true;
+  this->conf = conf;
+  this->local = local;
+  this->initialized = true;
 }
 
 
-void ProcessBasedIsolationModule::launchExecutor(Framework* framework, Executor* executor)
+pid_t ProcessBasedIsolationModule::launchExecutor(const FrameworkID& frameworkId,
+                                                  const FrameworkInfo& frameworkInfo,
+                                                  const ExecutorInfo& executorInfo,
+                                                  const string& directory)
 {
-  if (!initialized)
+  if (!initialized) {
     LOG(FATAL) << "Cannot launch executors before initialization!";
+  }
 
-  LOG(INFO) << "Starting executor for framework " << framework->frameworkId
-            << ": " << executor->info.uri();
+  LOG(INFO) << "Starting executor for framework " << frameworkId
+            << ": " << executorInfo.uri();
 
   pid_t pid;
-  if ((pid = fork()) == -1)
-    PLOG(FATAL) << "Failed to fork to launch new executor";
+  if ((pid = fork()) == -1) {
+    PLOG(ERROR) << "Failed to fork to launch new executor";
+  }
 
   if (pid) {
     // In parent process, record the pgid for killpg later.
     LOG(INFO) << "Started executor, OS pid = " << pid;
-    pgids[framework->frameworkId][executor->info.executor_id()] = pid;
-    executor->executorStatus = "PID: " + lexical_cast<string>(pid);
+    pgids[frameworkId][executorInfo.executor_id()] = pid;
   } else {
     // In child process, make cleanup easier.
 //     if (setpgid(0, 0) < 0)
 //       PLOG(FATAL) << "Failed to put executor in own process group";
-    if ((pid = setsid()) == -1)
+    if ((pid = setsid()) == -1) {
       PLOG(FATAL) << "Failed to put executor in own session";
+    }
     
-    createExecutorLauncher(framework, executor)->run();
+    createExecutorLauncher(frameworkId, frameworkInfo,
+                           executorInfo, directory)->run();
   }
+
+  return pid;
 }
 
 
-void ProcessBasedIsolationModule::killExecutor(Framework* framework, Executor* executor)
+void ProcessBasedIsolationModule::killExecutor(const FrameworkID& frameworkId,
+                                               const FrameworkInfo& frameworkInfo,
+                                               const ExecutorInfo& executorInfo)
 {
-  if (pgids[framework->frameworkId][executor->info.executor_id()] != -1) {
+  if (pgids[frameworkId][executorInfo.executor_id()] != -1) {
     // TODO(benh): Consider sending a SIGTERM, then after so much time
     // if it still hasn't exited do a SIGKILL (can use a libprocess
     // process for this).
     LOG(INFO) << "Sending SIGKILL to gpid "
-              << pgids[framework->frameworkId][executor->info.executor_id()];
-    killpg(pgids[framework->frameworkId][executor->info.executor_id()], SIGKILL);
-    pgids[framework->frameworkId][executor->info.executor_id()] = -1;
-    executor->executorStatus = "No executor running";
+              << pgids[frameworkId][executorInfo.executor_id()];
+    killpg(pgids[frameworkId][executorInfo.executor_id()], SIGKILL);
+    pgids[frameworkId][executorInfo.executor_id()] = -1;
 
     // TODO(benh): Kill all of the process's descendants? Perhaps
     // create a new libprocess process that continually tries to kill
@@ -102,78 +90,43 @@ void ProcessBasedIsolationModule::killExecutor(Framework* framework, Executor* e
     // to kill the executor last ... maybe this is just too much of a
     // burden?
 
-    pgids[framework->frameworkId].erase(executor->info.executor_id());
+    pgids[frameworkId].erase(executorInfo.executor_id());
   }
 }
 
 
-void ProcessBasedIsolationModule::resourcesChanged(Framework* framework, Executor* executor)
+void ProcessBasedIsolationModule::resourcesChanged(const FrameworkID& frameworkId,
+                                                   const FrameworkInfo& frameworkInfo,
+                                                   const ExecutorInfo& executorInfo,
+                                                   const Resources& resources)
 {
   // Do nothing; subclasses may override this.
 }
 
 
-ExecutorLauncher* ProcessBasedIsolationModule::createExecutorLauncher(Framework* framework, Executor* executor)
+ExecutorLauncher* ProcessBasedIsolationModule::createExecutorLauncher(const FrameworkID& frameworkId,
+                                                                      const FrameworkInfo& frameworkInfo,
+                                                                      const ExecutorInfo& executorInfo,
+                                                                      const string& directory)
 {
   // Create a map of parameters for the executor launcher.
   map<string, string> params;
 
-  for (int i = 0; i < executor->info.params().param_size(); i++) {
-    params[executor->info.params().param(i).key()] = 
-      executor->info.params().param(i).value();
+  for (int i = 0; i < executorInfo.params().param_size(); i++) {
+    params[executorInfo.params().param(i).key()] = 
+      executorInfo.params().param(i).value();
   }
 
-  return 
-    new ExecutorLauncher(framework->frameworkId,
-                         executor->info.executor_id(),
-                         executor->info.uri(),
-                         framework->info.user(),
-                         slave->getUniqueWorkDirectory(framework->frameworkId,
-                                                       executor->info.executor_id()),
-                         slave->self(),
-                         slave->getConfiguration().get("frameworks_home", ""),
-                         slave->getConfiguration().get("home", ""),
-                         slave->getConfiguration().get("hadoop_home", ""),
-                         !slave->local,
-                         slave->getConfiguration().get("switch_user", true),
-                         params);
-}
-
-
-ProcessBasedIsolationModule::Reaper::Reaper(ProcessBasedIsolationModule* m)
-  : module(m)
-{}
-
-
-void ProcessBasedIsolationModule::Reaper::operator () ()
-{
-  link(module->slave->self());
-  while (true) {
-    receive(1);
-    if (name() == process::TIMEOUT) {
-      // Check whether any child process has exited.
-      pid_t pid;
-      int status;
-      if ((pid = waitpid((pid_t) -1, &status, WNOHANG)) > 0) {
-        foreachpair (const FrameworkID& frameworkId, _, module->pgids) {
-          foreachpair (const ExecutorID& executorId, pid_t pgid, module->pgids[frameworkId]) {
-            if (pgid == pid) {
-              // Kill the process group to clean up the tasks.
-              LOG(INFO) << "Sending SIGKILL to gpid " << pgid;
-              killpg(pgid, SIGKILL);
-              module->pgids[frameworkId][executorId] = -1;
-              LOG(INFO) << "Telling slave of lost executor " << executorId
-                        << " of framework " << frameworkId;
-              // TODO(benh): This is broken if/when libprocess is parallel!
-              module->slave->executorExited(frameworkId, executorId, status);
-              module->pgids[frameworkId].erase(executorId);
-              break;
-            }
-          }
-        }
-      }
-    } else if (name() == process::TERMINATE || name() == process::EXITED) {
-      return;
-    }
-  }
+  return new ExecutorLauncher(frameworkId,
+                              executorInfo.executor_id(),
+                              executorInfo.uri(),
+                              frameworkInfo.user(),
+                              directory,
+                              slave,
+                              conf.get("frameworks_home", ""),
+                              conf.get("home", ""),
+                              conf.get("hadoop_home", ""),
+                              !local,
+                              conf.get("switch_user", true),
+                              params);
 }
