@@ -75,7 +75,7 @@ protected:
   /* Returns pointer and length of body of last dequeued (current) message. */
   const std::string& body() const;
 
-  /* Put a message at front of queue (will not reschedule process). */
+  /* Put a message at front of queue. */
   void inject(const UPID& from, const std::string& name, const char* data = NULL, size_t length = 0);
 
   /* Sends a message with data to PID. */
@@ -104,6 +104,12 @@ protected:
 
   /* Returns sub-second elapsed time (according to this process). */
   double elapsedTime();
+
+  /* Delegate incoming message's with the specified name to pid. */
+  void delegate(const std::string& name, const UPID& pid)
+  {
+    delegates[name] = pid;
+  }
 
   /* Install a handler for a message. */
   void installMessageHandler(const std::string& name, const std::tr1::function<void()>& handler)
@@ -154,12 +160,12 @@ private:
   void lock() { pthread_mutex_lock(&m); }
   void unlock() { pthread_mutex_unlock(&m); }
 
-  /* Enqueue the specified message, request, or delegator. */
-  void enqueue(Message* message);
+  /* Enqueue the specified message, request, or dispatcher. */
+  void enqueue(Message* message, bool inject = false);
   void enqueue(std::pair<HttpRequest*, Future<HttpResponse>*>* request);
-  void enqueue(std::tr1::function<void(ProcessBase*)>* delegator);
+  void enqueue(std::tr1::function<void(ProcessBase*)>* dispatcher);
 
-  /* Dequeue a message, request, or delegator, or returns NULL. */
+  /* Dequeue a message, request, or dispatcher, or returns NULL. */
   template <typename T>
   T* dequeue();
 
@@ -169,8 +175,11 @@ private:
   /* Queue of HTTP requests (with associated futures for responses). */
   std::deque<std::pair<HttpRequest*, Future<HttpResponse>*>*> requests;
 
-  /* Queue of dispatches. */
-  std::deque<std::tr1::function<void(ProcessBase*)>*> delegators;
+  /* Queue of dispatchers. */
+  std::deque<std::tr1::function<void(ProcessBase*)>*> dispatchers;
+
+  /* Delegates for messages. */
+  std::map<std::string, UPID> delegates;
 
   /* Handlers for messages. */
   std::map<std::string, std::tr1::function<void(void)> > messageHandlers;
@@ -239,11 +248,15 @@ PID<T> spawn(T* t, bool manage = false)
 
 
 /**
- * Wait for process to exit (returns true if actually waited on a process).
+ * Send a TERMINATE message to a process, injecting the message ahead
+ * of all other messages queued up for that process if requested. Note
+ * that currently terminate only works for local processes (in the
+ * future we plan to make this more explicit via the use of a PID
+ * instead of a UPID).
  *
- * @param PID id of the process
+ * @param inject if true message will be put on front of messae queue
  */
-bool wait(const UPID& pid);
+void terminate(const UPID& pid, bool inject = true);
 
 
 /**
@@ -251,9 +264,9 @@ bool wait(const UPID& pid);
  * true if actually waited on a process).
  *
  * @param PID id of the process
- * @param secs max time to wait
+ * @param secs max time to wait, 0 implies wait for ever
  */
-bool wait(const UPID& pid, double secs);
+bool wait(const UPID& pid, double secs = 0);
 
 
 /**
@@ -287,8 +300,8 @@ void post(const UPID& to, const std::string& name, const char* data = NULL, size
 namespace internal {
 
 template <typename T>
-void vdelegate(ProcessBase* process,
-               std::tr1::function<void(T*)>* thunk)
+void vdispatcher(ProcessBase* process,
+                 std::tr1::function<void(T*)>* thunk)
 {
   assert(process != NULL);
   assert(thunk != NULL);
@@ -298,9 +311,9 @@ void vdelegate(ProcessBase* process,
 
 
 template <typename R, typename T>
-void pdelegate(ProcessBase* process,
-               std::tr1::function<Promise<R>(T*)>* thunk,
-               Future<R>* future)
+void pdispatcher(ProcessBase* process,
+                 std::tr1::function<Promise<R>(T*)>* thunk,
+                 Future<R>* future)
 {
   assert(process != NULL);
   assert(thunk != NULL);
@@ -312,9 +325,9 @@ void pdelegate(ProcessBase* process,
 
 
 template <typename R, typename T>
-void delegate(ProcessBase* process,
-              std::tr1::function<R(T*)>* thunk,
-              Future<R>* future)
+void dispatcher(ProcessBase* process,
+                std::tr1::function<R(T*)>* thunk,
+                Future<R>* future)
 {
   assert(process != NULL);
   assert(thunk != NULL);
@@ -325,8 +338,8 @@ void delegate(ProcessBase* process,
 }
 
 
-/* Dispatches the delegator to the specified process. */
-void dispatcher(const UPID& pid, std::tr1::function<void(ProcessBase*)>* delegator);
+/* Dispatches the dispatcher for the specified process. */
+void dispatch(const UPID& pid, std::tr1::function<void(ProcessBase*)>* dispatcher);
 
 } // namespace internal {
 
@@ -343,12 +356,12 @@ void dispatch(const PID<T>& pid, void (T::*method)())
   std::tr1::function<void(T*)>* thunk =
     new std::tr1::function<void(T*)>(std::tr1::bind(method, std::tr1::placeholders::_1));
 
-  std::tr1::function<void(ProcessBase*)>* delegator =
-    new std::tr1::function<void(ProcessBase*)>(std::tr1::bind(&internal::vdelegate<T>,
+  std::tr1::function<void(ProcessBase*)>* dispatcher =
+    new std::tr1::function<void(ProcessBase*)>(std::tr1::bind(&internal::vdispatcher<T>,
                                                               std::tr1::placeholders::_1,
                                                               thunk));
 
-  internal::dispatcher(pid, delegator);
+  internal::dispatch(pid, dispatcher);
 }
 
 
@@ -366,12 +379,12 @@ void dispatch(const PID<T>& pid, void (T::*method)(P1), A1 a1)
     new std::tr1::function<void(T*)>(std::tr1::bind(method, std::tr1::placeholders::_1,
                                                     a1));
 
-  std::tr1::function<void(ProcessBase*)>* delegator =
-    new std::tr1::function<void(ProcessBase*)>(std::tr1::bind(&internal::vdelegate<T>,
+  std::tr1::function<void(ProcessBase*)>* dispatcher =
+    new std::tr1::function<void(ProcessBase*)>(std::tr1::bind(&internal::vdispatcher<T>,
                                                               std::tr1::placeholders::_1,
                                                               thunk));
 
-  internal::dispatcher(pid, delegator);
+  internal::dispatch(pid, dispatcher);
 }
 
 
@@ -392,12 +405,12 @@ void dispatch(const PID<T>& pid, void (T::*method)(P1, P2), A1 a1, A2 a2)
     new std::tr1::function<void(T*)>(std::tr1::bind(method, std::tr1::placeholders::_1,
                                                     a1, a2));
 
-  std::tr1::function<void(ProcessBase*)>* delegator =
-    new std::tr1::function<void(ProcessBase*)>(std::tr1::bind(&internal::vdelegate<T>,
+  std::tr1::function<void(ProcessBase*)>* dispatcher =
+    new std::tr1::function<void(ProcessBase*)>(std::tr1::bind(&internal::vdispatcher<T>,
                                                               std::tr1::placeholders::_1,
                                                               thunk));
 
-  internal::dispatcher(pid, delegator);
+  internal::dispatch(pid, dispatcher);
 }
 
 
@@ -420,12 +433,12 @@ void dispatch(const PID<T>& pid, void (T::*method)(P1, P2, P3),
     new std::tr1::function<void(T*)>(std::tr1::bind(method, std::tr1::placeholders::_1,
                                                     a1, a2, a3));
 
-  std::tr1::function<void(ProcessBase*)>* delegator =
-    new std::tr1::function<void(ProcessBase*)>(std::tr1::bind(&internal::vdelegate<T>,
+  std::tr1::function<void(ProcessBase*)>* dispatcher =
+    new std::tr1::function<void(ProcessBase*)>(std::tr1::bind(&internal::vdispatcher<T>,
                                                               std::tr1::placeholders::_1,
                                                               thunk));
 
-  internal::dispatcher(pid, delegator);
+  internal::dispatch(pid, dispatcher);
 }
 
 
@@ -449,12 +462,12 @@ void dispatch(const PID<T>& pid, void (T::*method)(P1, P2, P3, P4),
     new std::tr1::function<void(T*)>(std::tr1::bind(method, std::tr1::placeholders::_1,
                                                     a1, a2, a3, a4));
 
-  std::tr1::function<void(ProcessBase*)>* delegator =
-    new std::tr1::function<void(ProcessBase*)>(std::tr1::bind(&internal::vdelegate<T>,
+  std::tr1::function<void(ProcessBase*)>* dispatcher =
+    new std::tr1::function<void(ProcessBase*)>(std::tr1::bind(&internal::vdispatcher<T>,
                                                               std::tr1::placeholders::_1,
                                                               thunk));
 
-  internal::dispatcher(pid, delegator);
+  internal::dispatch(pid, dispatcher);
 }
 
 
@@ -479,12 +492,12 @@ void dispatch(const PID<T>& pid, void (T::*method)(P1, P2, P3, P4, P5),
     new std::tr1::function<void(T*)>(std::tr1::bind(method, std::tr1::placeholders::_1,
                                                     a1, a2, a3, a4, a5));
 
-  std::tr1::function<void(ProcessBase*)>* delegator =
-    new std::tr1::function<void(ProcessBase*)>(std::tr1::bind(&internal::vdelegate<T>,
+  std::tr1::function<void(ProcessBase*)>* dispatcher =
+    new std::tr1::function<void(ProcessBase*)>(std::tr1::bind(&internal::vdispatcher<T>,
                                                               std::tr1::placeholders::_1,
                                                               thunk));
 
-  internal::dispatcher(pid, delegator);
+  internal::dispatch(pid, dispatcher);
 }
 
 
@@ -504,12 +517,12 @@ Future<R> dispatch(const PID<T>& pid, Promise<R> (T::*method)())
 
   Future<R>* future = new Future<R>();
 
-  std::tr1::function<void(ProcessBase*)>* delegator =
-    new std::tr1::function<void(ProcessBase*)>(std::tr1::bind(&internal::pdelegate<R, T>,
+  std::tr1::function<void(ProcessBase*)>* dispatcher =
+    new std::tr1::function<void(ProcessBase*)>(std::tr1::bind(&internal::pdispatcher<R, T>,
                                                               std::tr1::placeholders::_1,
                                                               thunk, future));
 
-  internal::dispatcher(pid, delegator);
+  internal::dispatch(pid, dispatcher);
 
   return *future;
 }
@@ -533,12 +546,12 @@ Future<R> dispatch(const PID<T>& pid, Promise<R> (T::*method)(P1), A1 a1)
 
   Future<R>* future = new Future<R>();
 
-  std::tr1::function<void(ProcessBase*)>* delegator =
-    new std::tr1::function<void(ProcessBase*)>(std::tr1::bind(&internal::pdelegate<R, T>,
+  std::tr1::function<void(ProcessBase*)>* dispatcher =
+    new std::tr1::function<void(ProcessBase*)>(std::tr1::bind(&internal::pdispatcher<R, T>,
                                                               std::tr1::placeholders::_1,
                                                               thunk, future));
 
-  internal::dispatcher(pid, delegator);
+  internal::dispatch(pid, dispatcher);
 
   return *future;
 }
@@ -566,12 +579,12 @@ Future<R> dispatch(const PID<T>& pid, Promise<R> (T::*method)(P1, P2),
 
   Future<R>* future = new Future<R>();
 
-  std::tr1::function<void(ProcessBase*)>* delegator =
-    new std::tr1::function<void(ProcessBase*)>(std::tr1::bind(&internal::pdelegate<R, T>,
+  std::tr1::function<void(ProcessBase*)>* dispatcher =
+    new std::tr1::function<void(ProcessBase*)>(std::tr1::bind(&internal::pdispatcher<R, T>,
                                                               std::tr1::placeholders::_1,
                                                               thunk, future));
 
-  internal::dispatcher(pid, delegator);
+  internal::dispatch(pid, dispatcher);
 
   return *future;
 }
@@ -600,12 +613,12 @@ Future<R> dispatch(const PID<T>& pid, Promise<R> (T::*method)(P1, P2, P3),
 
   Future<R>* future = new Future<R>();
 
-  std::tr1::function<void(ProcessBase*)>* delegator =
-    new std::tr1::function<void(ProcessBase*)>(std::tr1::bind(&internal::pdelegate<R, T>,
+  std::tr1::function<void(ProcessBase*)>* dispatcher =
+    new std::tr1::function<void(ProcessBase*)>(std::tr1::bind(&internal::pdispatcher<R, T>,
                                                               std::tr1::placeholders::_1,
                                                               thunk, future));
 
-  internal::dispatcher(pid, delegator);
+  internal::dispatch(pid, dispatcher);
 
   return *future;
 }
@@ -635,12 +648,12 @@ Future<R> dispatch(const PID<T>& pid, Promise<R> (T::*method)(P1, P2, P3, P4),
 
   Future<R>* future = new Future<R>();
 
-  std::tr1::function<void(ProcessBase*)>* delegator =
-    new std::tr1::function<void(ProcessBase*)>(std::tr1::bind(&internal::pdelegate<R, T>,
+  std::tr1::function<void(ProcessBase*)>* dispatcher =
+    new std::tr1::function<void(ProcessBase*)>(std::tr1::bind(&internal::pdispatcher<R, T>,
                                                               std::tr1::placeholders::_1,
                                                               thunk, future));
 
-  internal::dispatcher(pid, delegator);
+  internal::dispatch(pid, dispatcher);
 
   return *future;
 }
@@ -671,12 +684,12 @@ Future<R> dispatch(const PID<T>& pid, Promise<R> (T::*method)(P1, P2, P3, P4, P5
 
   Future<R>* future = new Future<R>();
 
-  std::tr1::function<void(ProcessBase*)>* delegator =
-    new std::tr1::function<void(ProcessBase*)>(std::tr1::bind(&internal::pdelegate<R, T>,
+  std::tr1::function<void(ProcessBase*)>* dispatcher =
+    new std::tr1::function<void(ProcessBase*)>(std::tr1::bind(&internal::pdispatcher<R, T>,
                                                               std::tr1::placeholders::_1,
                                                               thunk, future));
 
-  internal::dispatcher(pid, delegator);
+  internal::dispatch(pid, dispatcher);
 
   return *future;
 }
@@ -697,12 +710,12 @@ Future<R> dispatch(const PID<T>& pid, R (T::*method)())
 
   Future<R>* future = new Future<R>();
 
-  std::tr1::function<void(ProcessBase*)>* delegator =
-    new std::tr1::function<void(ProcessBase*)>(std::tr1::bind(&internal::delegate<R, T>,
+  std::tr1::function<void(ProcessBase*)>* dispatcher =
+    new std::tr1::function<void(ProcessBase*)>(std::tr1::bind(&internal::dispatcher<R, T>,
                                                               std::tr1::placeholders::_1,
                                                               thunk, future));
 
-  internal::dispatcher(pid, delegator);
+  internal::dispatch(pid, dispatcher);
 
   return *future;
 }
@@ -725,12 +738,12 @@ Future<R> dispatch(const PID<T>& pid, R (T::*method)(P1), A1 a1)
 
   Future<R>* future = new Future<R>();
 
-  std::tr1::function<void(ProcessBase*)>* delegator =
-    new std::tr1::function<void(ProcessBase*)>(std::tr1::bind(&internal::delegate<R, T>,
+  std::tr1::function<void(ProcessBase*)>* dispatcher =
+    new std::tr1::function<void(ProcessBase*)>(std::tr1::bind(&internal::dispatcher<R, T>,
                                                               std::tr1::placeholders::_1,
                                                               thunk, future));
 
-  internal::dispatcher(pid, delegator);
+  internal::dispatch(pid, dispatcher);
 
   return *future;
 }
@@ -758,12 +771,12 @@ Future<R> dispatch(const PID<T>& pid, R (T::*method)(P1, P2),
 
   Future<R>* future = new Future<R>();
 
-  std::tr1::function<void(ProcessBase*)>* delegator =
-    new std::tr1::function<void(ProcessBase*)>(std::tr1::bind(&internal::delegate<R, T>,
+  std::tr1::function<void(ProcessBase*)>* dispatcher =
+    new std::tr1::function<void(ProcessBase*)>(std::tr1::bind(&internal::dispatcher<R, T>,
                                                               std::tr1::placeholders::_1,
                                                               thunk, future));
 
-  internal::dispatcher(pid, delegator);
+  internal::dispatch(pid, dispatcher);
 
   return *future;
 }
@@ -792,12 +805,12 @@ Future<R> dispatch(const PID<T>& pid, R (T::*method)(P1, P2, P3),
 
   Future<R>* future = new Future<R>();
 
-  std::tr1::function<void(ProcessBase*)>* delegator =
-    new std::tr1::function<void(ProcessBase*)>(std::tr1::bind(&internal::delegate<R, T>,
+  std::tr1::function<void(ProcessBase*)>* dispatcher =
+    new std::tr1::function<void(ProcessBase*)>(std::tr1::bind(&internal::dispatcher<R, T>,
                                                               std::tr1::placeholders::_1,
                                                               thunk, future));
 
-  internal::dispatcher(pid, delegator);
+  internal::dispatch(pid, dispatcher);
 
   return *future;
 }
@@ -827,12 +840,12 @@ Future<R> dispatch(const PID<T>& pid, R (T::*method)(P1, P2, P3, P4),
 
   Future<R>* future = new Future<R>();
 
-  std::tr1::function<void(ProcessBase*)>* delegator =
-    new std::tr1::function<void(ProcessBase*)>(std::tr1::bind(&internal::delegate<R, T>,
+  std::tr1::function<void(ProcessBase*)>* dispatcher =
+    new std::tr1::function<void(ProcessBase*)>(std::tr1::bind(&internal::dispatcher<R, T>,
                                                               std::tr1::placeholders::_1,
                                                               thunk, future));
 
-  internal::dispatcher(pid, delegator);
+  internal::dispatch(pid, dispatcher);
 
   return *future;
 }
@@ -863,12 +876,12 @@ Future<R> dispatch(const PID<T>& pid, R (T::*method)(P1, P2, P3, P4, P5),
 
   Future<R>* future = new Future<R>();
 
-  std::tr1::function<void(ProcessBase*)>* delegator =
-    new std::tr1::function<void(ProcessBase*)>(std::tr1::bind(&internal::delegate<R, T>,
+  std::tr1::function<void(ProcessBase*)>* dispatcher =
+    new std::tr1::function<void(ProcessBase*)>(std::tr1::bind(&internal::dispatcher<R, T>,
                                                               std::tr1::placeholders::_1,
                                                               thunk, future));
 
-  internal::dispatcher(pid, delegator);
+  internal::dispatch(pid, dispatcher);
 
   return *future;
 }

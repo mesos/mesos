@@ -348,13 +348,14 @@ public:
 
   bool deliver(Message* message, ProcessBase *sender = NULL);
   bool deliver(int c, HttpRequest* request, ProcessBase *sender = NULL);
-  bool deliver(const UPID& to, function<void(ProcessBase*)>* delegator, ProcessBase *sender = NULL);
+  bool deliver(const UPID& to, function<void(ProcessBase*)>* dispatcher, ProcessBase *sender = NULL);
 
   UPID spawn(ProcessBase *process, bool manage);
   void link(ProcessBase *process, const UPID &to);
   bool receive(ProcessBase *process, double secs);
   bool serve(ProcessBase *process, double secs);
   void pause(ProcessBase *process, double secs);
+  void terminate(const UPID& pid, bool inject, ProcessBase* sender = NULL);
   bool wait(ProcessBase *process, const UPID &pid);
   bool external_wait(const UPID &pid);
   bool poll(ProcessBase *process, int fd, int op, double secs, bool ignore);
@@ -1765,9 +1766,9 @@ bool ProcessManager::deliver(int c, HttpRequest *request, ProcessBase *sender)
 
 
 // TODO(benh): Refactor and share code with above!
-bool ProcessManager::deliver(const UPID& to, function<void(ProcessBase*)>* delegator, ProcessBase *sender)
+bool ProcessManager::deliver(const UPID& to, function<void(ProcessBase*)>* dispatcher, ProcessBase *sender)
 {
-  CHECK(delegator != NULL);
+  CHECK(dispatcher != NULL);
 
   if (ProcessReference receiver = use(to)) {
     // If we have a local sender AND we are using a manual clock
@@ -1786,9 +1787,9 @@ bool ProcessManager::deliver(const UPID& to, function<void(ProcessBase*)>* deleg
       }
     }
 
-    receiver->enqueue(delegator);
+    receiver->enqueue(dispatcher);
   } else {
-    delete delegator;
+    delete dispatcher;
     return false;
   }
 
@@ -1957,7 +1958,7 @@ bool ProcessManager::serve(ProcessBase *process, double secs)
     /* Ensure nothing enqueued since check in ProcessBase::serve. */
     if (process->messages.empty() &&
         process->requests.empty() &&
-        process->delegators.empty()) {
+        process->dispatchers.empty()) {
       if (secs > 0) {
         /* Create timeout. */
         const timeout &timeout = create_timeout(process, secs);
@@ -2025,6 +2026,26 @@ void ProcessManager::pause(ProcessBase *process, double secs)
     }
   }
   process->unlock();
+}
+
+
+void ProcessManager::terminate(const UPID& pid, bool inject, ProcessBase* sender)
+{
+  if (ProcessReference process = use(pid)) {
+    if (sender != NULL) {
+      synchronized (timeouts) {
+        if (clk != NULL) {
+          ev_tstamp tstamp =
+            max(clk->getCurrent(process), clk->getCurrent(sender));
+          clk->setCurrent(process, tstamp);
+        }
+      }
+
+      process->enqueue(encode(sender->self(), pid, TERMINATE), inject);
+    } else {
+      process->enqueue(encode(UPID(), pid, TERMINATE), inject);
+    }
+  }
 }
 
 
@@ -2351,11 +2372,11 @@ void ProcessManager::cleanup(ProcessBase *process)
         delete request;
       }
 
-      // Free any pending delegators.
-      while (!process->delegators.empty()) {
-        function<void(ProcessBase*)>* delegator = process->delegators.front();
-        process->delegators.pop_front();
-        delete delegator;
+      // Free any pending dispatchers.
+      while (!process->dispatchers.empty()) {
+        function<void(ProcessBase*)>* dispatcher = process->dispatchers.front();
+        process->dispatchers.pop_front();
+        delete dispatcher;
       }
 
       // Free current message.
@@ -2589,7 +2610,7 @@ ProcessBase::ProcessBase(const std::string& _id)
 ProcessBase::~ProcessBase() {}
 
 
-void ProcessBase::enqueue(Message* message)
+void ProcessBase::enqueue(Message* message, bool inject)
 {
   CHECK(message != NULL);
 
@@ -2605,30 +2626,48 @@ void ProcessBase::enqueue(Message* message)
     }
   }
 
+  UPID delegate;
+
   lock();
   {
     CHECK(state != FINISHED);
 
-    messages.push_back(message);
+    // Check and see if we should delegate this message.
+    if (delegates.count(message->name) > 0) {
+      delegate = delegates[message->name];
+    } else {
+      if (!inject) {
+        messages.push_back(message);
+      } else {
+        messages.push_front(message);
+      }
 
-    if (state == RECEIVING || state == SERVING) {
-      state = READY;
-      process_manager->enqueue(this);
-    } else if (state == POLLING) {
-      state = INTERRUPTED;
-      process_manager->enqueue(this);
+      if (state == RECEIVING || state == SERVING) {
+        state = READY;
+        process_manager->enqueue(this);
+      } else if (state == POLLING) {
+        state = INTERRUPTED;
+        process_manager->enqueue(this);
+      }
+
+      CHECK(state == INIT ||
+            state == READY ||
+            state == RUNNING ||
+            state == PAUSED ||
+            state == WAITING ||
+            state == INTERRUPTED ||
+            state == TIMEDOUT ||
+            state == FINISHING);
     }
-
-    CHECK(state == INIT ||
-	  state == READY ||
-	  state == RUNNING ||
-	  state == PAUSED ||
-	  state == WAITING ||
-	  state == INTERRUPTED ||
-	  state == TIMEDOUT ||
-	  state == FINISHING);
   }
   unlock();
+
+  // Delegate this message if necessary.
+  if (delegate != UPID()) {
+    VLOG(1) << "Delegating message '" << message->name << "' to " << delegate;
+    message->to = delegate;
+    transport(message, this);
+  }
 }
 
 
@@ -2666,9 +2705,9 @@ void ProcessBase::enqueue(pair<HttpRequest*, Future<HttpResponse>*>* request)
 }
 
 
-void ProcessBase::enqueue(function<void(ProcessBase*)>* delegator)
+void ProcessBase::enqueue(function<void(ProcessBase*)>* dispatcher)
 {
-  CHECK(delegator != NULL);
+  CHECK(dispatcher != NULL);
 
   // TODO(benh): Support filtering dispatches.
 
@@ -2676,7 +2715,7 @@ void ProcessBase::enqueue(function<void(ProcessBase*)>* delegator)
   {
     CHECK(state != FINISHED);
 
-    delegators.push_back(delegator);
+    dispatchers.push_back(dispatcher);
 
     if (state == SERVING) {
       state = READY;
@@ -2741,19 +2780,19 @@ pair<HttpRequest*, Future<HttpResponse>*>* ProcessBase::dequeue()
 template <>
 function<void(ProcessBase*)> * ProcessBase::dequeue()
 {
-  function<void(ProcessBase*)> *delegator = NULL;
+  function<void(ProcessBase*)> *dispatcher = NULL;
 
   lock();
   {
     CHECK(state == RUNNING);
-    if (!delegators.empty()) {
-      delegator = delegators.front();
-      delegators.pop_front();
+    if (!dispatchers.empty()) {
+      dispatcher = dispatchers.front();
+      dispatchers.pop_front();
     }
   }
   unlock();
 
-  return delegator;
+  return dispatcher;
 }
 
 
@@ -2762,26 +2801,7 @@ void ProcessBase::inject(const UPID& from, const string& name, const char* data,
   if (!from)
     return;
 
-  // Encode outgoing message.
-  Message *message = encode(from, pid, name, string(data, length));
-
-  // TODO(benh): Put filter inside lock statement below so that we can
-  // guarantee the order of the messages seen by a filter are the same
-  // as the order of messages seen by the process.
-  synchronized (filterer) {
-    if (filterer != NULL) {
-      if (filterer->filter(message)) {
-        delete message;
-        return;
-      }
-    }
-  }
-
-  lock();
-  {
-    messages.push_front(message);
-  }
-  unlock();
+  enqueue(encode(from, pid, name, string(data, length)), true);
 }
 
 
@@ -2840,6 +2860,8 @@ string ProcessBase::receive(double secs)
 
 string ProcessBase::serve(double secs, bool once)
 {
+  double startTime = elapsedTime();
+
   do {
     // Free current message.
     if (current != NULL) {
@@ -2847,10 +2869,10 @@ string ProcessBase::serve(double secs, bool once)
       current = NULL;
     }
 
-    // Check if there is a message, an HTTP request, or a delegator.
+    // Check if there is a message, an HTTP request, or a dispatcher.
   check:
     pair<HttpRequest*, Future<HttpResponse>*>* request;
-    function<void(ProcessBase*)>* delegator;
+    function<void(ProcessBase*)>* dispatcher;
     if ((request = dequeue<pair<HttpRequest*, Future<HttpResponse>*> >()) != NULL) {
       size_t index = request->first->path.find('/', 1);
       index = index != string::npos ? index + 1 : request->first->path.size();
@@ -2866,9 +2888,9 @@ string ProcessBase::serve(double secs, bool once)
       delete request->second;
       delete request;
       continue;
-    } else if ((delegator = dequeue<function<void(ProcessBase*)> >()) != NULL) {
-      (*delegator)(this);
-      delete delegator;
+    } else if ((dispatcher = dequeue<function<void(ProcessBase*)> >()) != NULL) {
+      (*dispatcher)(this);
+      delete dispatcher;
       continue;
     } else if ((current = dequeue<Message>()) != NULL) {
       if (messageHandlers.count(name()) > 0) {
@@ -2881,6 +2903,14 @@ string ProcessBase::serve(double secs, bool once)
 
     // Okay, nothing found, possibly block in ProcessManager::serve.
     if (pthread_self() == proc_thread) {
+      // Avoid blocking if seconds has elapsed.
+      if (secs > 0) {
+        secs = secs - (elapsedTime() - startTime);
+        if (secs <= 0) {
+          secs = -1;
+        }
+      }
+
       // Avoid blocking if negative seconds.
       if (secs >= 0) {
         if (!process_manager->serve(this, secs)) {
@@ -2891,7 +2921,7 @@ string ProcessBase::serve(double secs, bool once)
           {
             CHECK(!messages.empty() ||
 		  !requests.empty() ||
-		  !delegators.empty());
+		  !dispatchers.empty());
           }
           unlock();
           goto check;
@@ -3048,6 +3078,8 @@ UPID ProcessBase::spawn(ProcessBase* process, bool manage)
       }
     }
 
+    VLOG(1) << "Spawning process " << process->self();
+
     return process_manager->spawn(process, manage);
   } else {
     return UPID();
@@ -3055,31 +3087,13 @@ UPID ProcessBase::spawn(ProcessBase* process, bool manage)
 }
 
 
-bool wait(const UPID& pid)
+void terminate(const UPID& pid, bool inject)
 {
-  initialize();
-
-  if (!pid) {
-    return false;
-  }
-
-  // N.B. This could result in a deadlock! We could check if such was
-  // the case by doing:
-  //
-  //   if (proc_process && proc_process->pid == pid) {
-  //     handle deadlock here;
-  //   }
-  //
-  // But for now, deadlocks seem like better bugs to try and fix than
-  // segmentation faults that might occur because a client thinks it
-  // has waited on a process and it is now finished (and can be
-  // cleaned up).
-
   if (pthread_self() != proc_thread) {
-    return process_manager->external_wait(pid);
+    process_manager->terminate(pid, inject);
+  } else {
+    process_manager->terminate(pid, inject, proc_process);
   }
-
-  return process_manager->wait(proc_process, pid);
 }
 
 
@@ -3117,7 +3131,23 @@ bool wait(const UPID& pid, double secs)
   }
 
   if (secs == 0) {
-    return wait(pid);
+    // N.B. This could result in a deadlock! We could check if such
+    // was the case by doing:
+    //
+    //   if (proc_process && proc_process->pid == pid) {
+    //     handle deadlock here;
+    //   }
+    //
+    // But for now, deadlocks seem like better bugs to try and fix
+    // than segmentation faults that might occur because a client
+    // thinks it has waited on a process and it is now finished (and
+    // can be cleaned up).
+
+    if (pthread_self() != proc_thread) {
+      return process_manager->external_wait(pid);
+    }
+
+    return process_manager->wait(proc_process, pid);
   }
 
   bool waited = false;
@@ -3161,14 +3191,14 @@ void post(const UPID& to, const string& name, const char* data, size_t length)
 
 namespace internal {
 
-void dispatcher(const UPID& pid, function<void(ProcessBase*)>* delegator)
+void dispatch(const UPID& pid, function<void(ProcessBase*)>* dispatcher)
 {
   initialize();
 
-  if (proc_process != NULL) {
-    process_manager->deliver(pid, delegator, proc_process);
+  if (pthread_self() != proc_thread) {
+    process_manager->deliver(pid, dispatcher);
   } else {
-    process_manager->deliver(pid, delegator);
+    process_manager->deliver(pid, dispatcher, proc_process);
   }
 }
 

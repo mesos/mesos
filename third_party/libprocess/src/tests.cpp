@@ -1,8 +1,10 @@
 #include <gmock/gmock.h>
 
+#include <process/latch.hpp>
 #include <process/process.hpp>
 #include <process/run.hpp>
 
+using process::Latch;
 using process::Future;
 using process::PID;
 using process::Process;
@@ -215,6 +217,91 @@ TEST(libprocess, thunk)
   int result = process::run(&Thunk::run, 21, 21);
 
   EXPECT_EQ(42, result);
+}
+
+
+class DelegatorProcess : public Process<DelegatorProcess>
+{
+public:
+  DelegatorProcess(const UPID& delegatee)
+  {
+    delegate("func", delegatee);
+  }
+};
+
+
+class DelegateeProcess : public Process<DelegateeProcess>
+{
+public:
+  DelegateeProcess()
+  {
+    installMessageHandler("func", &DelegateeProcess::func);
+  }
+
+  MOCK_METHOD0(func, void());
+};
+
+
+TEST(libprocess, delegate)
+{
+  ASSERT_TRUE(GTEST_IS_THREADSAFE);
+
+  DelegateeProcess delegatee;
+  DelegatorProcess delegator(delegatee.self());
+
+  EXPECT_CALL(delegatee, func())
+    .Times(1);
+
+  process::spawn(&delegator);
+  process::spawn(&delegatee);
+
+  process::post(delegator.self(), "func");
+
+  process::post(delegator.self(), process::TERMINATE);
+  process::post(delegatee.self(), process::TERMINATE);
+
+  process::wait(delegator.self());
+  process::wait(delegatee.self());
+}
+
+
+class TerminateProcess : public Process<TerminateProcess>
+{
+public:
+  TerminateProcess(Latch* _latch) : latch(_latch) {}
+
+protected:
+  virtual void operator () ()
+  {
+    latch->await();
+    receive();
+    EXPECT_EQ(process::TERMINATE, name());
+  }
+
+private:
+  Latch* latch;
+};
+
+
+TEST(libprocess, terminate)
+{
+  ASSERT_TRUE(GTEST_IS_THREADSAFE);
+
+  Latch latch;
+
+  TerminateProcess process(&latch);
+
+  process::spawn(&process);
+
+  process::post(process.self(), "one");
+  process::post(process.self(), "two");
+  process::post(process.self(), "three");
+
+  process::terminate(process.self());
+
+  latch.trigger();
+  
+  process::wait(process.self());
 }
 
 
