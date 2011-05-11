@@ -15,8 +15,6 @@
 namespace mesos { namespace internal { namespace slave {
 
 class Slave;
-class Framework;
-class Executor;
 
 
 class IsolationModule {

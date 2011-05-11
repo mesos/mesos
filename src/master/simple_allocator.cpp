@@ -235,7 +235,7 @@ void SimpleAllocator::makeNewOffers(const vector<Slave*>& slaves)
   }
   
   // Clear refusers on any slave that has been refused by everyone
-  foreachpair (Slave* slave, _, freeResources) {
+  foreachkey (Slave* slave, freeResources) {
     unordered_set<Framework*>& refs = refusers[slave];
     if (refs.size() == ordering.size()) {
       VLOG(1) << "Clearing refusers for " << slave

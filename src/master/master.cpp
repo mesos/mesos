@@ -4,8 +4,6 @@
 
 #include <glog/logging.h>
 
-#include <google/protobuf/descriptor.h>
-
 #include <process/run.hpp>
 
 #include "config/config.hpp"
@@ -213,11 +211,11 @@ Master::~Master()
 {
   LOG(INFO) << "Shutting down master";
 
-  foreachpaircopy (_, Framework* framework, frameworks) {
+  foreachvaluecopy (Framework* framework, frameworks) {
     removeFramework(framework);
   }
 
-  foreachpaircopy (_, Slave* slave, slaves) {
+  foreachvaluecopy (Slave* slave, slaves) {
     removeSlave(slave);
   }
 
@@ -249,7 +247,7 @@ Promise<state::MasterState*> Master::getState()
   state::MasterState* state =
     new state::MasterState(build::DATE, build::USER, self());
 
-  foreachpair (_, Slave* s, slaves) {
+  foreachvalue (Slave* s, slaves) {
     Resources resources(s->info.resources());
     Resource::Scalar cpus;
     Resource::Scalar mem;
@@ -266,7 +264,7 @@ Promise<state::MasterState*> Master::getState()
     state->slaves.push_back(slave);
   }
 
-  foreachpair (_, Framework* f, frameworks) {
+  foreachvalue (Framework* f, frameworks) {
     Resources resources(f->resources);
     Resource::Scalar cpus;
     Resource::Scalar mem;
@@ -282,7 +280,7 @@ Promise<state::MasterState*> Master::getState()
 
     state->frameworks.push_back(framework);
 
-    foreachpair (_, Task* t, f->tasks) {
+    foreachvalue (Task* t, f->tasks) {
       Resources resources(t->resources());
       Resource::Scalar cpus;
       Resource::Scalar mem;
@@ -332,7 +330,7 @@ Promise<state::MasterState*> Master::getState()
 vector<Framework*> Master::getActiveFrameworks()
 {
   vector <Framework*> result;
-  foreachpair(_, Framework* framework, frameworks) {
+  foreachvalue (Framework* framework, frameworks) {
     if (framework->active) {
       result.push_back(framework);
     }
@@ -345,7 +343,7 @@ vector<Framework*> Master::getActiveFrameworks()
 vector<Slave*> Master::getActiveSlaves()
 {
   vector <Slave*> result;
-  foreachpair(_, Slave* slave, slaves) {
+  foreachvalue (Slave* slave, slaves) {
     if (slave->active) {
       result.push_back(slave);
     }
@@ -421,7 +419,7 @@ void Master::operator () ()
     serve();
     if (name() == process::TERMINATE) {
       LOG(INFO) << "Asked to terminate by " << from();
-      foreachpair (_, Slave* slave, slaves) {
+      foreachvalue (Slave* slave, slaves) {
         send(slave->pid, process::TERMINATE);
       }
       break;
@@ -493,9 +491,9 @@ void Master::initialize()
           &FrameworkMessageMessage::data);
 
   install(F2M_STATUS_UPDATE_ACK, &Master::statusUpdateAck,
-          &StatusUpdateAckMessage::framework_id,
-          &StatusUpdateAckMessage::task_id,
-          &StatusUpdateAckMessage::slave_id);
+          &StatusUpdateAcknowledgedMessage::framework_id,
+          &StatusUpdateAcknowledgedMessage::task_id,
+          &StatusUpdateAcknowledgedMessage::slave_id);
 
   install(S2M_REGISTER_SLAVE, &Master::registerSlave,
           &RegisterSlaveMessage::slave);
@@ -509,8 +507,8 @@ void Master::initialize()
           &UnregisterSlaveMessage::slave_id);
 
   install(S2M_STATUS_UPDATE, &Master::statusUpdate,
-          &StatusUpdateMessage::framework_id,
-          &StatusUpdateMessage::status);
+          &StatusUpdateMessage::update,
+          &StatusUpdateMessage::reliable);
 
   install(S2M_FRAMEWORK_MESSAGE, &Master::executorMessage,
           &FrameworkMessageMessage::slave_id,
@@ -657,7 +655,7 @@ void Master::reregisterFramework(const FrameworkID& frameworkId,
       addFramework(framework);
       // Add any running tasks reported by slaves for this framework.
       foreachpair (const SlaveID& slaveId, Slave* slave, slaves) {
-        foreachpair (_, Task* task, slave->tasks) {
+        foreachvalue (Task* task, slave->tasks) {
           if (framework->frameworkId == task->framework_id()) {
             framework->addTask(task);
           }
@@ -671,7 +669,7 @@ void Master::reregisterFramework(const FrameworkID& frameworkId,
     // broadcast because an executor might be running on a slave but
     // it currently isn't running any tasks. This could be a
     // potential scalability issue ...
-    foreachpair (_, Slave* slave, slaves) {
+    foreachvalue (Slave* slave, slaves) {
       MSG<M2S_UPDATE_FRAMEWORK> out;
       out.mutable_framework_id()->MergeFrom(frameworkId);
       out.set_pid(from());
@@ -714,11 +712,15 @@ void Master::resourceOfferReply(const FrameworkID& frameworkId,
       // probably be better to have better error messages here).
       foreach (const TaskDescription& task, tasks) {
         MSG<M2F_STATUS_UPDATE> out;
-        out.mutable_framework_id()->MergeFrom(frameworkId);
-        TaskStatus* status = out.mutable_status();
+        StatusUpdate* update = out.mutable_update();
+        update->mutable_framework_id()->MergeFrom(frameworkId);
+        update->mutable_executor_id()->MergeFrom(task.executor().executor_id());
+        update->mutable_slave_id()->MergeFrom(task.slave_id());
+        TaskStatus* status = update->mutable_status();
         status->mutable_task_id()->MergeFrom(task.task_id());
-        status->mutable_slave_id()->MergeFrom(task.slave_id());
         status->set_state(TASK_LOST);
+        update->set_timestamp(elapsedTime());
+        out.set_reliable(false);
         send(framework->pid, out);
       }
     }
@@ -759,15 +761,23 @@ void Master::killTask(const FrameworkID& frameworkId,
       out.mutable_task_id()->MergeFrom(taskId);
       send(slave->pid, out);
     } else {
+      // TODO(benh): Once the scheduler has persistance and
+      // high-availability of it's tasks, it will be the one that
+      // determines that this invocation of 'killTask' is silly, and
+      // can just return "locally" (i.e., after hitting only the other
+      // replicas). Unfortunately, it still won't know the slave id.
+
       LOG(WARNING) << "Cannot kill task " << taskId
                    << " of framework " << frameworkId
                    << " because it cannot be found";
       MSG<M2F_STATUS_UPDATE> out;
-      out.mutable_framework_id()->MergeFrom(frameworkId);
-      TaskStatus *status = out.mutable_status();
+      StatusUpdate* update = out.mutable_update();
+      update->mutable_framework_id()->MergeFrom(frameworkId);
+      TaskStatus* status = update->mutable_status();
       status->mutable_task_id()->MergeFrom(taskId);
-      status->mutable_slave_id()->set_value("UNKNOWN");
       status->set_state(TASK_LOST);
+      update->set_timestamp(elapsedTime());
+      out.set_reliable(false);
       send(framework->pid, out);
     }
   }
@@ -972,26 +982,27 @@ void Master::unregisterSlave(const SlaveID& slaveId)
 }
 
 
-void Master::statusUpdate(const FrameworkID& frameworkId,
-                          const TaskStatus& status)
+void Master::statusUpdate(const StatusUpdate& update, bool reliable)
 {
-  LOG(INFO) << "Status update: task " << status.task_id()
-            << " of framework " << frameworkId
-            << " is now in state "
-            << TaskState_descriptor()->FindValueByNumber(status.state())->name();
+  const TaskStatus& status = update.status();
 
-  Slave* slave = lookupSlave(status.slave_id());
+  LOG(INFO) << "Status update from " << from()
+            << ": task " << status.task_id()
+            << " of framework " << update.framework_id()
+            << " is now in state " << status.state();
+
+  Slave* slave = lookupSlave(update.slave_id());
   if (slave != NULL) {
-    Framework* framework = lookupFramework(frameworkId);
+    Framework* framework = lookupFramework(update.framework_id());
     if (framework != NULL) {
       // Pass on the (transformed) status update to the framework.
       MSG<M2F_STATUS_UPDATE> out;
-      out.mutable_framework_id()->MergeFrom(frameworkId);
-      out.mutable_status()->MergeFrom(status);
+      out.mutable_update()->MergeFrom(update);
+      out.set_reliable(reliable);
       send(framework->pid, out);
 
       // Lookup the task and see if we need to update anything locally.
-      Task* task = slave->lookupTask(frameworkId, status.task_id());
+      Task* task = slave->lookupTask(update.framework_id(), status.task_id());
       if (task != NULL) {
         task->set_state(status.state());
 
@@ -1017,18 +1028,21 @@ void Master::statusUpdate(const FrameworkID& frameworkId,
 
 	statistics.valid_status_updates++;
       } else {
-        LOG(WARNING) << "Status update error: couldn't lookup "
+        LOG(WARNING) << "Status update from " << from()
+                     << ": error, couldn't lookup "
                      << "task " << status.task_id();
 	statistics.invalid_status_updates++;
       }
     } else {
-      LOG(WARNING) << "Status update error: couldn't lookup "
-                   << "framework " << frameworkId;
+      LOG(WARNING) << "Status update from " << from()
+                   << ": error, couldn't lookup "
+                   << "framework " << update.framework_id();
       statistics.invalid_status_updates++;
     }
   } else {
-    LOG(WARNING) << "Status update error: couldn't lookup slave "
-                 << status.slave_id();
+    LOG(WARNING) << "Status update from " << from()
+                 << ": error, couldn't lookup slave "
+                 << update.slave_id();
     statistics.invalid_status_updates++;
   }
 }
@@ -1083,16 +1097,30 @@ void Master::exitedExecutor(const SlaveID& slaveId,
                 << " (" << slave->info.hostname() << ") "
                 << "exited with result " << result;
 
+      // TODO(benh): What about a status update that is on it's way
+      // from the slave but got re-ordered on the wire? By sending
+      // this status updates here we are not allowing possibly
+      // finished tasks to reach the scheduler appropriately. In
+      // stead, it seems like perhaps the right thing to do is to have
+      // the slave be responsible for sending those status updates,
+      // and have the master (or better yet ... and soon ... the
+      // scheduler) decide that a task is dead only when a slave lost
+      // has occured.
+
       // Tell the framework which tasks have been lost.
-      foreachpaircopy (_, Task* task, framework->tasks) {
+      foreachvaluecopy (Task* task, framework->tasks) {
         if (task->slave_id() == slave->slaveId &&
             task->executor_id() == executorId) {
           MSG<M2F_STATUS_UPDATE> out;
-          out.mutable_framework_id()->MergeFrom(task->framework_id());
-          TaskStatus* status = out.mutable_status();
+          StatusUpdate* update = out.mutable_update();
+          update->mutable_framework_id()->MergeFrom(task->framework_id());
+          update->mutable_executor_id()->MergeFrom(task->executor_id());
+          update->mutable_slave_id()->MergeFrom(task->slave_id());
+          TaskStatus* status = update->mutable_status();
           status->mutable_task_id()->MergeFrom(task->task_id());
-          status->mutable_slave_id()->MergeFrom(task->slave_id());
           status->set_state(TASK_LOST);
+          update->set_timestamp(elapsedTime());
+          out.set_reliable(false);
           send(framework->pid, out);
 
           LOG(INFO) << "Removing task " << task->task_id()
@@ -1123,7 +1151,7 @@ void Master::deactivatedSlaveHostnamePort(const string& hostname, uint16_t port)
 {
   if (slaveHostnamePorts.count(hostname, port) > 0) {
     // Look for a connected slave and remove it.
-    foreachpair (_, Slave* slave, slaves) {
+    foreachvalue (Slave* slave, slaves) {
       if (slave->info.hostname() == hostname && slave->pid.port == port) {
         LOG(WARNING) << "Removing slave " << slave->slaveId << " at "
 		     << hostname << ":" << port
@@ -1144,7 +1172,7 @@ void Master::deactivatedSlaveHostnamePort(const string& hostname, uint16_t port)
 void Master::timerTick()
 {
   // Check which framework filters can be expired.
-  foreachpair (_, Framework* framework, frameworks) {
+  foreachvalue (Framework* framework, frameworks) {
     framework->removeExpiredFilters(elapsedTime());
   }
 
@@ -1195,7 +1223,7 @@ void Master::exited()
       removeSlave(slave);
     }
   } else {
-    foreachpair (_, Framework* framework, frameworks) {
+    foreachvalue (Framework* framework, frameworks) {
       if (framework->failoverTimer != NULL &&
           framework->failoverTimer->self() == from()) {
         LOG(ERROR) << "Bad framework failover timer, removing "
@@ -1238,7 +1266,7 @@ Promise<HttpResponse> Master::http_frameworks_json(const HttpRequest& request)
 
   out << "[";
 
-  foreachpair (_, Framework* framework, frameworks) {
+  foreachvalue (Framework* framework, frameworks) {
     out <<
       "{" <<
       "\"id\":\"" << framework->frameworkId << "\"," <<
@@ -1271,7 +1299,7 @@ Promise<HttpResponse> Master::http_slaves_json(const HttpRequest& request)
 
   out << "[";
 
-  foreachpair (_, Slave* slave, slaves) {
+  foreachvalue (Slave* slave, slaves) {
     // TODO(benh): Send all of the resources (as JSON).
     Resources resources(slave->info.resources());
     Resource::Scalar cpus = resources.getScalar("cpus", Resource::Scalar());
@@ -1309,21 +1337,19 @@ Promise<HttpResponse> Master::http_tasks_json(const HttpRequest& request)
 
   out << "[";
 
-  foreachpair (_, Framework* framework, frameworks) {
-    foreachpair (_, Task* task, framework->tasks) {
+  foreachvalue (Framework* framework, frameworks) {
+    foreachvalue (Task* task, framework->tasks) {
       // TODO(benh): Send all of the resources (as JSON).
       Resources resources(task->resources());
       Resource::Scalar cpus = resources.getScalar("cpus", Resource::Scalar());
       Resource::Scalar mem = resources.getScalar("mem", Resource::Scalar());
-      const string& state =
-        TaskState_descriptor()->FindValueByNumber(task->state())->name();
       out <<
         "{" <<
         "\"task_id\":\"" << task->task_id() << "\"," <<
         "\"framework_id\":\"" << task->framework_id() << "\"," <<
         "\"slave_id\":\"" << task->slave_id() << "\"," <<
         "\"name\":\"" << task->name() << "\"," <<
-        "\"state\":\"" << state << "\"," <<
+        "\"state\":\"" << task->state() << "\"," <<
         "\"cpus\":" << cpus.value() << "," <<
         "\"mem\":" << mem.value() <<
         "},";
@@ -1726,14 +1752,14 @@ void Master::removeFramework(Framework* framework)
   // TODO: Notify allocator that a framework removal is beginning?
   
   // Tell slaves to kill the framework
-  foreachpair (_, Slave *slave, slaves) {
+  foreachvalue (Slave *slave, slaves) {
     MSG<M2S_KILL_FRAMEWORK> out;
     out.mutable_framework_id()->MergeFrom(framework->frameworkId);
     send(slave->pid, out);
   }
 
   // Remove pointers to the framework's tasks in slaves
-  foreachpaircopy (_, Task *task, framework->tasks) {
+  foreachvaluecopy (Task *task, framework->tasks) {
     Slave *slave = lookupSlave(task->slave_id());
     CHECK(slave != NULL);
     removeTask(task, TRR_FRAMEWORK_LOST);
@@ -1828,7 +1854,7 @@ void Master::removeSlave(Slave* slave)
   // TODO: Notify allocator that a slave removal is beginning?
   
   // Remove pointers to slave's tasks in frameworks, and send status updates
-  foreachpaircopy (_, Task* task, slave->tasks) {
+  foreachvaluecopy (Task* task, slave->tasks) {
     Framework *framework = lookupFramework(task->framework_id());
     // A framework might not actually exist because the master failed
     // over and the framework hasn't reconnected. This can be a tricky
@@ -1840,11 +1866,15 @@ void Master::removeSlave(Slave* slave)
     // S2M_REREGISTER_SLAVE.
     if (framework != NULL) {
       MSG<M2F_STATUS_UPDATE> out;
-      out.mutable_framework_id()->MergeFrom(task->framework_id());
-      TaskStatus* status = out.mutable_status();
+      StatusUpdate* update = out.mutable_update();
+      update->mutable_framework_id()->MergeFrom(task->framework_id());
+      update->mutable_executor_id()->MergeFrom(task->executor_id());
+      update->mutable_slave_id()->MergeFrom(task->slave_id());
+      TaskStatus* status = update->mutable_status();
       status->mutable_task_id()->MergeFrom(task->task_id());
-      status->mutable_slave_id()->MergeFrom(task->slave_id());
       status->set_state(TASK_LOST);
+      update->set_timestamp(elapsedTime());
+      out.set_reliable(false);
       send(framework->pid, out);
     }
     removeTask(task, TRR_SLAVE_LOST);
@@ -1863,13 +1893,13 @@ void Master::removeSlave(Slave* slave)
   }
   
   // Remove slave from any filters
-  foreachpair (_, Framework* framework, frameworks) {
+  foreachvalue (Framework* framework, frameworks) {
     framework->slaveFilter.erase(slave);
   }
   
   // Send lost-slave message to all frameworks (this helps them re-run
   // previously finished tasks whose output was on the lost slave)
-  foreachpair (_, Framework* framework, frameworks) {
+  foreachvalue (Framework* framework, frameworks) {
     MSG<M2F_LOST_SLAVE> out;
     out.mutable_slave_id()->MergeFrom(slave->slaveId);
     send(framework->pid, out);

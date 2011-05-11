@@ -8,8 +8,6 @@
 
 #include <arpa/inet.h>
 
-#include <google/protobuf/descriptor.h>
-
 #include <iostream>
 #include <map>
 #include <string>
@@ -90,8 +88,8 @@ public:
             &RescindResourceOfferMessage::offer_id);
 
     install(M2F_STATUS_UPDATE, &SchedulerProcess::statusUpdate,
-            &StatusUpdateMessage::framework_id,
-            &StatusUpdateMessage::status);
+            &StatusUpdateMessage::update,
+            &StatusUpdateMessage::reliable);
 
     install(M2F_LOST_SLAVE, &SchedulerProcess::lostSlave,
             &LostSlaveMessage::slave_id);
@@ -211,14 +209,15 @@ protected:
                          cref(offerId)));
   }
 
-  void statusUpdate(const FrameworkID& frameworkId, const TaskStatus& status)
+  void statusUpdate(const StatusUpdate& update, bool reliable)
   {
-    VLOG(1) << "Status update: task " << status.task_id()
-            << " of framework " << frameworkId
-            << " is now in state "
-            << TaskState_descriptor()->FindValueByNumber(status.state())->name();
+    const TaskStatus& status = update.status();
 
-    CHECK(this->frameworkId == frameworkId);
+    VLOG(1) << "Status update: task " << status.task_id()
+            << " of framework " << update.framework_id()
+            << " is now in state " << status.state();
+
+    CHECK(frameworkId == update.framework_id());
 
     // TODO(benh): Note that this maybe a duplicate status update!
     // Once we get support to try and have a more consistent view
@@ -232,15 +231,17 @@ protected:
     process::invoke(bind(&Scheduler::statusUpdate, sched, driver,
                          cref(status)));
 
-    // Acknowledge the message (we do this last, after we process::invoked
-    // the scheduler, if we did at all, in case it causes a crash,
-    // since this way the message might get resent/routed after
-    // the scheduler comes back online).
-    MSG<F2M_STATUS_UPDATE_ACK> out;
-    out.mutable_framework_id()->MergeFrom(frameworkId);
-    out.mutable_slave_id()->MergeFrom(status.slave_id());
-    out.mutable_task_id()->MergeFrom(status.task_id());
-    send(master, out);
+    if (reliable) {
+      // Acknowledge the message (we do this last, after we
+      // process::invoked the scheduler, if we did at all, in case it
+      // causes a crash, since this way the message might get
+      // resent/routed after the scheduler comes back online).
+      MSG<F2M_STATUS_UPDATE_ACK> out;
+      out.mutable_framework_id()->MergeFrom(frameworkId);
+      out.mutable_slave_id()->MergeFrom(update.slave_id());
+      out.mutable_task_id()->MergeFrom(status.task_id());
+      send(master, out);
+    }
   }
 
   void lostSlave(const SlaveID& slaveId)

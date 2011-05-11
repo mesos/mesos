@@ -1,12 +1,14 @@
+#include <signal.h>
+
 #include <map>
 
 #include "process_based_isolation_module.hpp"
 
+#include "common/type_utils.hpp"
+
 using namespace mesos;
 using namespace mesos::internal;
 using namespace mesos::internal::slave;
-
-using boost::unordered_map;
 
 using launcher::ExecutorLauncher;
 
@@ -43,8 +45,8 @@ pid_t ProcessBasedIsolationModule::launchExecutor(const FrameworkID& frameworkId
     LOG(FATAL) << "Cannot launch executors before initialization!";
   }
 
-  LOG(INFO) << "Starting executor for framework " << frameworkId
-            << ": " << executorInfo.uri();
+  LOG(INFO) << "Starting executor '" << executorInfo.uri()
+            << "' for framework " << frameworkId;
 
   pid_t pid;
   if ((pid = fork()) == -1) {
@@ -79,7 +81,7 @@ void ProcessBasedIsolationModule::killExecutor(const FrameworkID& frameworkId,
     // TODO(benh): Consider sending a SIGTERM, then after so much time
     // if it still hasn't exited do a SIGKILL (can use a libprocess
     // process for this).
-    LOG(INFO) << "Sending SIGKILL to gpid "
+    LOG(INFO) << "Sending SIGKILL to pgid "
               << pgids[frameworkId][executorInfo.executor_id()];
     killpg(pgids[frameworkId][executorInfo.executor_id()], SIGKILL);
     pgids[frameworkId][executorInfo.executor_id()] = -1;

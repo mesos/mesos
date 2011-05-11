@@ -57,7 +57,7 @@ MESSAGE(F2M_RESOURCE_OFFER_REPLY, ResourceOfferReplyMessage);
 MESSAGE(F2M_REVIVE_OFFERS, ReviveOffersMessage);
 MESSAGE(F2M_KILL_TASK, KillTaskMessage);
 MESSAGE(F2M_FRAMEWORK_MESSAGE, FrameworkMessageMessage);
-MESSAGE(F2M_STATUS_UPDATE_ACK, StatusUpdateAckMessage);
+MESSAGE(F2M_STATUS_UPDATE_ACK, StatusUpdateAcknowledgedMessage);
 
 // From master to framework.
 MESSAGE(M2F_REGISTER_REPLY, FrameworkRegisteredMessage);
@@ -84,7 +84,7 @@ MESSAGE(M2S_KILL_TASK, KillTaskMessage);
 MESSAGE(M2S_KILL_FRAMEWORK, KillFrameworkMessage);
 MESSAGE(M2S_FRAMEWORK_MESSAGE, FrameworkMessageMessage);
 MESSAGE(M2S_UPDATE_FRAMEWORK, UpdateFrameworkMessage);
-MESSAGE(M2S_STATUS_UPDATE_ACK, StatusUpdateAckMessage);
+MESSAGE(M2S_STATUS_UPDATE_ACK, StatusUpdateAcknowledgedMessage);
 
 // From executor to slave.
 MESSAGE(E2S_REGISTER_EXECUTOR, RegisterExecutorMessage);
@@ -96,6 +96,7 @@ MESSAGE(S2E_REGISTER_REPLY, ExecutorRegisteredMessage);
 MESSAGE(S2E_RUN_TASK, RunTaskMessage);
 MESSAGE(S2E_KILL_TASK, KillTaskMessage);
 MESSAGE(S2E_FRAMEWORK_MESSAGE, FrameworkMessageMessage);
+MESSAGE(S2E_STATUS_UPDATE_ACK, StatusUpdateAcknowledgedMessage);
 MESSAGE(S2E_KILL_EXECUTOR);
 
 #ifdef __sun__
@@ -157,6 +158,16 @@ public:
   }
 
 protected:
+  virtual void operator () ()
+  {
+    // TODO(benh): Shouldn't serve just be a virtual function, and
+    // then the one we get from process::Process will be sufficient?
+    do {
+      const std::string& name = serve();
+      if (name == process::TERMINATE) break;
+    } while (true);
+  }
+
   void send(const process::UPID& to, const std::string& name)
   {
     process::Process<T>::send(to, name);
@@ -173,11 +184,11 @@ protected:
   const std::string& serve(double secs = 0, bool once = false)
   {
     do {
-      process::Process<T>::serve(secs, once);
-      if (handlers.count(process::Process<T>::name()) > 0) {
-        handlers[process::Process<T>::name()](process::Process<T>::body());
+      const std::string& name = process::Process<T>::serve(secs, once);
+      if (handlers.count(name) > 0) {
+        handlers[name](process::Process<T>::body());
       } else {
-        return process::Process<T>::name();
+        return name;
       }
     } while (!once);
   }

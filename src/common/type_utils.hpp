@@ -1,6 +1,8 @@
 #ifndef __TYPE_UTILS_HPP__
 #define __TYPE_UTILS_HPP__
 
+#include <google/protobuf/descriptor.h>
+
 #include <mesos/mesos.hpp>
 
 #include <boost/functional/hash.hpp>
@@ -48,6 +50,14 @@ inline std::ostream& operator << (std::ostream& stream, const ExecutorID& execut
   stream << executorId.value();
   return stream;
 }
+
+
+inline std::ostream& operator << (std::ostream& stream, const TaskState& state)
+{
+  stream << TaskState_descriptor()->FindValueByNumber(state)->name();
+  return stream;
+}
+
 
 
 inline bool operator == (const FrameworkID& left, const FrameworkID& right)

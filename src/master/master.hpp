@@ -25,9 +25,6 @@
 
 namespace mesos { namespace internal { namespace master {
 
-using foreach::_;
-
-
 // Maximum number of slot offers to have outstanding for each framework.
 const int MAX_OFFERS_PER_FRAMEWORK = 50;
 
@@ -121,8 +118,7 @@ public:
                           const std::vector<TaskDescription>& tasks,
                           const Params& params);
   void reviveOffers(const FrameworkID& frameworkId);
-  void killTask(const FrameworkID& frameworkId,
-                const TaskID& taskId);
+  void killTask(const FrameworkID& frameworkId, const TaskID& taskId);
   void schedulerMessage(const SlaveID& slaveId,
 			const FrameworkID& frameworkId,
 			const ExecutorID& executorId,
@@ -135,8 +131,7 @@ public:
                        const SlaveInfo& slaveInfo,
                        const std::vector<Task>& tasks);
   void unregisterSlave(const SlaveID& slaveId);
-  void statusUpdate(const FrameworkID& frameworkId,
-                    const TaskStatus& status);
+  void statusUpdate(const StatusUpdate& update, bool reliable);
   void executorMessage(const SlaveID& slaveId,
 		       const FrameworkID& frameworkId,
 		       const ExecutorID& executorId,
@@ -307,7 +302,7 @@ struct Slave
 
   Task* lookupTask(const FrameworkID& frameworkId, const TaskID& taskId)
   {
-    foreachpair (_, Task* task, tasks) {
+    foreachvalue (Task* task, tasks) {
       if (task->framework_id() == frameworkId && task->task_id() == taskId) {
         return task;
       }

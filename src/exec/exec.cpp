@@ -99,14 +99,6 @@ protected:
   {
     VLOG(1) << "Executor asked to run a task " << task.task_id();
 
-    MSG<E2S_STATUS_UPDATE> out;
-    out.mutable_framework_id()->MergeFrom(frameworkId);
-    TaskStatus* status = out.mutable_status();
-    status->mutable_task_id()->MergeFrom(task.task_id());
-    status->mutable_slave_id()->MergeFrom(slaveId);
-    status->set_state(TASK_RUNNING);
-    send(slave, out);
-
     process::invoke(bind(&Executor::launchTask, executor, driver, cref(task)));
   }
 
@@ -332,15 +324,16 @@ int MesosExecutorDriver::sendStatusUpdate(const TaskStatus& status)
 
   CHECK(process != NULL);
 
-  // Validate that they set the correct slave ID.
-  if (!(process->slaveId == status.slave_id())) {
-    return -1;
-  }
-
   // TODO(benh): Do a dispatch to Executor first?
   MSG<E2S_STATUS_UPDATE> out;
-  out.mutable_framework_id()->MergeFrom(process->frameworkId);
-  out.mutable_status()->MergeFrom(status);
+  StatusUpdate* update = out.mutable_update();
+  update->mutable_framework_id()->MergeFrom(process->frameworkId);
+  update->mutable_executor_id()->MergeFrom(process->executorId);
+  update->mutable_slave_id()->MergeFrom(process->slaveId);
+  update->mutable_status()->MergeFrom(status);
+  update->set_timestamp(process->elapsedTime());
+  update->set_sequence(-1);
+  out.set_reliable(false);
   process->send(process->slave, out);
 
   return 0;

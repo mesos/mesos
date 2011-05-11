@@ -228,12 +228,13 @@ void ExecutorLauncher::setupEnvironment()
   setupEnvVariablesFromParams();
 
   // Set Mesos environment variables to pass slave ID, framework ID, etc.
-  setenv("MESOS_SLAVE_PID", slavePid.c_str(), true);
-  setenv("MESOS_FRAMEWORK_ID", frameworkId.value().c_str(), true);
-  setenv("MESOS_EXECUTOR_ID", executorId.value().c_str(), true);
+  setenv("MESOS_DIRECTORY", workDirectory.c_str(), 1);
+  setenv("MESOS_SLAVE_PID", slavePid.c_str(), 1);
+  setenv("MESOS_FRAMEWORK_ID", frameworkId.value().c_str(), 1);
+  setenv("MESOS_EXECUTOR_ID", executorId.value().c_str(), 1);
   
   // Set LIBPROCESS_PORT so that we bind to a random free port.
-  setenv("LIBPROCESS_PORT", "0", true);
+  setenv("LIBPROCESS_PORT", "0", 1);
 
   // Set MESOS_HOME so that Java and Python executors can find libraries
   if (mesosHome != "") {
@@ -247,7 +248,7 @@ void ExecutorLauncher::setupEnvVariablesFromParams()
   foreachpair (const string& key, const string& value, params) {
     if (key.find("env.") == 0) {
       const string& var = key.substr(strlen("env."));
-      setenv(var.c_str(), value.c_str(), true);
+      setenv(var.c_str(), value.c_str(), 1);
     }
   }
 }
