@@ -3,6 +3,9 @@
 
 #include <boost/foreach.hpp>
 
+#include <boost/tuple/tuple.hpp>
+
+
 #define BOOST_FOREACH_PAIR(VARFIRST, VARSECOND, COL)                                            \
     BOOST_FOREACH_PREAMBLE()                                                                    \
     if (boost::foreach_detail_::auto_any_t _foreach_col = BOOST_FOREACH_CONTAIN(COL)) {} else   \
@@ -23,8 +26,6 @@
 #define foreach BOOST_FOREACH
 #define foreachpair BOOST_FOREACH_PAIR
 
-#include <boost/tuple/tuple.hpp>
-
 namespace foreach {
 
 const boost::tuples::detail::swallow_assign _ = boost::tuples::ignore;
@@ -33,6 +34,11 @@ template <typename T> T copy(const T& t) { return t; }
 
 }
 
+#define foreachkey(VAR, COL)                    \
+  foreachpair (VAR, foreach::_, COL)
+
+#define foreachvalue(VAR, COL)                  \
+  foreachpair (foreach::_, VAR, COL)
 
 #define foreachcopy(VAR, COL)                   \
   foreach (VAR, foreach::copy(COL))
@@ -40,6 +46,10 @@ template <typename T> T copy(const T& t) { return t; }
 #define foreachpaircopy(VARFIRST, VARSECOND, COL)       \
   foreachpair (VARFIRST, VARSECOND, foreach::copy(COL))
 
+#define foreachkeycopy(VAR, COL)                        \
+  foreachpair (VAR, foreach::_, foreach::copy(COL))
 
+#define foreachvaluecopy(VAR, COL)                      \
+  foreachpair (foreach::_, VAR, foreach::copy(COL))
 
-#endif /* FOREACH_HPP */
+#endif // __FOREACH_HPP__
