@@ -3,6 +3,7 @@
 
 #include <gmock/gmock.h>
 
+#include <map>
 #include <string>
 
 #include <mesos/executor.hpp>
@@ -10,7 +11,13 @@
 
 #include <process/process.hpp>
 
+#include "common/utils.hpp"
+#include "common/type_utils.hpp"
+
 #include "messaging/messages.hpp"
+
+#include "slave/isolation_module.hpp"
+#include "slave/slave.hpp"
 
 
 namespace mesos { namespace internal { namespace test {
@@ -176,7 +183,79 @@ ACTION_P(Trigger, trigger) { trigger->value = true; }
   } while (false)
 
 
-}}} // namespace mesos::internal::test
+class TestingIsolationModule : public slave::IsolationModule
+{
+public:
+  TestingIsolationModule(const std::map<ExecutorID, Executor*>& _executors)
+    : executors(_executors) {}
+
+  virtual ~TestingIsolationModule() {}
+
+  virtual void initialize(const process::PID<slave::Slave>& slave,
+                          const Configuration& conf,
+                          bool local)
+  {
+    this->slave = slave;
+  }
+
+  virtual pid_t launchExecutor(const FrameworkID& frameworkId,
+                               const FrameworkInfo& frameworkInfo,
+                               const ExecutorInfo& executorInfo,
+                               const std::string& directory)
+  {
+    if (executors.count(executorInfo.executor_id()) > 0) {
+      Executor* executor = executors[executorInfo.executor_id()];
+      MesosExecutorDriver* driver = new MesosExecutorDriver(executor);
+      drivers[executorInfo.executor_id()] = driver;
+
+      utils::os::setenv("MESOS_LOCAL", "1");
+      utils::os::setenv("MESOS_DIRECTORY", directory);
+      utils::os::setenv("MESOS_SLAVE_PID", slave);
+      utils::os::setenv("MESOS_FRAMEWORK_ID", frameworkId.value());
+      utils::os::setenv("MESOS_EXECUTOR_ID", executorInfo.executor_id().value());
+
+      driver->start();
+
+      utils::os::unsetenv("MESOS_LOCAL");
+      utils::os::unsetenv("MESOS_DIRECTORY");
+      utils::os::unsetenv("MESOS_SLAVE_PID");
+      utils::os::unsetenv("MESOS_FRAMEWORK_ID");
+      utils::os::unsetenv("MESOS_EXECUTOR_ID");
+    } else {
+      ADD_FAILURE() << "Cannot launch executor";
+    }
+
+    return 0;
+  }
+
+  virtual void killExecutor(const FrameworkID& frameworkId,
+                            const FrameworkInfo& frameworkInfo,
+                            const ExecutorInfo& executorInfo)
+  {
+    if (drivers.count(executorInfo.executor_id()) > 0) {
+      MesosExecutorDriver* driver = drivers[executorInfo.executor_id()];
+      driver->stop();
+      driver->join();
+      delete driver;
+      drivers.erase(executorInfo.executor_id());
+    } else {
+      ADD_FAILURE() << "Cannot kill executor";
+    }
+  }
+
+  virtual void resourcesChanged(const FrameworkID& frameworkId,
+                                const FrameworkInfo& frameworkInfo,
+                                const ExecutorInfo& executorInfo,
+                                const Resources& resources)
+  {}
+
+private:
+  std::map<ExecutorID, Executor*> executors;
+  std::map<ExecutorID, MesosExecutorDriver*> drivers;
+  process::PID<slave::Slave> slave;
+};
+
+}}} // namespace mesos { namespace internal { namespace test {
 
 
-#endif /* __TESTING_UTILS_HPP__ */
+#endif // __TESTING_UTILS_HPP__

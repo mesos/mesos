@@ -80,10 +80,12 @@ endif
 SCHED_LIB = $(LIBDIR)/libmesos_sched.a
 EXEC_LIB = $(LIBDIR)/libmesos_exec.a
 
-TESTS_OBJ = main.o utils.o master_test.o offer_reply_errors_test.o	\
-	    resources_test.o external_test.o sample_frameworks_test.o	\
-	    configurator_test.o string_utils_test.o multimap_test.o	\
-	    lxc_isolation_test.o
+TESTS_OBJ = main.o utils.o master_tests.o resource_offer_tests.o	\
+	    resource_offer_reply_tests.o fault_tolerant_tests.o		\
+	    resources_tests.o external_tests.o				\
+	    sample_frameworks_tests.o configurator_tests.o		\
+	    string_utils_tests.o multimap_tests.o			\
+	    lxc_isolation_tests.o
 
 ALLTESTS_EXE = $(BINDIR)/tests/all-tests
 
