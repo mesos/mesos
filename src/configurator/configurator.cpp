@@ -15,8 +15,6 @@
 
 using namespace mesos::internal;
 
-using foreach::_;
-
 using std::ifstream;
 using std::map;
 using std::string;
@@ -378,7 +376,7 @@ void Configurator::loadDefaults()
 vector<string> Configurator::getOptions() const 
 {
   vector<string> ret;
-  foreachpair (const string& key, _, options) {
+  foreachkey (const string& key, options) {
     ret.push_back(key);
   }
   return ret;

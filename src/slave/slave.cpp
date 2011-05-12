@@ -1,5 +1,4 @@
 #include <errno.h>
-#include <netdb.h>
 
 #include <algorithm>
 
@@ -8,15 +7,6 @@
 #include "common/build.hpp"
 #include "common/type_utils.hpp"
 #include "common/utils.hpp"
-
-// There's no gethostbyname2 on Solaris, so fake it by calling gethostbyname
-#ifdef __sun__
-#define gethostbyname2(name, _) gethostbyname(name)
-#endif
-
-using namespace mesos;
-using namespace mesos::internal;
-using namespace mesos::internal::slave;
 
 using process::HttpOKResponse;
 using process::HttpResponse;
@@ -495,11 +485,15 @@ void Slave::operator () ()
   LOG(INFO) << "Slave started at " << self();
   LOG(INFO) << "Slave resources: " << resources;
 
-  // Get our hostname
-  char buf[512];
-  gethostname(buf, sizeof(buf));
-  hostent* he = gethostbyname2(buf, AF_INET);
-  string hostname = he->h_name;
+  Result<string> result = utils::os::hostname();
+
+  if (result.isError()) {
+    LOG(FATAL) << "Failed to get hostname: " << result.error();
+  }
+
+  CHECK(result.isSome());
+
+  string hostname = result.get();
 
   // Check and see if we have a different public DNS name. Normally
   // this is our hostname, but on EC2 we look for the MESOS_PUBLIC_DNS
@@ -522,7 +516,7 @@ void Slave::operator () ()
     serve(1);
     if (name() == process::TERMINATE) {
       LOG(INFO) << "Asked to shut down by " << from();
-      foreachvaluecopy (Framework* framework, frameworks) {
+      foreachvalue (Framework* framework, utils::copy(frameworks)) {
         removeFramework(framework);
       }
       return;
@@ -1627,7 +1621,7 @@ void Slave::removeFramework(Framework* framework, bool killExecutors)
   LOG(INFO) << "Cleaning up framework " << framework->id;
 
   // Shutdown all executors of this framework.
-  foreachvaluecopy (Executor* executor, framework->executors) {
+  foreachvalue (Executor* executor, utils::copy(framework->executors)) {
     removeExecutor(framework, executor, killExecutors);
   }
 

@@ -26,30 +26,10 @@
 #define foreach BOOST_FOREACH
 #define foreachpair BOOST_FOREACH_PAIR
 
-namespace foreach {
-
-const boost::tuples::detail::swallow_assign _ = boost::tuples::ignore;
-
-template <typename T> T copy(const T& t) { return t; }
-
-}
-
 #define foreachkey(VAR, COL)                    \
-  foreachpair (VAR, foreach::_, COL)
+  foreachpair (VAR, boost::tuples::ignore, COL)
 
 #define foreachvalue(VAR, COL)                  \
-  foreachpair (foreach::_, VAR, COL)
-
-#define foreachcopy(VAR, COL)                   \
-  foreach (VAR, foreach::copy(COL))
-
-#define foreachpaircopy(VARFIRST, VARSECOND, COL)       \
-  foreachpair (VARFIRST, VARSECOND, foreach::copy(COL))
-
-#define foreachkeycopy(VAR, COL)                        \
-  foreachpair (VAR, foreach::_, foreach::copy(COL))
-
-#define foreachvaluecopy(VAR, COL)                      \
-  foreachpair (foreach::_, VAR, foreach::copy(COL))
+  foreachpair (boost::tuples::ignore, VAR, COL)
 
 #endif // __FOREACH_HPP__

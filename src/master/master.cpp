@@ -211,11 +211,11 @@ Master::~Master()
 {
   LOG(INFO) << "Shutting down master";
 
-  foreachvaluecopy (Framework* framework, frameworks) {
+  foreachvalue (Framework* framework, utils::copy(frameworks)) {
     removeFramework(framework);
   }
 
-  foreachvaluecopy (Slave* slave, slaves) {
+  foreachvalue (Slave* slave, utils::copy(slaves)) {
     removeSlave(slave);
   }
 
@@ -1108,7 +1108,7 @@ void Master::exitedExecutor(const SlaveID& slaveId,
       // has occured.
 
       // Tell the framework which tasks have been lost.
-      foreachvaluecopy (Task* task, framework->tasks) {
+      foreachvalue (Task* task, utils::copy(framework->tasks)) {
         if (task->slave_id() == slave->slaveId &&
             task->executor_id() == executorId) {
           MSG<M2F_STATUS_UPDATE> out;
@@ -1206,7 +1206,7 @@ void Master::exited()
       framework->active = false;
 
       // Remove the framework's slot offers.
-      foreachcopy (SlotOffer* offer, framework->slotOffers) {
+      foreach (SlotOffer* offer, utils::copy(framework->slotOffers)) {
         removeSlotOffer(offer, ORR_FRAMEWORK_FAILOVER, offer->resources);
       }
 
@@ -1711,7 +1711,7 @@ void Master::failoverFramework(Framework* framework, const UPID& newPid)
 
   // Remove the framework's slot offers (if they weren't removed before)..
   // TODO(benh): Consider just reoffering these to the new framework.
-  foreachcopy (SlotOffer* offer, framework->slotOffers) {
+  foreach (SlotOffer* offer, utils::copy(framework->slotOffers)) {
     removeSlotOffer(offer, ORR_FRAMEWORK_FAILOVER, offer->resources);
   }
 
@@ -1752,21 +1752,21 @@ void Master::removeFramework(Framework* framework)
   // TODO: Notify allocator that a framework removal is beginning?
   
   // Tell slaves to kill the framework
-  foreachvalue (Slave *slave, slaves) {
+  foreachvalue (Slave* slave, slaves) {
     MSG<M2S_KILL_FRAMEWORK> out;
     out.mutable_framework_id()->MergeFrom(framework->frameworkId);
     send(slave->pid, out);
   }
 
   // Remove pointers to the framework's tasks in slaves
-  foreachvaluecopy (Task *task, framework->tasks) {
-    Slave *slave = lookupSlave(task->slave_id());
+  foreachvalue (Task* task, utils::copy(framework->tasks)) {
+    Slave* slave = lookupSlave(task->slave_id());
     CHECK(slave != NULL);
     removeTask(task, TRR_FRAMEWORK_LOST);
   }
   
   // Remove the framework's slot offers (if they weren't removed before).
-  foreachcopy (SlotOffer* offer, framework->slotOffers) {
+  foreach (SlotOffer* offer, utils::copy(framework->slotOffers)) {
     removeSlotOffer(offer, ORR_FRAMEWORK_LOST, offer->resources);
   }
 
@@ -1854,8 +1854,8 @@ void Master::removeSlave(Slave* slave)
   // TODO: Notify allocator that a slave removal is beginning?
   
   // Remove pointers to slave's tasks in frameworks, and send status updates
-  foreachvaluecopy (Task* task, slave->tasks) {
-    Framework *framework = lookupFramework(task->framework_id());
+  foreachvalue (Task* task, utils::copy(slave->tasks)) {
+    Framework* framework = lookupFramework(task->framework_id());
     // A framework might not actually exist because the master failed
     // over and the framework hasn't reconnected. This can be a tricky
     // situation for frameworks that want to have high-availability,
@@ -1881,7 +1881,7 @@ void Master::removeSlave(Slave* slave)
   }
 
   // Remove slot offers from the slave; this will also rescind them
-  foreachcopy (SlotOffer* offer, slave->slotOffers) {
+  foreach (SlotOffer* offer, utils::copy(slave->slotOffers)) {
     // Only report resources on slaves other than this one to the allocator
     vector<SlaveResources> otherSlaveResources;
     foreach (const SlaveResources& r, offer->resources) {

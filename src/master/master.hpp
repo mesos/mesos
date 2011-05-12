@@ -17,6 +17,7 @@
 #include "common/multimap.hpp"
 #include "common/resources.hpp"
 #include "common/type_utils.hpp"
+#include "common/utils.hpp"
 
 #include "configurator/configurator.hpp"
 
@@ -473,7 +474,7 @@ struct Framework
   
   void removeExpiredFilters(double now)
   {
-    foreachpaircopy (Slave* slave, double removalTime, slaveFilter) {
+    foreachpair (Slave* slave, double removalTime, utils::copy(slaveFilter)) {
       if (removalTime != 0 && removalTime <= now) {
         slaveFilter.erase(slave);
       }

@@ -5,6 +5,7 @@
 #include <dirent.h>
 #include <libgen.h>
 #include <limits.h>
+#include <netdb.h>
 #include <pwd.h>
 #include <stddef.h>
 #include <unistd.h>
@@ -19,7 +20,13 @@
 #include <boost/lexical_cast.hpp>
 
 #include "common/foreach.hpp"
+#include "common/result.hpp"
 #include "common/tokenize.hpp"
+
+#ifdef __APPLE__
+#define gethostbyname2_r(name, af, ret, buf, buflen, result, h_errnop)  \
+  ({ *(result) = gethostbyname2(name, af); 0; })
+#endif // __APPLE__
 
 
 // Useful common macros.
@@ -31,6 +38,10 @@
 
 
 namespace mesos { namespace internal { namespace utils {
+
+template <typename T>
+T copy(const T& t) { return t; }
+
 
 template <typename T>
 inline std::string stringify(T t)
@@ -324,6 +335,43 @@ inline std::vector<std::string> listdir(const std::string& directory)
   }
 
   return result;
+}
+
+
+inline Result<std::string> hostname()
+{
+  char host[512];
+
+  if (gethostname(host, sizeof(host)) < 0) {
+    return Result<std::string>::error(strerror(errno));
+  }
+
+  struct hostent he, *hep;
+  char* temp;
+  size_t length;
+  int result;
+  int herrno;
+
+  // Allocate temporary buffer for gethostbyname2_r.
+  length = 1024;
+  temp = new char[length];
+
+  while ((result = gethostbyname2_r(host, AF_INET, &he, temp,
+				    length, &hep, &herrno)) == ERANGE) {
+    // Enlarge the buffer.
+    delete[] temp;
+    length *= 2;
+    temp = new char[length];
+  }
+
+  if (result != 0 || hep == NULL) {
+    delete[] temp;
+    return Result<std::string>::error(hstrerror(herrno));
+  }
+
+  std::string hostname = hep->h_name;
+  delete[] temp;
+  return Result<std::string>::some(hostname);
 }
 
 } // namespace os {
