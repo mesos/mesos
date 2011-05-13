@@ -36,7 +36,15 @@ message ResourceOffer {
 }
 
 
-message FrameworkMessageMessage { // :(
+message ExecutorToFrameworkMessage {
+  required SlaveID slave_id = 1;
+  required FrameworkID framework_id = 2;
+  required ExecutorID executor_id = 3;
+  required bytes data = 4;
+}
+
+
+message FrameworkToExecutorMessage {
   required SlaveID slave_id = 1;
   required FrameworkID framework_id = 2;
   required ExecutorID executor_id = 3;
@@ -112,7 +120,7 @@ message StatusUpdateMessage {
 }
 
 
-message StatusUpdateAcknowledgedMessage {
+message StatusUpdateAcknowledgementMessage {
   required SlaveID slave_id = 1;
   required FrameworkID framework_id = 2;
   required TaskID task_id = 3;
@@ -144,6 +152,11 @@ message ReregisterSlaveMessage {
 
 
 message SlaveRegisteredMessage {
+  required SlaveID slave_id = 1;
+}
+
+
+message SlaveReregisteredMessage {
   required SlaveID slave_id = 1;
 }
 
@@ -208,6 +221,8 @@ message FrameworkExpiredMessage {
 }
 
 
+message NoMasterDetectedMessage {}
+
 message NewMasterDetectedMessage {
   required string pid = 2;
 }
@@ -216,3 +231,6 @@ message NewMasterDetectedMessage {
 message GotMasterTokenMessage {
   required string token = 1;
 }
+
+
+message ShutdownMessage {}

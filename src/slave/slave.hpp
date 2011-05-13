@@ -2,6 +2,7 @@
 #define __SLAVE_HPP__
 
 #include <process/process.hpp>
+#include <process/protobuf.hpp>
 
 #include "isolation_module.hpp"
 #include "state.hpp"
@@ -25,7 +26,7 @@ const double STATUS_UPDATE_RETRY_INTERVAL = 10;
 
 
 // Slave process. 
-class Slave : public MesosProcess<Slave>
+class Slave : public ProtobufProcess<Slave>
 {
 public:
   Slave(const Configuration& conf,
@@ -45,8 +46,8 @@ public:
   void newMasterDetected(const std::string& pid);
   void noMasterDetected();
   void masterDetectionFailure();
-  void registerReply(const SlaveID& slaveId);
-  void reregisterReply(const SlaveID& slaveId);
+  void registered(const SlaveID& slaveId);
+  void reregistered(const SlaveID& slaveId);
   void runTask(const FrameworkInfo& frameworkInfo,
                const FrameworkID& frameworkId,
                const std::string& pid,
@@ -60,9 +61,9 @@ public:
 			const std::string& data);
   void updateFramework(const FrameworkID& frameworkId,
                        const std::string& pid);
-  void statusUpdateAcknowledged(const SlaveID& slaveId,
-                                const FrameworkID& frameworkId,
-                                const TaskID& taskId);
+  void statusUpdateAcknowledgement(const SlaveID& slaveId,
+                                   const FrameworkID& frameworkId,
+                                   const TaskID& taskId);
   void registerExecutor(const FrameworkID& frameworkId,
                         const ExecutorID& executorId);
   void statusUpdate(const StatusUpdate& update);

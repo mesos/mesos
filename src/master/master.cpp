@@ -150,12 +150,12 @@ protected:
     // we don't hear a pong, increment the number of timeouts from the
     // slave and try and send another ping. If we eventually timeout too
     // many missed pongs in a row, consider the slave dead.
-    send(slave, PING);
+    send(slave, "PING");
     pinged = true;
 
     do {
       receive(SLAVE_PONG_TIMEOUT);
-      if (name() == PONG) {
+      if (name() == "PONG") {
         timeouts = 0;
         pinged = false;
       } else if (name() == process::TIMEOUT) {
@@ -164,7 +164,7 @@ protected:
           pinged = false;
         }
 
-        send(slave, PING);
+        send(slave, "PING");
         pinged = true;
       } else if (name() == process::TERMINATE) {
         return;
@@ -193,14 +193,14 @@ private:
 
 
 Master::Master()
-  : MesosProcess<Master>("master")
+  : ProtobufProcess<Master>("master")
 {
   initialize();
 }
 
 
 Master::Master(const Configuration& conf)
-  : MesosProcess<Master>("master"),
+  : ProtobufProcess<Master>("master"),
     conf(conf)
 {
   initialize();
@@ -387,18 +387,18 @@ void Master::operator () ()
   LOG(INFO) << "Master started at mesos://" << self();
 
   // Don't do anything until we get a master token.
-  while (receive() != GOT_MASTER_TOKEN) {
+  while (receive() != GotMasterTokenMessage().GetTypeName()) {
     LOG(INFO) << "Oops! We're dropping a message since "
               << "we haven't received an identifier yet!";  
   }
 
-  MSG<GOT_MASTER_TOKEN> msg;
-  msg.ParseFromString(body());
+  GotMasterTokenMessage message;
+  message.ParseFromString(body());
 
   // The master ID is comprised of the current date and some ephemeral
   // token (e.g., determined by ZooKeeper).
 
-  masterId = DateUtils::currentDate() + "-" + msg.token();
+  masterId = DateUtils::currentDate() + "-" + message.token();
   LOG(INFO) << "Master ID: " << masterId;
 
   // Setup slave manager.
@@ -455,74 +455,75 @@ void Master::initialize()
   startTime = elapsedTime();
 
   // Install handler functions for certain messages.
-  install(NEW_MASTER_DETECTED, &Master::newMasterDetected,
-          &NewMasterDetectedMessage::pid);
+  installProtobufHandler(&Master::newMasterDetected,
+                         &NewMasterDetectedMessage::pid);
 
-  install(NO_MASTER_DETECTED, &Master::noMasterDetected);
+  installProtobufHandler<NoMasterDetectedMessage>(&Master::noMasterDetected);
 
-  install(F2M_REGISTER_FRAMEWORK, &Master::registerFramework,
-          &RegisterFrameworkMessage::framework);
+  installProtobufHandler(&Master::registerFramework,
+                         &RegisterFrameworkMessage::framework);
 
-  install(F2M_REREGISTER_FRAMEWORK, &Master::reregisterFramework,
-          &ReregisterFrameworkMessage::framework_id,
-          &ReregisterFrameworkMessage::framework,
-          &ReregisterFrameworkMessage::generation);
+  installProtobufHandler(&Master::reregisterFramework,
+                         &ReregisterFrameworkMessage::framework_id,
+                         &ReregisterFrameworkMessage::framework,
+                         &ReregisterFrameworkMessage::generation);
 
-  install(F2M_UNREGISTER_FRAMEWORK, &Master::unregisterFramework,
-          &UnregisterFrameworkMessage::framework_id);
+  installProtobufHandler(&Master::unregisterFramework,
+                         &UnregisterFrameworkMessage::framework_id);
 
-  install(F2M_RESOURCE_OFFER_REPLY, &Master::resourceOfferReply,
-          &ResourceOfferReplyMessage::framework_id,
-          &ResourceOfferReplyMessage::offer_id,
-          &ResourceOfferReplyMessage::tasks,
-          &ResourceOfferReplyMessage::params);
+  installProtobufHandler(&Master::resourceOfferReply,
+                         &ResourceOfferReplyMessage::framework_id,
+                         &ResourceOfferReplyMessage::offer_id,
+                         &ResourceOfferReplyMessage::tasks,
+                         &ResourceOfferReplyMessage::params);
 
-  install(F2M_REVIVE_OFFERS, &Master::reviveOffers,
-          &ReviveOffersMessage::framework_id);
+  installProtobufHandler(&Master::reviveOffers,
+                         &ReviveOffersMessage::framework_id);
 
-  install(F2M_KILL_TASK, &Master::killTask,
-          &KillTaskMessage::framework_id,
-          &KillTaskMessage::task_id);
+  installProtobufHandler(&Master::killTask,
+                         &KillTaskMessage::framework_id,
+                         &KillTaskMessage::task_id);
 
-  install(F2M_FRAMEWORK_MESSAGE, &Master::schedulerMessage,
-          &FrameworkMessageMessage::slave_id,
-          &FrameworkMessageMessage::framework_id,
-          &FrameworkMessageMessage::executor_id,
-          &FrameworkMessageMessage::data);
+  installProtobufHandler(&Master::schedulerMessage,
+                         &FrameworkToExecutorMessage::slave_id,
+                         &FrameworkToExecutorMessage::framework_id,
+                         &FrameworkToExecutorMessage::executor_id,
+                         &FrameworkToExecutorMessage::data);
 
-  install(F2M_STATUS_UPDATE_ACK, &Master::statusUpdateAck,
-          &StatusUpdateAcknowledgedMessage::framework_id,
-          &StatusUpdateAcknowledgedMessage::task_id,
-          &StatusUpdateAcknowledgedMessage::slave_id);
+  installProtobufHandler(&Master::statusUpdateAcknowledgement,
+                         &StatusUpdateAcknowledgementMessage::framework_id,
+                         &StatusUpdateAcknowledgementMessage::task_id,
+                         &StatusUpdateAcknowledgementMessage::slave_id);
 
-  install(S2M_REGISTER_SLAVE, &Master::registerSlave,
-          &RegisterSlaveMessage::slave);
+  installProtobufHandler(&Master::registerSlave,
+                         &RegisterSlaveMessage::slave);
 
-  install(S2M_REREGISTER_SLAVE, &Master::reregisterSlave,
-          &ReregisterSlaveMessage::slave_id,
-          &ReregisterSlaveMessage::slave,
-          &ReregisterSlaveMessage::tasks);
+  installProtobufHandler(&Master::reregisterSlave,
+                         &ReregisterSlaveMessage::slave_id,
+                         &ReregisterSlaveMessage::slave,
+                         &ReregisterSlaveMessage::tasks);
 
-  install(S2M_UNREGISTER_SLAVE, &Master::unregisterSlave,
-          &UnregisterSlaveMessage::slave_id);
+  installProtobufHandler(&Master::unregisterSlave,
+                         &UnregisterSlaveMessage::slave_id);
 
-  install(S2M_STATUS_UPDATE, &Master::statusUpdate,
-          &StatusUpdateMessage::update,
-          &StatusUpdateMessage::reliable);
+  installProtobufHandler(&Master::statusUpdate,
+                         &StatusUpdateMessage::update,
+                         &StatusUpdateMessage::reliable);
 
-  install(S2M_FRAMEWORK_MESSAGE, &Master::executorMessage,
-          &FrameworkMessageMessage::slave_id,
-          &FrameworkMessageMessage::framework_id,
-          &FrameworkMessageMessage::executor_id,
-          &FrameworkMessageMessage::data);
+  installProtobufHandler(&Master::executorMessage,
+                         &ExecutorToFrameworkMessage::slave_id,
+                         &ExecutorToFrameworkMessage::framework_id,
+                         &ExecutorToFrameworkMessage::executor_id,
+                         &ExecutorToFrameworkMessage::data);
 
-  install(S2M_EXITED_EXECUTOR, &Master::exitedExecutor,
-          &ExitedExecutorMessage::slave_id,
-          &ExitedExecutorMessage::framework_id,
-          &ExitedExecutorMessage::executor_id,
-          &ExitedExecutorMessage::result);
+  installProtobufHandler(&Master::exitedExecutor,
+                         &ExitedExecutorMessage::slave_id,
+                         &ExitedExecutorMessage::framework_id,
+                         &ExitedExecutorMessage::executor_id,
+                         &ExitedExecutorMessage::result);
 
-  install(process::EXITED, &Master::exited);
+  // Install some message handlers.
+  installMessageHandler(process::EXITED, &Master::exited);
 
   // Install HTTP request handlers.
   installHttpHandler("info.json", &Master::http_info_json);
@@ -574,20 +575,20 @@ void Master::registerFramework(const FrameworkInfo& frameworkInfo)
 
   if (framework->info.executor().uri() == "") {
     LOG(INFO) << framework << " registering without an executor URI";
-    MSG<M2F_ERROR> out;
-    out.set_code(1);
-    out.set_message("No executor URI given");
-    send(from(), out);
+    FrameworkErrorMessage message;
+    message.set_code(1);
+    message.set_message("No executor URI given");
+    send(from(), message);
     delete framework;
   } else {
     bool rootSubmissions = conf.get<bool>("root_submissions", true);
     if (framework->info.user() == "root" && rootSubmissions == false) {
       LOG(INFO) << framework << " registering as root, but "
                 << "root submissions are disabled on this cluster";
-      MSG<M2F_ERROR> out;
-      out.set_code(1);
-      out.set_message("User 'root' is not allowed to run frameworks");
-      send(from(), out);
+      FrameworkErrorMessage message;
+      message.set_code(1);
+      message.set_message("User 'root' is not allowed to run frameworks");
+      send(from(), message);
       delete framework;
     }
   }
@@ -602,17 +603,17 @@ void Master::reregisterFramework(const FrameworkID& frameworkId,
 {
   if (frameworkId == "") {
     LOG(ERROR) << "Framework re-registering without an id!";
-    MSG<M2F_ERROR> out;
-    out.set_code(1);
-    out.set_message("Missing framework id");
-    send(from(), out);
+    FrameworkErrorMessage message;
+    message.set_code(1);
+    message.set_message("Missing framework id");
+    send(from(), message);
   } else if (frameworkInfo.executor().uri() == "") {
     LOG(INFO) << "Framework " << frameworkId << " re-registering "
               << "without an executor URI";
-    MSG<M2F_ERROR> out;
-    out.set_code(1);
-    out.set_message("No executor URI given");
-    send(from(), out);
+    FrameworkErrorMessage message;
+    message.set_code(1);
+    message.set_message("No executor URI given");
+    send(from(), message);
   } else {
     LOG(INFO) << "Re-registering framework " << frameworkId
               << " at " << from();
@@ -636,10 +637,10 @@ void Master::reregisterFramework(const FrameworkID& frameworkId,
         LOG(INFO) << "Framework " << frameworkId
                   << " re-registering with an already used id "
                   << " and not failing over!";
-        MSG<M2F_ERROR> out;
-        out.set_code(1);
-        out.set_message("Framework id in use");
-        send(from(), out);
+        FrameworkErrorMessage message;
+        message.set_code(1);
+        message.set_message("Framework id in use");
+        send(from(), message);
         return;
       }
     } else {
@@ -670,10 +671,10 @@ void Master::reregisterFramework(const FrameworkID& frameworkId,
     // it currently isn't running any tasks. This could be a
     // potential scalability issue ...
     foreachvalue (Slave* slave, slaves) {
-      MSG<M2S_UPDATE_FRAMEWORK> out;
-      out.mutable_framework_id()->MergeFrom(frameworkId);
-      out.set_pid(from());
-      send(slave->pid, out);
+      UpdateFrameworkMessage message;
+      message.mutable_framework_id()->MergeFrom(frameworkId);
+      message.set_pid(from());
+      send(slave->pid, message);
     }
   }
 }
@@ -711,8 +712,8 @@ void Master::resourceOfferReply(const FrameworkID& frameworkId,
       // immediately report any tasks in it as lost (it would
       // probably be better to have better error messages here).
       foreach (const TaskDescription& task, tasks) {
-        MSG<M2F_STATUS_UPDATE> out;
-        StatusUpdate* update = out.mutable_update();
+        StatusUpdateMessage message;
+        StatusUpdate* update = message.mutable_update();
         update->mutable_framework_id()->MergeFrom(frameworkId);
         update->mutable_executor_id()->MergeFrom(task.executor().executor_id());
         update->mutable_slave_id()->MergeFrom(task.slave_id());
@@ -720,8 +721,8 @@ void Master::resourceOfferReply(const FrameworkID& frameworkId,
         status->mutable_task_id()->MergeFrom(task.task_id());
         status->set_state(TASK_LOST);
         update->set_timestamp(elapsedTime());
-        out.set_reliable(false);
-        send(framework->pid, out);
+        message.set_reliable(false);
+        send(framework->pid, message);
       }
     }
   }
@@ -756,10 +757,10 @@ void Master::killTask(const FrameworkID& frameworkId,
                 << " to kill task " << taskId
                 << " of framework " << frameworkId;
 
-      MSG<M2S_KILL_TASK> out;
-      out.mutable_framework_id()->MergeFrom(frameworkId);
-      out.mutable_task_id()->MergeFrom(taskId);
-      send(slave->pid, out);
+      KillTaskMessage message;
+      message.mutable_framework_id()->MergeFrom(frameworkId);
+      message.mutable_task_id()->MergeFrom(taskId);
+      send(slave->pid, message);
     } else {
       // TODO(benh): Once the scheduler has persistance and
       // high-availability of it's tasks, it will be the one that
@@ -770,15 +771,15 @@ void Master::killTask(const FrameworkID& frameworkId,
       LOG(WARNING) << "Cannot kill task " << taskId
                    << " of framework " << frameworkId
                    << " because it cannot be found";
-      MSG<M2F_STATUS_UPDATE> out;
-      StatusUpdate* update = out.mutable_update();
+      StatusUpdateMessage message;
+      StatusUpdate* update = message.mutable_update();
       update->mutable_framework_id()->MergeFrom(frameworkId);
       TaskStatus* status = update->mutable_status();
       status->mutable_task_id()->MergeFrom(taskId);
       status->set_state(TASK_LOST);
       update->set_timestamp(elapsedTime());
-      out.set_reliable(false);
-      send(framework->pid, out);
+      message.set_reliable(false);
+      send(framework->pid, message);
     }
   }
 }
@@ -795,12 +796,12 @@ void Master::schedulerMessage(const SlaveID& slaveId,
     if (slave != NULL) {
       LOG(INFO) << "Sending framework message for framework "
                 << frameworkId << " to slave " << slaveId;
-      MSG<M2S_FRAMEWORK_MESSAGE> out;
-      out.mutable_slave_id()->MergeFrom(slaveId);
-      out.mutable_framework_id()->MergeFrom(frameworkId);
-      out.mutable_executor_id()->MergeFrom(executorId);
-      out.set_data(data);
-      send(slave->pid, out);
+      FrameworkToExecutorMessage message;
+      message.mutable_slave_id()->MergeFrom(slaveId);
+      message.mutable_framework_id()->MergeFrom(frameworkId);
+      message.mutable_executor_id()->MergeFrom(executorId);
+      message.set_data(data);
+      send(slave->pid, message);
     } else {
       LOG(WARNING) << "Cannot send framework message for framework "
                    << frameworkId << " to slave " << slaveId
@@ -814,9 +815,9 @@ void Master::schedulerMessage(const SlaveID& slaveId,
 }
 
 
-void Master::statusUpdateAck(const FrameworkID& frameworkId,
-                             const TaskID& taskId,
-                             const SlaveID& slaveId)
+void Master::statusUpdateAcknowledgement(const FrameworkID& frameworkId,
+                                         const TaskID& taskId,
+                                         const SlaveID& slaveId)
 {
   Framework* framework = lookupFramework(frameworkId);
   if (framework != NULL) {
@@ -825,11 +826,11 @@ void Master::statusUpdateAck(const FrameworkID& frameworkId,
       LOG(INFO) << "Sending slave " << slaveId
                 << " status update acknowledgement for task " << taskId
                 << " of framework " << frameworkId;
-      MSG<M2S_STATUS_UPDATE_ACK> out;
-      out.mutable_framework_id()->MergeFrom(frameworkId);
-      out.mutable_slave_id()->MergeFrom(slaveId);
-      out.mutable_task_id()->MergeFrom(taskId);
-      send(slave->pid, out);
+      StatusUpdateAcknowledgementMessage message;
+      message.mutable_framework_id()->MergeFrom(frameworkId);
+      message.mutable_slave_id()->MergeFrom(slaveId);
+      message.mutable_task_id()->MergeFrom(taskId);
+      send(slave->pid, message);
     } else {
       LOG(WARNING) << "Cannot tell slave " << slaveId
                    << " of status update acknowledgement for task " << taskId
@@ -858,7 +859,7 @@ void Master::registerSlave(const SlaveInfo& slaveInfo)
     {
       // TODO(benh): Do a reverse lookup to ensure IP maps to
       // hostname, or check credentials of this slave.
-      process::dispatch(master, &Master::addSlave, slave);
+      process::dispatch(master, &Master::addSlave, slave, false);
     }
 
     static bool run(Slave* slave,
@@ -996,10 +997,10 @@ void Master::statusUpdate(const StatusUpdate& update, bool reliable)
     Framework* framework = lookupFramework(update.framework_id());
     if (framework != NULL) {
       // Pass on the (transformed) status update to the framework.
-      MSG<M2F_STATUS_UPDATE> out;
-      out.mutable_update()->MergeFrom(update);
-      out.set_reliable(reliable);
-      send(framework->pid, out);
+      StatusUpdateMessage message;
+      message.mutable_update()->MergeFrom(update);
+      message.set_reliable(reliable);
+      send(framework->pid, message);
 
       // Lookup the task and see if we need to update anything locally.
       Task* task = slave->lookupTask(update.framework_id(), status.task_id());
@@ -1059,12 +1060,12 @@ void Master::executorMessage(const SlaveID& slaveId,
     if (framework != NULL) {
       LOG(INFO) << "Sending framework message from slave " << slaveId
                 << " to framework " << frameworkId;
-      MSG<M2S_FRAMEWORK_MESSAGE> out;
-      out.mutable_slave_id()->MergeFrom(slaveId);
-      out.mutable_framework_id()->MergeFrom(frameworkId);
-      out.mutable_executor_id()->MergeFrom(executorId);
-      out.set_data(data);
-      send(framework->pid, out);
+      ExecutorToFrameworkMessage message;
+      message.mutable_slave_id()->MergeFrom(slaveId);
+      message.mutable_framework_id()->MergeFrom(frameworkId);
+      message.mutable_executor_id()->MergeFrom(executorId);
+      message.set_data(data);
+      send(framework->pid, message);
 
       statistics.valid_framework_messages++;
     } else {
@@ -1111,8 +1112,8 @@ void Master::exitedExecutor(const SlaveID& slaveId,
       foreachvalue (Task* task, utils::copy(framework->tasks)) {
         if (task->slave_id() == slave->slaveId &&
             task->executor_id() == executorId) {
-          MSG<M2F_STATUS_UPDATE> out;
-          StatusUpdate* update = out.mutable_update();
+          StatusUpdateMessage message;
+          StatusUpdate* update = message.mutable_update();
           update->mutable_framework_id()->MergeFrom(task->framework_id());
           update->mutable_executor_id()->MergeFrom(task->executor_id());
           update->mutable_slave_id()->MergeFrom(task->slave_id());
@@ -1120,8 +1121,8 @@ void Master::exitedExecutor(const SlaveID& slaveId,
           status->mutable_task_id()->MergeFrom(task->task_id());
           status->set_state(TASK_LOST);
           update->set_timestamp(elapsedTime());
-          out.set_reliable(false);
-          send(framework->pid, out);
+          message.set_reliable(false);
+          send(framework->pid, message);
 
           LOG(INFO) << "Removing task " << task->task_id()
                     << " of framework " << frameworkId
@@ -1463,19 +1464,19 @@ OfferID Master::makeOffer(Framework* framework,
   LOG(INFO) << "Sending offer " << offer->offerId
             << " to framework " << framework->frameworkId;
 
-  MSG<M2F_RESOURCE_OFFER> out;
-  out.mutable_offer_id()->MergeFrom(offerId);
+  ResourceOfferMessage message;
+  message.mutable_offer_id()->MergeFrom(offerId);
 
   foreach (const SlaveResources& r, resources) {
-    SlaveOffer* offer = out.add_offers();
+    SlaveOffer* offer = message.add_offers();
     offer->mutable_slave_id()->MergeFrom(r.slave->slaveId);
     offer->set_hostname(r.slave->info.hostname());
     offer->mutable_resources()->MergeFrom(r.resources);
 
-    out.add_pids(r.slave->pid);
+    message.add_pids(r.slave->pid);
   }
 
-  send(framework->pid, out);
+  send(framework->pid, message);
 
   return offerId;
 }
@@ -1625,12 +1626,12 @@ void Master::launchTask(Framework* framework, const TaskDescription& task)
 
   LOG(INFO) << "Launching " << t << " on " << slave;
 
-  MSG<M2S_RUN_TASK> out;
-  out.mutable_framework()->MergeFrom(framework->info);
-  out.mutable_framework_id()->MergeFrom(framework->frameworkId);
-  out.set_pid(framework->pid);
-  out.mutable_task()->MergeFrom(task);
-  send(slave->pid, out);
+  RunTaskMessage message;
+  message.mutable_framework()->MergeFrom(framework->info);
+  message.mutable_framework_id()->MergeFrom(framework->frameworkId);
+  message.set_pid(framework->pid);
+  message.mutable_task()->MergeFrom(task);
+  send(slave->pid, message);
 
   statistics.launched_tasks++;
 }
@@ -1640,14 +1641,14 @@ void Master::launchTask(Framework* framework, const TaskDescription& task)
 // TODO: Make the error codes and messages programmer-friendly
 void Master::terminateFramework(Framework* framework,
                                 int32_t code,
-                                const string& message)
+                                const string& error)
 {
-  LOG(INFO) << "Terminating " << framework << " due to error: " << message;
+  LOG(INFO) << "Terminating " << framework << " due to error: " << error;
 
-  MSG<M2F_ERROR> out;
-  out.set_code(code);
-  out.set_message(message);
-  send(framework->pid, out);
+  FrameworkErrorMessage message;
+  message.set_code(code);
+  message.set_message(error);
+  send(framework->pid, message);
 
   removeFramework(framework);
 }
@@ -1673,9 +1674,9 @@ void Master::removeSlotOffer(SlotOffer* offer,
   // Also send framework a rescind message unless the reason we are
   // removing the offer is that the framework replied to it
   if (reason != ORR_FRAMEWORK_REPLIED) {
-    MSG<M2F_RESCIND_OFFER> out;
-    out.mutable_offer_id()->MergeFrom(offer->offerId);
-    send(framework->pid, out);
+    RescindResourceOfferMessage message;
+    message.mutable_offer_id()->MergeFrom(offer->offerId);
+    send(framework->pid, message);
   }
   
   // Tell the allocator about the unused resources.
@@ -1695,9 +1696,9 @@ void Master::addFramework(Framework* framework)
   pidToFrameworkId[framework->pid] = framework->frameworkId;
   link(framework->pid);
 
-  MSG<M2F_REGISTER_REPLY> out;
-  out.mutable_framework_id()->MergeFrom(framework->frameworkId);
-  send(framework->pid, out);
+  FrameworkRegisteredMessage message;
+  message.mutable_framework_id()->MergeFrom(framework->frameworkId);
+  send(framework->pid, message);
 
   allocator->frameworkAdded(framework);
 }
@@ -1715,10 +1716,12 @@ void Master::failoverFramework(Framework* framework, const UPID& newPid)
     removeSlotOffer(offer, ORR_FRAMEWORK_FAILOVER, offer->resources);
   }
 
-  MSG<M2F_ERROR> out;
-  out.set_code(1);
-  out.set_message("Framework failover");
-  send(oldPid, out);
+  {
+    FrameworkErrorMessage message;
+    message.set_code(1);
+    message.set_message("Framework failover");
+    send(oldPid, message);
+  }
 
   // TODO(benh): unlink(oldPid);
   pidToFrameworkId.erase(oldPid);
@@ -1738,9 +1741,9 @@ void Master::failoverFramework(Framework* framework, const UPID& newPid)
   // Make sure we can get offers again.
   framework->active = true;
 
-  MSG<M2F_REGISTER_REPLY> reply;
-  reply.mutable_framework_id()->MergeFrom(framework->frameworkId);
-  send(newPid, reply);
+  FrameworkRegisteredMessage message;
+  message.mutable_framework_id()->MergeFrom(framework->frameworkId);
+  send(newPid, message);
 }
 
 
@@ -1753,9 +1756,9 @@ void Master::removeFramework(Framework* framework)
   
   // Tell slaves to kill the framework
   foreachvalue (Slave* slave, slaves) {
-    MSG<M2S_KILL_FRAMEWORK> out;
-    out.mutable_framework_id()->MergeFrom(framework->frameworkId);
-    send(slave->pid, out);
+    KillFrameworkMessage message;
+    message.mutable_framework_id()->MergeFrom(framework->frameworkId);
+    send(slave->pid, message);
   }
 
   // Remove pointers to the framework's tasks in slaves
@@ -1783,7 +1786,7 @@ void Master::removeFramework(Framework* framework)
 }
 
 
-void Master::addSlave(Slave* slave)
+void Master::addSlave(Slave* slave, bool reregister)
 {
   CHECK(slave != NULL);
 
@@ -1793,9 +1796,15 @@ void Master::addSlave(Slave* slave)
 
   allocator->slaveAdded(slave);
 
-  MSG<M2S_REGISTER_REPLY> out;
-  out.mutable_slave_id()->MergeFrom(slave->slaveId);
-  send(slave->pid, out);
+  if (!reregister) {
+    SlaveRegisteredMessage message;
+    message.mutable_slave_id()->MergeFrom(slave->slaveId);
+    send(slave->pid, message);
+  } else {
+    SlaveReregisteredMessage message;
+    message.mutable_slave_id()->MergeFrom(slave->slaveId);
+    send(slave->pid, message);
+  }
 
   // TODO(benh):
   //     // Ask the slaves manager to monitor this slave for us.
@@ -1813,7 +1822,7 @@ void Master::readdSlave(Slave* slave, const vector<Task>& tasks)
 {
   CHECK(slave != NULL);
 
-  addSlave(slave);
+  addSlave(slave, true);
 
   for (int i = 0; i < tasks.size(); i++) {
     Task* task = new Task(tasks[i]);
@@ -1830,10 +1839,10 @@ void Master::readdSlave(Slave* slave, const vector<Task>& tasks)
     Framework* framework = lookupFramework(task->framework_id());
     if (framework != NULL) {
       framework->addTask(task);
-      MSG<M2S_UPDATE_FRAMEWORK> out;
-      out.mutable_framework_id()->MergeFrom(framework->frameworkId);
-      out.set_pid(framework->pid);
-      send(slave->pid, out);
+      UpdateFrameworkMessage message;
+      message.mutable_framework_id()->MergeFrom(framework->frameworkId);
+      message.set_pid(framework->pid);
+      send(slave->pid, message);
     } else {
       // TODO(benh): We should really put a timeout on how long we
       // keep tasks running on a slave that never have frameworks
@@ -1863,10 +1872,10 @@ void Master::removeSlave(Slave* slave)
     // status update about this task.  Perhaps in the future what we
     // want to do is create a local Framework object to represent that
     // framework until it fails over. See the TODO above in
-    // S2M_REREGISTER_SLAVE.
+    // Master::reregisterSlave.
     if (framework != NULL) {
-      MSG<M2F_STATUS_UPDATE> out;
-      StatusUpdate* update = out.mutable_update();
+      StatusUpdateMessage message;
+      StatusUpdate* update = message.mutable_update();
       update->mutable_framework_id()->MergeFrom(task->framework_id());
       update->mutable_executor_id()->MergeFrom(task->executor_id());
       update->mutable_slave_id()->MergeFrom(task->slave_id());
@@ -1874,8 +1883,8 @@ void Master::removeSlave(Slave* slave)
       status->mutable_task_id()->MergeFrom(task->task_id());
       status->set_state(TASK_LOST);
       update->set_timestamp(elapsedTime());
-      out.set_reliable(false);
-      send(framework->pid, out);
+      message.set_reliable(false);
+      send(framework->pid, message);
     }
     removeTask(task, TRR_SLAVE_LOST);
   }
@@ -1900,9 +1909,9 @@ void Master::removeSlave(Slave* slave)
   // Send lost-slave message to all frameworks (this helps them re-run
   // previously finished tasks whose output was on the lost slave)
   foreachvalue (Framework* framework, frameworks) {
-    MSG<M2F_LOST_SLAVE> out;
-    out.mutable_slave_id()->MergeFrom(slave->slaveId);
-    send(framework->pid, out);
+    LostSlaveMessage message;
+    message.mutable_slave_id()->MergeFrom(slave->slaveId);
+    send(framework->pid, message);
   }
 
   // TODO(benh):

@@ -144,7 +144,7 @@ TEST(MasterTest, SlavePartitioned)
   EXPECT_CALL(sched, slaveLost(&driver, _))
     .WillOnce(Trigger(&slaveLostCall));
 
-  EXPECT_MSG(filter, Eq(PONG), _, _)
+  EXPECT_MSG(filter, Eq("PONG"), _, _)
     .WillRepeatedly(Return(true));
 
   driver.start();
@@ -313,7 +313,7 @@ TEST(MasterTest, SchedulerFailoverStatusUpdate)
   EXPECT_CALL(sched1, error(&driver1, _, "Framework failover"))
     .Times(1);
 
-  EXPECT_MSG(filter, Eq(M2F_STATUS_UPDATE), _, Ne(master))
+  EXPECT_MSG(filter, Eq(StatusUpdateMessage().GetTypeName()), _, Ne(master))
     .WillOnce(DoAll(Trigger(&statusUpdateMsg), Return(true)))
     .RetiresOnSaturation();
 

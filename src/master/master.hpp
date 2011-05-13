@@ -10,6 +10,7 @@
 #include <boost/unordered_set.hpp>
 
 #include <process/process.hpp>
+#include <process/protobuf.hpp>
 
 #include "state.hpp"
 
@@ -85,7 +86,7 @@ class SlaveObserver;
 struct SlotOffer;
 
 
-class Master : public MesosProcess<Master>
+class Master : public ProtobufProcess<Master>
 {
 public:
   Master();
@@ -124,9 +125,9 @@ public:
 			const FrameworkID& frameworkId,
 			const ExecutorID& executorId,
 			const std::string& data);
-  void statusUpdateAck(const FrameworkID& frameworkId,
-                       const TaskID& taskId,
-                       const SlaveID& slaveId);
+  void statusUpdateAcknowledgement(const FrameworkID& frameworkId,
+                                   const TaskID& taskId,
+                                   const SlaveID& slaveId);
   void registerSlave(const SlaveInfo& slaveInfo);
   void reregisterSlave(const SlaveID& slaveId,
                        const SlaveInfo& slaveInfo,
@@ -170,7 +171,7 @@ protected:
   // TODO: Make the error codes and messages programmer-friendly
   void terminateFramework(Framework* framework,
                           int32_t code,
-                          const std::string& message);
+                          const std::string& error);
   
   // Remove a slot offer (because it was replied to, or we want to rescind it,
   // or we lost a framework or a slave)
@@ -191,7 +192,7 @@ protected:
   void removeFramework(Framework* framework);
 
   // Add a slave.
-  void addSlave(Slave* slave);
+  void addSlave(Slave* slave, bool reregister = false);
 
   void readdSlave(Slave* slave, const std::vector<Task>& tasks);
 

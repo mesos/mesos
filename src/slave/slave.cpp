@@ -1,3 +1,6 @@
+#include <google/protobuf/text_format.h>
+
+
 #include <errno.h>
 
 #include <algorithm>
@@ -30,12 +33,12 @@ struct Executor
 {
   Executor(const FrameworkID& _frameworkId,
            const ExecutorInfo& _info,
-           const std::string& _directory)
+           const string& _directory)
     : frameworkId(_frameworkId),
       info(_info),
       directory(_directory),
-      id(info.executor_id()),
-      pid(process::UPID()) {}
+      id(_info.executor_id()),
+      pid(UPID()) {}
 
   virtual ~Executor()
   {
@@ -92,9 +95,9 @@ struct Executor
 
   const FrameworkID frameworkId;
 
-  const std::string directory;
+  const string directory;
 
-  process::UPID pid;
+  UPID pid;
 
   Resources resources;
 
@@ -108,17 +111,17 @@ struct Framework
 {
   Framework(const FrameworkID& _id,
             const FrameworkInfo& _info,
-            const process::UPID& _pid)
+            const UPID& _pid)
     : id(_id), info(_info), pid(_pid) {}
 
   virtual ~Framework() {}
 
-  Executor* createExecutor(const ExecutorInfo& info,
-                           const std::string& directory)
+  Executor* createExecutor(const ExecutorInfo& executorInfo,
+                           const string& directory)
   {
-    Executor* executor = new Executor(id, info, directory);
-    CHECK(!executors.contains(info.executor_id()));
-    executors[info.executor_id()] = executor;
+    Executor* executor = new Executor(id, executorInfo, directory);
+    CHECK(!executors.contains(executorInfo.executor_id()));
+    executors[executorInfo.executor_id()] = executor;
     return executor;
   }
 
@@ -155,7 +158,7 @@ struct Framework
   const FrameworkID id;
   const FrameworkInfo info;
 
-  process::UPID pid;
+  UPID pid;
 
   hashmap<ExecutorID, Executor*> executors;
   hashmap<double, hashmap<TaskID, StatusUpdate> > updates;
@@ -256,7 +259,7 @@ private:
 Slave::Slave(const Configuration& _conf,
              bool _local,
              IsolationModule* _isolationModule)
-  : MesosProcess<Slave>("slave"),
+  : ProtobufProcess<Slave>("slave"),
     conf(_conf),
     local(_local),
     isolationModule(_isolationModule)
@@ -271,7 +274,7 @@ Slave::Slave(const Configuration& _conf,
 Slave::Slave(const Resources& _resources,
              bool _local,
              IsolationModule *_isolationModule)
-  : MesosProcess<Slave>("slave"),
+  : ProtobufProcess<Slave>("slave"),
     resources(_resources),
     local(_local),
     isolationModule(_isolationModule)
@@ -392,10 +395,6 @@ Promise<state::SlaveState*> Slave::getState()
 
 void Slave::initialize()
 {
-  // Startup the executor reaper.
-  reaper = new ExecutorReaper(self());
-  process::spawn(reaper, true);
-
   // Start all the statistics at 0.
   CHECK(TASK_STARTING == TaskState_MIN);
   CHECK(TASK_LOST == TaskState_MAX);
@@ -413,63 +412,62 @@ void Slave::initialize()
   startTime = elapsedTime();
 
   // Install protobuf handlers.
-  install(NEW_MASTER_DETECTED, &Slave::newMasterDetected,
-          &NewMasterDetectedMessage::pid);
+  installProtobufHandler(&Slave::newMasterDetected,
+                         &NewMasterDetectedMessage::pid);
 
-  install(NO_MASTER_DETECTED, &Slave::noMasterDetected);
+  installProtobufHandler<NoMasterDetectedMessage>(&Slave::noMasterDetected);
 
-  install(M2S_REGISTER_REPLY, &Slave::registerReply,
-          &SlaveRegisteredMessage::slave_id);
+  installProtobufHandler(&Slave::registered,
+                         &SlaveRegisteredMessage::slave_id);
 
-  install(M2S_REREGISTER_REPLY, &Slave::reregisterReply,
-          &SlaveRegisteredMessage::slave_id);
+  installProtobufHandler(&Slave::reregistered,
+                         &SlaveReregisteredMessage::slave_id);
 
-  install(M2S_RUN_TASK, &Slave::runTask,
-          &RunTaskMessage::framework,
-          &RunTaskMessage::framework_id,
-          &RunTaskMessage::pid,
-          &RunTaskMessage::task);
+  installProtobufHandler(&Slave::runTask,
+                         &RunTaskMessage::framework,
+                         &RunTaskMessage::framework_id,
+                         &RunTaskMessage::pid,
+                         &RunTaskMessage::task);
 
-  install(M2S_KILL_TASK, &Slave::killTask,
-          &KillTaskMessage::framework_id,
-          &KillTaskMessage::task_id);
+  installProtobufHandler(&Slave::killTask,
+                         &KillTaskMessage::framework_id,
+                         &KillTaskMessage::task_id);
 
-  install(M2S_KILL_FRAMEWORK, &Slave::killFramework,
-          &KillFrameworkMessage::framework_id);
+  installProtobufHandler(&Slave::killFramework,
+                         &KillFrameworkMessage::framework_id);
 
-  install(M2S_FRAMEWORK_MESSAGE, &Slave::schedulerMessage,
-          &FrameworkMessageMessage::slave_id,
-          &FrameworkMessageMessage::framework_id,
-          &FrameworkMessageMessage::executor_id,
-          &FrameworkMessageMessage::data);
+  installProtobufHandler(&Slave::schedulerMessage,
+                         &FrameworkToExecutorMessage::slave_id,
+                         &FrameworkToExecutorMessage::framework_id,
+                         &FrameworkToExecutorMessage::executor_id,
+                         &FrameworkToExecutorMessage::data);
 
-  install(M2S_UPDATE_FRAMEWORK, &Slave::updateFramework,
-          &UpdateFrameworkMessage::framework_id,
-          &UpdateFrameworkMessage::pid);
+  installProtobufHandler(&Slave::updateFramework,
+                         &UpdateFrameworkMessage::framework_id,
+                         &UpdateFrameworkMessage::pid);
 
-  install(M2S_STATUS_UPDATE_ACK, &Slave::statusUpdateAcknowledged,
-          &StatusUpdateAcknowledgedMessage::slave_id,
-          &StatusUpdateAcknowledgedMessage::framework_id,
-          &StatusUpdateAcknowledgedMessage::task_id);
+  installProtobufHandler(&Slave::statusUpdateAcknowledgement,
+                         &StatusUpdateAcknowledgementMessage::slave_id,
+                         &StatusUpdateAcknowledgementMessage::framework_id,
+                         &StatusUpdateAcknowledgementMessage::task_id);
 
-  install(E2S_REGISTER_EXECUTOR, &Slave::registerExecutor,
-          &RegisterExecutorMessage::framework_id,
-          &RegisterExecutorMessage::executor_id);
+  installProtobufHandler(&Slave::registerExecutor,
+                         &RegisterExecutorMessage::framework_id,
+                         &RegisterExecutorMessage::executor_id);
 
-  install(E2S_STATUS_UPDATE, &Slave::statusUpdate,
-          &StatusUpdateMessage::update);
+  installProtobufHandler(&Slave::statusUpdate,
+                         &StatusUpdateMessage::update);
 
-  install(E2S_FRAMEWORK_MESSAGE, &Slave::executorMessage,
-          &FrameworkMessageMessage::slave_id,
-          &FrameworkMessageMessage::framework_id,
-          &FrameworkMessageMessage::executor_id,
-          &FrameworkMessageMessage::data);
-
-  install(PING, &Slave::ping);
+  installProtobufHandler(&Slave::executorMessage,
+                         &ExecutorToFrameworkMessage::slave_id,
+                         &ExecutorToFrameworkMessage::framework_id,
+                         &ExecutorToFrameworkMessage::executor_id,
+                         &ExecutorToFrameworkMessage::data);
 
   // Install some message handlers.
   installMessageHandler(process::TIMEOUT, &Slave::timeout);
   installMessageHandler(process::EXITED, &Slave::exited);
+  installMessageHandler("PING", &Slave::ping);
 
   // Install some HTTP handlers.
   installHttpHandler("info.json", &Slave::http_info_json);
@@ -512,8 +510,16 @@ void Slave::operator () ()
   // Initialize isolation module.
   isolationModule->initialize(self(), conf, local);
 
+  // Startup the executor reaper (TODO(benh): Make the isolation
+  // modules do this).
+  reaper = new ExecutorReaper(self());
+  process::spawn(reaper, true);
+  link(reaper->self());
+
   while (true) {
     serve(1);
+    // TODO(benh): Actually get a ShutdownMessage and then do a
+    // process::terminate(self()) from within.
     if (name() == process::TERMINATE) {
       LOG(INFO) << "Asked to shut down by " << from();
       foreachvalue (Framework* framework, utils::copy(frameworks)) {
@@ -534,25 +540,25 @@ void Slave::newMasterDetected(const string& pid)
 
   if (id == "") {
     // Slave started before master.
-    MSG<S2M_REGISTER_SLAVE> out;
-    out.mutable_slave()->MergeFrom(info);
-    send(master, out);
+    RegisterSlaveMessage message;
+    message.mutable_slave()->MergeFrom(info);
+    send(master, message);
   } else {
     // Re-registering, so send tasks running.
-    MSG<S2M_REREGISTER_SLAVE> out;
-    out.mutable_slave_id()->MergeFrom(id);
-    out.mutable_slave()->MergeFrom(info);
+    ReregisterSlaveMessage message;
+    message.mutable_slave_id()->MergeFrom(id);
+    message.mutable_slave()->MergeFrom(info);
 
     foreachvalue (Framework* framework, frameworks) {
       foreachvalue (Executor* executor, framework->executors) {
 	foreachvalue (Task* task, executor->launchedTasks) {
           // TODO(benh): Also need to send queued tasks here ...
-	  out.add_tasks()->MergeFrom(*task);
+	  message.add_tasks()->MergeFrom(*task);
 	}
       }
     }
 
-    send(master, out);
+    send(master, message);
   }
 }
 
@@ -563,14 +569,14 @@ void Slave::noMasterDetected()
 }
 
 
-void Slave::registerReply(const SlaveID& slaveId)
+void Slave::registered(const SlaveID& slaveId)
 {
   LOG(INFO) << "Registered with master; given slave ID " << slaveId;
   id = slaveId;
 }
 
 
-void Slave::reregisterReply(const SlaveID& slaveId)
+void Slave::reregistered(const SlaveID& slaveId)
 {
   LOG(INFO) << "Re-registered with master";
 
@@ -608,12 +614,12 @@ void Slave::runTask(const FrameworkInfo& frameworkInfo,
       // Add the task and send it to the executor.
       executor->addTask(task);
 
-      MSG<S2E_RUN_TASK> out;
-      out.mutable_framework()->MergeFrom(framework->info);
-      out.mutable_framework_id()->MergeFrom(framework->id);
-      out.set_pid(framework->pid);
-      out.mutable_task()->MergeFrom(task);
-      send(executor->pid, out);
+      RunTaskMessage message;
+      message.mutable_framework()->MergeFrom(framework->info);
+      message.mutable_framework_id()->MergeFrom(framework->id);
+      message.set_pid(framework->pid);
+      message.mutable_task()->MergeFrom(task);
+      send(executor->pid, message);
 
       // Now update the resources.
       isolationModule->resourcesChanged(
@@ -622,16 +628,21 @@ void Slave::runTask(const FrameworkInfo& frameworkInfo,
     }
   } else {
     // Launch an executor for this task.
-    const string& directory =
-      getUniqueWorkDirectory(framework->id, executor->id);
+    ExecutorInfo executorInfo = task.has_executor()
+      ? task.executor()
+      : framework->info.executor();
 
-    if (task.has_executor()) {
-      executor =
-        framework->createExecutor(task.executor(), directory);
-    } else {
-      executor =
-        framework->createExecutor(framework->info.executor(), directory);
-    }
+    ExecutorID executorId = executorInfo.executor_id();
+
+    string directory = getUniqueWorkDirectory(framework->id, executorId);
+
+    LOG(INFO) << "Using '" << directory
+              << "' as work directory for executor '" << executorId
+              << "' of framework " << framework->id;
+
+    executor = framework->createExecutor(executorInfo, directory);
+
+//     std::cout << "executor: " << executor << std::endl;
 
     // Queue task until the executor starts up.
     executor->queuedTasks[task.task_id()] = task;
@@ -644,6 +655,8 @@ void Slave::runTask(const FrameworkInfo& frameworkInfo,
     pid_t pid = isolationModule->launchExecutor(
         framework->id, framework->info,
         executor->info, directory);
+
+//     std::cout << "launchExecutor returned normally, pid: " << pid << std::endl;
 
     // For now, an isolation module returning 0 effectively indicates
     // that the slave shouldn't try and reap it to determine if it has
@@ -675,8 +688,8 @@ void Slave::killTask(const FrameworkID& frameworkId,
                  << " of framework " << frameworkId
                  << " because no such framework is running";
 
-    MSG<S2M_STATUS_UPDATE> out;
-    StatusUpdate* update = out.mutable_update();
+    StatusUpdateMessage message;
+    StatusUpdate* update = message.mutable_update();
     update->mutable_framework_id()->MergeFrom(frameworkId);
     update->mutable_slave_id()->MergeFrom(id);
     TaskStatus *status = update->mutable_status();
@@ -684,8 +697,8 @@ void Slave::killTask(const FrameworkID& frameworkId,
     status->set_state(TASK_LOST);
     update->set_timestamp(elapsedTime());
     update->set_sequence(-1);
-    out.set_reliable(false);
-    send(master, out);
+    message.set_reliable(false);
+    send(master, message);
 
     return;
   }
@@ -699,8 +712,8 @@ void Slave::killTask(const FrameworkID& frameworkId,
                  << " of framework " << frameworkId
                  << " because no such task is running";
 
-    MSG<S2M_STATUS_UPDATE> out;
-    StatusUpdate* update = out.mutable_update();
+    StatusUpdateMessage message;
+    StatusUpdate* update = message.mutable_update();
     update->mutable_framework_id()->MergeFrom(framework->id);
     update->mutable_slave_id()->MergeFrom(id);
     TaskStatus *status = update->mutable_status();
@@ -708,8 +721,8 @@ void Slave::killTask(const FrameworkID& frameworkId,
     status->set_state(TASK_LOST);
     update->set_timestamp(elapsedTime());
     update->set_sequence(-1);
-    out.set_reliable(false);
-    send(master, out);
+    message.set_reliable(false);
+    send(master, message);
   } else if (!executor->pid) {
     // Remove the task and update the resources.
     executor->removeTask(taskId);
@@ -718,8 +731,8 @@ void Slave::killTask(const FrameworkID& frameworkId,
         framework->id, framework->info,
         executor->info, executor->resources);
 
-    MSG<S2M_STATUS_UPDATE> out;
-    StatusUpdate* update = out.mutable_update();
+    StatusUpdateMessage message;
+    StatusUpdate* update = message.mutable_update();
     update->mutable_framework_id()->MergeFrom(framework->id);
     update->mutable_executor_id()->MergeFrom(executor->id);
     update->mutable_slave_id()->MergeFrom(id);
@@ -728,15 +741,15 @@ void Slave::killTask(const FrameworkID& frameworkId,
     status->set_state(TASK_KILLED);
     update->set_timestamp(elapsedTime());
     update->set_sequence(0);
-    out.set_reliable(false);
-    send(master, out);
+    message.set_reliable(false);
+    send(master, message);
   } else {
     // Otherwise, send a message to the executor and wait for
     // it to send us a status update.
-    MSG<S2E_KILL_TASK> out;
-    out.mutable_framework_id()->MergeFrom(frameworkId);
-    out.mutable_task_id()->MergeFrom(taskId);
-    send(executor->pid, out);
+    KillTaskMessage message;
+    message.mutable_framework_id()->MergeFrom(frameworkId);
+    message.mutable_task_id()->MergeFrom(taskId);
+    send(executor->pid, message);
   }
 }
 
@@ -780,12 +793,12 @@ void Slave::schedulerMessage(const SlaveID& slaveId,
                  << " because executor is not running";
     statistics.invalidFrameworkMessages++;
   } else {
-    MSG<S2E_FRAMEWORK_MESSAGE> out;
-    out.mutable_slave_id()->MergeFrom(slaveId);
-    out.mutable_framework_id()->MergeFrom(frameworkId);
-    out.mutable_executor_id()->MergeFrom(executorId);
-    out.set_data(data);
-    send(executor->pid, out);
+    FrameworkToExecutorMessage message;
+    message.mutable_slave_id()->MergeFrom(slaveId);
+    message.mutable_framework_id()->MergeFrom(frameworkId);
+    message.mutable_executor_id()->MergeFrom(executorId);
+    message.set_data(data);
+    send(executor->pid, message);
 
     statistics.validFrameworkMessages++;
   }
@@ -804,9 +817,9 @@ void Slave::updateFramework(const FrameworkID& frameworkId,
 }
 
 
-void Slave::statusUpdateAcknowledged(const SlaveID& slaveId,
-                                     const FrameworkID& frameworkId,
-                                     const TaskID& taskId)
+void Slave::statusUpdateAcknowledgement(const SlaveID& slaveId,
+                                        const FrameworkID& frameworkId,
+                                        const TaskID& taskId)
 {
   Framework* framework = getFramework(frameworkId);
   if (framework != NULL) {
@@ -883,10 +896,10 @@ void Slave::statusUpdateAcknowledged(const SlaveID& slaveId,
 //       LOG(WARNING) << "WARNING! Acknowledged a \"terminal\""
 //                    << " task status but updates are still pending";
 //     } else if (!empty) {
-//       MSG<S2M_STATUS_UPDATE> out;
-//       out.mutable_update()->MergeFrom(stream->pending.front());
-//       out.set_reliable(true);
-//       send(master, out);
+//       StatusUpdateMessage message;
+//       message.mutable_update()->MergeFrom(stream->pending.front());
+//       message.set_reliable(true);
+//       send(master, message);
 
 //       stream->timeout = elapsedTime() + STATUS_UPDATE_RETRY_INTERVAL;
 //     }
@@ -906,10 +919,7 @@ void Slave::registerExecutor(const FrameworkID& frameworkId,
     LOG(WARNING) << "Framework " << frameworkId
                  << " does not exist (it may have been killed),"
                  << " telling executor to exit";
-
-    // TODO(benh): Should we be sending a TERMINATE instead?
-    send(from(), S2E_KILL_EXECUTOR);
-
+    send(from(), ShutdownMessage());
     return;
   }
 
@@ -919,14 +929,12 @@ void Slave::registerExecutor(const FrameworkID& frameworkId,
   if (executor == NULL) {
     LOG(WARNING) << "WARNING! Unexpected executor '" << executorId
                  << "' registering for framework " << frameworkId;
-    // TODO(benh): Should we be sending a TERMINATE instead?
-    send(from(), S2E_KILL_EXECUTOR);
+    send(from(), ShutdownMessage());
   } else if (executor->pid != UPID()) {
     LOG(WARNING) << "WARNING! executor '" << executorId
                  << "' of framework " << frameworkId
                  << " is already running";
-    // TODO(benh): Should we be sending a TERMINATE instead?
-    send(from(), S2E_KILL_EXECUTOR);
+    send(from(), ShutdownMessage());
   } else {
     // Save the pid for the executor.
     executor->pid = from();
@@ -937,14 +945,14 @@ void Slave::registerExecutor(const FrameworkID& frameworkId,
         executor->info, executor->resources);
 
     // Tell executor it's registered and give it any queued tasks.
-    MSG<S2E_REGISTER_REPLY> out;
-    ExecutorArgs* args = out.mutable_args();
+    ExecutorRegisteredMessage message;
+    ExecutorArgs* args = message.mutable_args();
     args->mutable_framework_id()->MergeFrom(framework->id);
     args->mutable_executor_id()->MergeFrom(executor->id);
     args->mutable_slave_id()->MergeFrom(id);
     args->set_hostname(info.hostname());
     args->set_data(executor->info.data());
-    send(executor->pid, out);
+    send(executor->pid, message);
 
     LOG(INFO) << "Flushing queued tasks for framework " << framework->id;
 
@@ -952,12 +960,12 @@ void Slave::registerExecutor(const FrameworkID& frameworkId,
       // Add the task to the executor.
       executor->addTask(task);
 
-      MSG<S2E_RUN_TASK> out;
-      out.mutable_framework_id()->MergeFrom(framework->id);
-      out.mutable_framework()->MergeFrom(framework->info);
-      out.set_pid(framework->pid);
-      out.mutable_task()->MergeFrom(task);
-      send(executor->pid, out);
+      RunTaskMessage message;
+      message.mutable_framework_id()->MergeFrom(framework->id);
+      message.mutable_framework()->MergeFrom(framework->info);
+      message.set_pid(framework->pid);
+      message.mutable_task()->MergeFrom(task);
+      send(executor->pid, message);
     }
 
     executor->queuedTasks.clear();
@@ -1042,11 +1050,11 @@ void Slave::registerExecutor(const FrameworkID& frameworkId,
 //   }
 
 //   // Now acknowledge the executor.
-//   MSG<S2E_STATUS_UPDATE_ACK> out;
-//   out.mutable_framework_id()->MergeFrom(update.framework_id());
-//   out.mutable_slave_id()->MergeFrom(update.slave_id());
-//   out.mutable_task_id()->MergeFrom(update.status().task_id());
-//   send(executor->pid, out);
+//   StatusUpdateAcknowledgementMessage message;
+//   message.mutable_framework_id()->MergeFrom(update.framework_id());
+//   message.mutable_slave_id()->MergeFrom(update.slave_id());
+//   message.mutable_task_id()->MergeFrom(update.status().task_id());
+//   send(executor->pid, message);
 
 //   executor->updateTaskState(
 //       update.status().task_id(),
@@ -1073,10 +1081,10 @@ void Slave::registerExecutor(const FrameworkID& frameworkId,
 //   // Slave::statusUpdateAcknowledged.
 //   if (stream->pending.size() == 1) {
 //     CHECK(stream->timeout == -1);
-//     MSG<S2M_STATUS_UPDATE> out;
-//     out.mutable_update()->MergeFrom(update);
-//     out.set_reliable(true);
-//     send(master, out);
+//     StatusUpdateMessage message;
+//     message.mutable_update()->MergeFrom(update);
+//     message.set_reliable(true);
+//     send(master, message);
 
 //     stream->timeout = elapsedTime() + STATUS_UPDATE_RETRY_INTERVAL;
 //   }
@@ -1109,10 +1117,10 @@ void Slave::statusUpdate(const StatusUpdate& update)
       }
 
       // Send message and record the status for possible resending.
-      MSG<S2M_STATUS_UPDATE> out;
-      out.mutable_update()->MergeFrom(update);
-      out.set_reliable(true);
-      send(master, out);
+      StatusUpdateMessage message;
+      message.mutable_update()->MergeFrom(update);
+      message.set_reliable(true);
+      send(master, message);
 
       double deadline = elapsedTime() + STATUS_UPDATE_RETRY_INTERVAL;
       framework->updates[deadline][status.task_id()] = update;
@@ -1144,13 +1152,12 @@ void Slave::executorMessage(const SlaveID& slaveId,
   LOG(INFO) << "Sending message for framework " << frameworkId
             << " to " << framework->pid;
 
-  // TODO(benh): This is weird, sending an M2F message.
-  MSG<M2F_FRAMEWORK_MESSAGE> out;
-  out.mutable_slave_id()->MergeFrom(slaveId);
-  out.mutable_framework_id()->MergeFrom(frameworkId);
-  out.mutable_executor_id()->MergeFrom(executorId);
-  out.set_data(data);
-  send(framework->pid, out);
+  ExecutorToFrameworkMessage message;
+  message.mutable_slave_id()->MergeFrom(slaveId);
+  message.mutable_framework_id()->MergeFrom(frameworkId);
+  message.mutable_executor_id()->MergeFrom(executorId);
+  message.set_data(data);
+  send(framework->pid, message);
 
   statistics.validFrameworkMessages++;
 }
@@ -1158,7 +1165,7 @@ void Slave::executorMessage(const SlaveID& slaveId,
 
 void Slave::ping()
 {
-  send(from(), PONG);
+  send(from(), "PONG");
 }
 
 
@@ -1172,10 +1179,10 @@ void Slave::timeout()
           LOG(WARNING) << "Resending status update"
                        << " for task " << update.status().task_id()
                        << " of framework " << framework->id;
-          MSG<S2M_STATUS_UPDATE> out;
-          out.mutable_update()->MergeFrom(update);
-          out.set_reliable(true);
-          send(master, out);
+          StatusUpdateMessage message;
+          message.mutable_update()->MergeFrom(update);
+          message.set_reliable(true);
+          send(master, message);
         }
       }
     }
@@ -1198,10 +1205,10 @@ void Slave::timeout()
 //                 << " for task " << update.status().task_id()
 //                 << " of framework " << update.framework_id();
       
-//       MSG<S2M_STATUS_UPDATE> out;
-//       out.mutable_update()->MergeFrom(update);
-//       out.set_reliable(true);
-//       send(master, out);
+//       StatusUpdateMessage message;
+//       message.mutable_update()->MergeFrom(update);
+//       message.set_reliable(true);
+//       send(master, message);
 
 //       stream->timeout = now + STATUS_UPDATE_RETRY_INTERVAL;
 //     }
@@ -1467,10 +1474,10 @@ Framework* Slave::getFramework(const FrameworkID& frameworkId)
 //   // the acknowledgement.
 //   if (!stream->pending.empty()) {
 //     StatusUpdate* update = stream->pending.front();
-//     MSG<S2M_STATUS_UPDATE> out;
-//     out.mutable_update()->MergeFrom(*update);
-//     out.set_reliable(true);
-//     send(master, out);
+//     StatusUpdateMessage message;
+//     message.mutable_update()->MergeFrom(*update);
+//     message.set_reliable(true);
+//     send(master, message);
 
 //     stream->timeout = elapsedTime() + STATUS_UPDATE_RETRY_INTERVAL;
 //   }
@@ -1600,12 +1607,12 @@ void Slave::executorExited(const FrameworkID& frameworkId,
             << "' of framework " << frameworkId
             << " with result " << result;
 
-  MSG<S2M_EXITED_EXECUTOR> out;
-  out.mutable_slave_id()->MergeFrom(id);
-  out.mutable_framework_id()->MergeFrom(frameworkId);
-  out.mutable_executor_id()->MergeFrom(executorId);
-  out.set_result(result);
-  send(master, out);
+  ExitedExecutorMessage message;
+  message.mutable_slave_id()->MergeFrom(id);
+  message.mutable_framework_id()->MergeFrom(frameworkId);
+  message.mutable_executor_id()->MergeFrom(executorId);
+  message.set_result(result);
+  send(master, message);
 
   removeExecutor(framework, executor, false);
 
@@ -1635,15 +1642,15 @@ void Slave::removeExecutor(Framework* framework,
                            bool killExecutor)
 {
   if (killExecutor) {
-    LOG(INFO) << "Killing executor '" << executor->id
+    LOG(INFO) << "Shutting down executor '" << executor->id
               << "' of framework " << framework->id;
 
-    send(executor->pid, S2E_KILL_EXECUTOR);
+    send(from(), ShutdownMessage());
 
     // TODO(benh): There really isn't ANY time between when an
-    // executor gets a S2E_KILL_EXECUTOR message and the isolation
-    // module goes and kills it. We should really think about making
-    // the semantics of this better.
+    // executor gets a shutdown message and the isolation module goes
+    // and kills it. We should really think about making the semantics
+    // of this better.
 
     isolationModule->killExecutor(framework->id,
                                   framework->info,
@@ -1674,6 +1681,9 @@ void Slave::removeExecutor(Framework* framework,
 string Slave::getUniqueWorkDirectory(const FrameworkID& frameworkId,
                                      const ExecutorID& executorId)
 {
+  LOG(INFO) << "Generating a unique work directory for executor '"
+            << executorId << "' of framework " << frameworkId;
+
   string workDir = ".";
   if (conf.contains("work_dir")) {
     workDir = conf.get("work_dir", workDir);
@@ -1687,6 +1697,8 @@ string Slave::getUniqueWorkDirectory(const FrameworkID& frameworkId,
   os << workDir << "/slave-" << id
      << "/fw-" << frameworkId << "-" << executorId;
 
+  // TODO(benh): Make executor id be in it's own directory.
+
   // Find a unique directory based on the path given by the slave
   // (this is because we might launch multiple executors from the same
   // framework on this slave).
@@ -1699,6 +1711,9 @@ string Slave::getUniqueWorkDirectory(const FrameworkID& frameworkId,
     os << i;
     if (opendir(os.str().c_str()) == NULL && errno == ENOENT)
       break;
+
+    // TODO(benh): Does one need to any sort of closedir?
+
     os.str(dir);
   }
 

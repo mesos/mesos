@@ -12,6 +12,7 @@
 #include <mesos/executor.hpp>
 
 #include <process/process.hpp>
+#include <process/protobuf.hpp>
 
 #include "common/fatal.hpp"
 #include "common/lock.hpp"
@@ -34,7 +35,7 @@ using std::string;
 
 namespace mesos { namespace internal {
 
-class ExecutorProcess : public MesosProcess<ExecutorProcess>
+class ExecutorProcess : public ProtobufProcess<ExecutorProcess>
 {
 public:
   ExecutorProcess(const UPID& _slave, MesosExecutorDriver* _driver,
@@ -42,26 +43,31 @@ public:
                   const ExecutorID& _executorId, bool _local)
     : slave(_slave), driver(_driver), executor(_executor),
       frameworkId(_frameworkId), executorId(_executorId),
-      local(_local), terminate(false)
+      local(_local)
   {
-    install(S2E_REGISTER_REPLY, &ExecutorProcess::registerReply,
-            &ExecutorRegisteredMessage::args);
+    installProtobufHandler<ExecutorRegisteredMessage>(
+        &ExecutorProcess::registered,
+        &ExecutorRegisteredMessage::args);
 
-    install(S2E_RUN_TASK, &ExecutorProcess::runTask,
-            &RunTaskMessage::task);
+    installProtobufHandler<RunTaskMessage>(
+        &ExecutorProcess::runTask,
+        &RunTaskMessage::task);
 
-    install(S2E_KILL_TASK, &ExecutorProcess::killTask,
-            &KillTaskMessage::task_id);
+    installProtobufHandler<KillTaskMessage>(
+        &ExecutorProcess::killTask,
+        &KillTaskMessage::task_id);
 
-    install(S2E_FRAMEWORK_MESSAGE, &ExecutorProcess::frameworkMessage,
-	    &FrameworkMessageMessage::slave_id,
-	    &FrameworkMessageMessage::framework_id,
-	    &FrameworkMessageMessage::executor_id,
-	    &FrameworkMessageMessage::data);
+    installProtobufHandler<FrameworkToExecutorMessage>(
+        &ExecutorProcess::frameworkMessage,
+        &FrameworkToExecutorMessage::slave_id,
+        &FrameworkToExecutorMessage::framework_id,
+        &FrameworkToExecutorMessage::executor_id,
+        &FrameworkToExecutorMessage::data);
 
-    install(S2E_KILL_EXECUTOR, &ExecutorProcess::killExecutor);
+    installProtobufHandler<ShutdownMessage>(
+        &ExecutorProcess::shutdown);
 
-    install(process::EXITED, &ExecutorProcess::exited);
+    installMessageHandler(process::EXITED, &ExecutorProcess::exited);
   }
 
   virtual ~ExecutorProcess() {}
@@ -74,21 +80,15 @@ protected:
     link(slave);
 
     // Register with slave.
-    MSG<E2S_REGISTER_EXECUTOR> out;
-    out.mutable_framework_id()->MergeFrom(frameworkId);
-    out.mutable_executor_id()->MergeFrom(executorId);
-    send(slave, out);
+    RegisterExecutorMessage message;
+    message.mutable_framework_id()->MergeFrom(frameworkId);
+    message.mutable_executor_id()->MergeFrom(executorId);
+    send(slave, message);
 
-    while(true) {
-      // Check for terminate in the same way as SchedulerProcess. See
-      // comments there for an explanation of why this is necessary.
-      if (terminate) return;
-
-      serve(0, true);
-    }
+    do { if (serve() == process::TERMINATE) break; } while (true);
   }
 
-  void registerReply(const ExecutorArgs& args)
+  void registered(const ExecutorArgs& args)
   {
     VLOG(1) << "Executor registered on slave " << args.slave_id();
     slaveId = args.slave_id();
@@ -97,15 +97,17 @@ protected:
 
   void runTask(const TaskDescription& task)
   {
-    VLOG(1) << "Executor asked to run a task " << task.task_id();
+    VLOG(1) << "Executor asked to run task '" << task.task_id() << "'";
 
-    process::invoke(bind(&Executor::launchTask, executor, driver, cref(task)));
+    process::invoke(bind(&Executor::launchTask, executor, driver,
+                         cref(task)));
   }
 
   void killTask(const TaskID& taskId)
   {
-    VLOG(1) << "Executor asked to kill task " << taskId;
-    process::invoke(bind(&Executor::killTask, executor, driver, cref(taskId)));
+    VLOG(1) << "Executor asked to kill task '" << taskId << "'";
+    process::invoke(bind(&Executor::killTask, executor, driver,
+                         cref(taskId)));
   }
 
   void frameworkMessage(const SlaveID& slaveId,
@@ -118,14 +120,15 @@ protected:
                          cref(data)));
   }
 
-  void killExecutor()
+  void shutdown()
   {
     VLOG(1) << "Executor asked to shutdown";
+    // TODO(benh): Any need to invoke driver.stop?
     process::invoke(bind(&Executor::shutdown, executor, driver));
     if (!local) {
       exit(0);
     } else {
-      return;
+      process::terminate(self());
     }
   }
 
@@ -144,7 +147,7 @@ protected:
     if (!local) {
       killpg(0, SIGKILL);
     } else {
-      terminate = true;
+      process::terminate(self());
     }
   }
 
@@ -158,16 +161,12 @@ private:
   ExecutorID executorId;
   SlaveID slaveId;
   bool local;
-
-  volatile bool terminate;
 };
 
-}} /* namespace mesos { namespace internal { */
+}} // namespace mesos { namespace internal {
 
 
-/*
- * Implementation of C++ API.
- */
+// Implementation of C++ API.
 
 
 MesosExecutorDriver::MesosExecutorDriver(Executor* _executor)
@@ -283,8 +282,7 @@ int MesosExecutorDriver::stop()
 
   CHECK(process != NULL);
 
-  process->terminate = true;
-  process::post(process->self(), process::TERMINATE);
+  process::terminate(process->self());
 
   running = false;
 
@@ -325,16 +323,16 @@ int MesosExecutorDriver::sendStatusUpdate(const TaskStatus& status)
   CHECK(process != NULL);
 
   // TODO(benh): Do a dispatch to Executor first?
-  MSG<E2S_STATUS_UPDATE> out;
-  StatusUpdate* update = out.mutable_update();
+  StatusUpdateMessage message;
+  StatusUpdate* update = message.mutable_update();
   update->mutable_framework_id()->MergeFrom(process->frameworkId);
   update->mutable_executor_id()->MergeFrom(process->executorId);
   update->mutable_slave_id()->MergeFrom(process->slaveId);
   update->mutable_status()->MergeFrom(status);
   update->set_timestamp(process->elapsedTime());
   update->set_sequence(-1);
-  out.set_reliable(false);
-  process->send(process->slave, out);
+  message.set_reliable(false);
+  process->send(process->slave, message);
 
   return 0;
 }
@@ -352,12 +350,12 @@ int MesosExecutorDriver::sendFrameworkMessage(const string& data)
   CHECK(process != NULL);
 
   // TODO(benh): Do a dispatch to Executor first?
-  MSG<E2S_FRAMEWORK_MESSAGE> out;
-  out.mutable_slave_id()->MergeFrom(process->slaveId);
-  out.mutable_framework_id()->MergeFrom(process->frameworkId);
-  out.mutable_executor_id()->MergeFrom(process->executorId);
-  out.set_data(data);
-  process->send(process->slave, out);
+  ExecutorToFrameworkMessage message;
+  message.mutable_slave_id()->MergeFrom(process->slaveId);
+  message.mutable_framework_id()->MergeFrom(process->frameworkId);
+  message.mutable_executor_id()->MergeFrom(process->executorId);
+  message.set_data(data);
+  process->send(process->slave, message);
 
   return 0;
 }
