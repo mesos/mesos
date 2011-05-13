@@ -215,7 +215,7 @@ public:
 protected:
   virtual void operator () ()
   {
-    do { serve(); if (name() == TERMINATE) break; } while (true);
+    do { if (serve() == TERMINATE) break; } while (true);
   }
 };
 
