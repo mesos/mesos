@@ -19,7 +19,6 @@ namespace mesos { namespace internal { namespace slave {
 
 struct Framework;
 struct Executor;
-struct ExecutorReaper;
 
 
 const double STATUS_UPDATE_RETRY_INTERVAL = 10;
@@ -72,19 +71,17 @@ public:
                        const ExecutorID& executorId,
                        const std::string& data);
   void ping();
-
-  void timeout();
   void exited();
 
-  // TODO(benh): Have the isolation module actually call:
-  // void executorStarted(const FrameworkID& frameworkId,
-  //                      const ExecutorID& executorId,
-  //                      pid_t pid);
+  void statusUpdateTimeout(const StatusUpdate& update);
 
-  // Callback used by reaper to tell us when an executor exits.
+  void executorStarted(const FrameworkID& frameworkId,
+                       const ExecutorID& executorId,
+                       pid_t pid);
+
   void executorExited(const FrameworkID& frameworkId,
                       const ExecutorID& executorId,
-                      int result);
+                      int status);
 
 protected:
   virtual void operator () ();
@@ -134,8 +131,6 @@ private:
   Resources resources;
 
   hashmap<FrameworkID, Framework*> frameworks;
-
-  ExecutorReaper* reaper;
 
   IsolationModule* isolationModule;
 

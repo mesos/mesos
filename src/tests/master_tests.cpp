@@ -28,6 +28,7 @@ using std::map;
 using std::vector;
 
 using testing::_;
+using testing::AtMost;
 using testing::DoAll;
 using testing::Eq;
 using testing::Return;
@@ -41,23 +42,23 @@ TEST(MasterTest, TaskRunning)
   Master m;
   PID<Master> master = process::spawn(&m);
 
-  Resources resources = Resources::parse("cpus:2;mem:1024");
-
   MockExecutor exec;
 
   EXPECT_CALL(exec, init(_, _))
     .Times(1);
 
   EXPECT_CALL(exec, launchTask(_, _))
-    .Times(1);
+    .WillOnce(SendStatusUpdate(TASK_RUNNING));
 
   EXPECT_CALL(exec, shutdown(_))
-    .Times(1);
+    .Times(AtMost(1));
 
   map<ExecutorID, Executor*> execs;
   execs[DEFAULT_EXECUTOR_ID] = &exec;
 
   TestingIsolationModule isolationModule(execs);
+
+  Resources resources = Resources::parse("cpus:2;mem:1024");
 
   Slave s(resources, true, &isolationModule);
   PID<Slave> slave = process::spawn(&s);
@@ -129,8 +130,6 @@ TEST(MasterTest, KillTask)
   Master m;
   PID<Master> master = process::spawn(&m);
 
-  Resources resources = Resources::parse("cpus:2;mem:1024");
-
   MockExecutor exec;
 
   trigger killTaskCall;
@@ -139,18 +138,20 @@ TEST(MasterTest, KillTask)
     .Times(1);
 
   EXPECT_CALL(exec, launchTask(_, _))
-    .Times(1);
+    .WillOnce(SendStatusUpdate(TASK_RUNNING));
 
   EXPECT_CALL(exec, killTask(_, _))
     .WillOnce(Trigger(&killTaskCall));
 
   EXPECT_CALL(exec, shutdown(_))
-    .Times(1);
+    .Times(AtMost(1));
 
   map<ExecutorID, Executor*> execs;
   execs[DEFAULT_EXECUTOR_ID] = &exec;
 
   TestingIsolationModule isolationModule(execs);
+
+  Resources resources = Resources::parse("cpus:2;mem:1024");
 
   Slave s(resources, true, &isolationModule);
   PID<Slave> slave = process::spawn(&s);
@@ -229,8 +230,6 @@ TEST(MasterTest, FrameworkMessage)
   Master m;
   PID<Master> master = process::spawn(&m);
 
-  Resources resources = Resources::parse("cpus:2;mem:1024");
-
   MockExecutor exec;
 
   ExecutorDriver* execDriver;
@@ -243,19 +242,21 @@ TEST(MasterTest, FrameworkMessage)
     .WillOnce(DoAll(SaveArg<0>(&execDriver), SaveArg<1>(&args)));
 
   EXPECT_CALL(exec, launchTask(_, _))
-    .Times(1);
+    .WillOnce(SendStatusUpdate(TASK_RUNNING));
 
   EXPECT_CALL(exec, frameworkMessage(_, _))
     .WillOnce(DoAll(SaveArg<1>(&execData),
                     Trigger(&execFrameworkMessageCall)));
 
   EXPECT_CALL(exec, shutdown(_))
-    .Times(1);
+    .Times(AtMost(1));
 
   map<ExecutorID, Executor*> execs;
   execs[DEFAULT_EXECUTOR_ID] = &exec;
 
   TestingIsolationModule isolationModule(execs);
+
+  Resources resources = Resources::parse("cpus:2;mem:1024");
 
   Slave s(resources, true, &isolationModule);
   PID<Slave> slave = process::spawn(&s);
@@ -353,8 +354,6 @@ TEST(MasterTest, MultipleExecutors)
   Master m;
   PID<Master> master = process::spawn(&m);
 
-  Resources resources = Resources::parse("cpus:2;mem:1024");
-
   MockExecutor exec1;
   TaskDescription exec1Task;
   trigger exec1LaunchTaskCall;
@@ -364,10 +363,11 @@ TEST(MasterTest, MultipleExecutors)
 
   EXPECT_CALL(exec1, launchTask(_, _))
     .WillOnce(DoAll(SaveArg<1>(&exec1Task),
-                    Trigger(&exec1LaunchTaskCall)));
+                    Trigger(&exec1LaunchTaskCall),
+                    SendStatusUpdate(TASK_RUNNING)));
 
   EXPECT_CALL(exec1, shutdown(_))
-    .Times(1);
+    .Times(AtMost(1));
 
   MockExecutor exec2;
   TaskDescription exec2Task;
@@ -378,10 +378,11 @@ TEST(MasterTest, MultipleExecutors)
 
   EXPECT_CALL(exec2, launchTask(_, _))
     .WillOnce(DoAll(SaveArg<1>(&exec2Task),
-                    Trigger(&exec2LaunchTaskCall)));
+                    Trigger(&exec2LaunchTaskCall),
+                    SendStatusUpdate(TASK_RUNNING)));
 
   EXPECT_CALL(exec2, shutdown(_))
-    .Times(1);
+    .Times(AtMost(1));
 
   ExecutorID executorId1;
   executorId1.set_value("executor-1");
@@ -394,6 +395,8 @@ TEST(MasterTest, MultipleExecutors)
   execs[executorId2] = &exec2;
 
   TestingIsolationModule isolationModule(execs);
+
+  Resources resources = Resources::parse("cpus:2;mem:1024");
 
   Slave s(resources, true, &isolationModule);
   PID<Slave> slave = process::spawn(&s);

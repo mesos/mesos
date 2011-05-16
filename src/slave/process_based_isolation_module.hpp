@@ -3,41 +3,42 @@
 
 #include <sys/types.h>
 
-#include <boost/unordered_map.hpp>
-
 #include "isolation_module.hpp"
+#include "reaper.hpp"
 #include "slave.hpp"
 
-#include "launcher/launcher.hpp"
+#include "common/hashmap.hpp"
 
-#include "messaging/messages.hpp"
+#include "launcher/launcher.hpp"
 
 
 namespace mesos { namespace internal { namespace slave {
 
-class ProcessBasedIsolationModule : public IsolationModule {
+class ProcessBasedIsolationModule
+  : public IsolationModule, public ProcessExitedListener
+{
 public:
   ProcessBasedIsolationModule();
 
   virtual ~ProcessBasedIsolationModule();
 
-  virtual void initialize(const process::PID<Slave>& slave,
-                          const Configuration& conf,
-                          bool local);
+  virtual void initialize(const Configuration& conf,
+                          bool local,
+                          const process::PID<Slave>& slave);
 
-  virtual pid_t launchExecutor(const FrameworkID& frameworkId,
-                               const FrameworkInfo& frameworkInfo,
-                               const ExecutorInfo& executorInfo,
-                               const std::string& directory);
+  virtual void launchExecutor(const FrameworkID& frameworkId,
+                              const FrameworkInfo& frameworkInfo,
+                              const ExecutorInfo& executorInfo,
+                              const std::string& directory);
 
   virtual void killExecutor(const FrameworkID& frameworkId,
-                            const FrameworkInfo& frameworkInfo,
-                            const ExecutorInfo& executorInfo);
+                            const ExecutorID& executorId);
 
   virtual void resourcesChanged(const FrameworkID& frameworkId,
-                                const FrameworkInfo& frameworkInfo,
-                                const ExecutorInfo& executorInfo,
+                                const ExecutorID& executorId,
                                 const Resources& resources);
+
+  virtual void processExited(pid_t pid, int status);
 
 protected:
   // Main method executed after a fork() to create a Launcher for launching
@@ -47,18 +48,24 @@ protected:
   // Subclasses of ProcessBasedIsolationModule that wish to override the
   // default launching behavior should override createLauncher() and return
   // their own Launcher object (including possibly a subclass of Launcher).
-  virtual launcher::ExecutorLauncher* createExecutorLauncher(const FrameworkID& frameworkId,
-                                                             const FrameworkInfo& frameworkInfo,
-                                                             const ExecutorInfo& executorInfo,
-                                                             const std::string& directory);
+  virtual launcher::ExecutorLauncher* createExecutorLauncher(
+      const FrameworkID& frameworkId,
+      const FrameworkInfo& frameworkInfo,
+      const ExecutorInfo& executorInfo,
+      const std::string& directory);
 
 private:
-  process::PID<Slave> slave;
-  // TODO(benh): Make this const by passing it via constructor.
+  // No copying.
+  ProcessBasedIsolationModule(const ProcessBasedIsolationModule&);
+  void operator = (const ProcessBasedIsolationModule&);
+
+  // TODO(benh): Make variables const by passing them via constructor.
   Configuration conf;
   bool local;
+  process::PID<Slave> slave;
   bool initialized;
-  boost::unordered_map<FrameworkID, boost::unordered_map<ExecutorID, pid_t> > pgids;
+  Reaper* reaper;
+  hashmap<FrameworkID, hashmap<ExecutorID, pid_t> > pgids;
 };
 
 }}}

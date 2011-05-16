@@ -31,11 +31,12 @@ using std::map;
 using std::vector;
 
 using testing::_;
+using testing::AnyOf;
 using testing::AtMost;
 using testing::DoAll;
 using testing::ElementsAre;
 using testing::Eq;
-using testing::Ne;
+using testing::Not;
 using testing::Return;
 using testing::SaveArg;
 
@@ -47,9 +48,9 @@ TEST(MasterTest, SlaveLost)
   Master m;
   PID<Master> master = process::spawn(&m);
 
-  Resources resources = Resources::parse("cpus:2;mem:1024");
-
   ProcessBasedIsolationModule isolationModule;
+
+  Resources resources = Resources::parse("cpus:2;mem:1024");
   
   Slave s(resources, true, &isolationModule);
   PID<Slave> slave = process::spawn(&s);
@@ -258,23 +259,23 @@ TEST(MasterTest, SchedulerFailoverStatusUpdate)
   Master m;
   PID<Master> master = process::spawn(&m);
 
-  Resources resources = Resources::parse("cpus:2;mem:1024");
-
   MockExecutor exec;
 
   EXPECT_CALL(exec, init(_, _))
     .Times(1);
 
   EXPECT_CALL(exec, launchTask(_, _))
-    .Times(1);
+    .WillOnce(SendStatusUpdate(TASK_RUNNING));
 
   EXPECT_CALL(exec, shutdown(_))
-    .Times(1);
+    .Times(AtMost(1));
 
   map<ExecutorID, Executor*> execs;
   execs[DEFAULT_EXECUTOR_ID] = &exec;
 
   TestingIsolationModule isolationModule(execs);
+
+  Resources resources = Resources::parse("cpus:2;mem:1024");
 
   Slave s(resources, true, &isolationModule);
   PID<Slave> slave = process::spawn(&s);
@@ -313,7 +314,8 @@ TEST(MasterTest, SchedulerFailoverStatusUpdate)
   EXPECT_CALL(sched1, error(&driver1, _, "Framework failover"))
     .Times(1);
 
-  EXPECT_MSG(filter, Eq(StatusUpdateMessage().GetTypeName()), _, Ne(master))
+  EXPECT_MSG(filter, Eq(StatusUpdateMessage().GetTypeName()), _,
+             Not(AnyOf(Eq(master), Eq(slave))))
     .WillOnce(DoAll(Trigger(&statusUpdateMsg), Return(true)))
     .RetiresOnSaturation();
 
@@ -362,7 +364,7 @@ TEST(MasterTest, SchedulerFailoverStatusUpdate)
 
   WAIT_UNTIL(registeredCall);
 
-  process::Clock::advance(STATUS_UPDATE_RETRY_INTERVAL);
+  process::Clock::advance(STATUS_UPDATE_RETRY_INTERVAL*2);
 
   WAIT_UNTIL(statusUpdateCall);
 
@@ -391,8 +393,6 @@ TEST(MasterTest, SchedulerFailoverFrameworkMessage)
   Master m;
   PID<Master> master = process::spawn(&m);
 
-  Resources resources = Resources::parse("cpus:2;mem:1024");
-
   MockExecutor exec;
 
   ExecutorDriver* execDriver;
@@ -401,15 +401,17 @@ TEST(MasterTest, SchedulerFailoverFrameworkMessage)
     .WillOnce(SaveArg<0>(&execDriver));
 
   EXPECT_CALL(exec, launchTask(_, _))
-    .Times(1);
+    .WillOnce(SendStatusUpdate(TASK_RUNNING));
 
   EXPECT_CALL(exec, shutdown(_))
-    .Times(1);
+    .Times(AtMost(1));
 
   map<ExecutorID, Executor*> execs;
   execs[DEFAULT_EXECUTOR_ID] = &exec;
 
   TestingIsolationModule isolationModule(execs);
+
+  Resources resources = Resources::parse("cpus:2;mem:1024");
 
   Slave s(resources, true, &isolationModule);
   PID<Slave> slave = process::spawn(&s);

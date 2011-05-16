@@ -98,8 +98,9 @@ endif
 MASTER_OBJ = master/master.o master/slaves_manager.o			\
 	     master/allocator_factory.o master/simple_allocator.o
 
-SLAVE_OBJ = slave/slave.o launcher/launcher.o slave/isolation_module.o	\
-	    slave/process_based_isolation_module.o
+SLAVE_OBJ = slave/slave.o slave/isolation_module.o			\
+	    slave/process_based_isolation_module.o slave/reaper.o	\
+	    launcher/launcher.o
 
 ifeq ($(OS_NAME),solaris)
   SLAVE_OBJ += slave/solaris_project_isolation_module.o

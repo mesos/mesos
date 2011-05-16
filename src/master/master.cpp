@@ -493,7 +493,8 @@ void Master::initialize()
   installProtobufHandler(&Master::statusUpdateAcknowledgement,
                          &StatusUpdateAcknowledgementMessage::framework_id,
                          &StatusUpdateAcknowledgementMessage::task_id,
-                         &StatusUpdateAcknowledgementMessage::slave_id);
+                         &StatusUpdateAcknowledgementMessage::slave_id,
+                         &StatusUpdateAcknowledgementMessage::sequence);
 
   installProtobufHandler(&Master::registerSlave,
                          &RegisterSlaveMessage::slave);
@@ -520,7 +521,7 @@ void Master::initialize()
                          &ExitedExecutorMessage::slave_id,
                          &ExitedExecutorMessage::framework_id,
                          &ExitedExecutorMessage::executor_id,
-                         &ExitedExecutorMessage::result);
+                         &ExitedExecutorMessage::status);
 
   // Install some message handlers.
   installMessageHandler(process::EXITED, &Master::exited);
@@ -817,7 +818,8 @@ void Master::schedulerMessage(const SlaveID& slaveId,
 
 void Master::statusUpdateAcknowledgement(const FrameworkID& frameworkId,
                                          const TaskID& taskId,
-                                         const SlaveID& slaveId)
+                                         const SlaveID& slaveId,
+                                         int32_t sequence)
 {
   Framework* framework = lookupFramework(frameworkId);
   if (framework != NULL) {
@@ -830,6 +832,7 @@ void Master::statusUpdateAcknowledgement(const FrameworkID& frameworkId,
       message.mutable_framework_id()->MergeFrom(frameworkId);
       message.mutable_slave_id()->MergeFrom(slaveId);
       message.mutable_task_id()->MergeFrom(taskId);
+      message.set_sequence(sequence);
       send(slave->pid, message);
     } else {
       LOG(WARNING) << "Cannot tell slave " << slaveId
@@ -1086,8 +1089,12 @@ void Master::executorMessage(const SlaveID& slaveId,
 void Master::exitedExecutor(const SlaveID& slaveId,
                             const FrameworkID& frameworkId,
                             const ExecutorID& executorId,
-                            int32_t result)
+                            int32_t status)
 {
+  // TODO(benh): Send status updates for the tasks running under this
+  // executor from the slave! Maybe requires adding an extra "reason"
+  // so that people can see that the tasks were lost because of 
+
   Slave* slave = lookupSlave(slaveId);
   if (slave != NULL) {
     Framework* framework = lookupFramework(frameworkId);
@@ -1096,7 +1103,7 @@ void Master::exitedExecutor(const SlaveID& slaveId,
                 << " of framework " << framework->frameworkId
                 << " on slave " << slave->slaveId
                 << " (" << slave->info.hostname() << ") "
-                << "exited with result " << result;
+                << "exited with status " << status;
 
       // TODO(benh): What about a status update that is on it's way
       // from the slave but got re-ordered on the wire? By sending

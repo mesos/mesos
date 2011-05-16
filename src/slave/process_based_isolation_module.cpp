@@ -10,36 +10,49 @@ using namespace mesos;
 using namespace mesos::internal;
 using namespace mesos::internal::slave;
 
-using launcher::ExecutorLauncher;
+using namespace process;
 
-using process::PID;
+using launcher::ExecutorLauncher;
 
 using std::map;
 using std::string;
 
 
 ProcessBasedIsolationModule::ProcessBasedIsolationModule()
-  : initialized(false) {}
-
-
-ProcessBasedIsolationModule::~ProcessBasedIsolationModule() {}
-
-
-void ProcessBasedIsolationModule::initialize(const PID<Slave>& slave,
-                                             const Configuration& conf,
-                                             bool local)
 {
-  this->slave = slave;
-  this->conf = conf;
-  this->local = local;
-  this->initialized = true;
+  reaper = new Reaper();
+  spawn(reaper);
+  dispatch(reaper->self(), &Reaper::addProcessExitedListener, this);
 }
 
 
-pid_t ProcessBasedIsolationModule::launchExecutor(const FrameworkID& frameworkId,
-                                                  const FrameworkInfo& frameworkInfo,
-                                                  const ExecutorInfo& executorInfo,
-                                                  const string& directory)
+ProcessBasedIsolationModule::~ProcessBasedIsolationModule()
+{
+  CHECK(reaper != NULL);
+  terminate(reaper->self());
+  wait(reaper->self());
+  delete reaper;
+}
+
+
+void ProcessBasedIsolationModule::initialize(
+    const Configuration& _conf,
+    bool _local,
+    const PID<Slave>& _slave)
+{
+  conf = _conf;
+  local = _local;
+  slave = _slave;
+
+  initialized = true;
+}
+
+
+void ProcessBasedIsolationModule::launchExecutor(
+    const FrameworkID& frameworkId,
+    const FrameworkInfo& frameworkInfo,
+    const ExecutorInfo& executorInfo,
+    const string& directory)
 {
   if (!initialized) {
     LOG(FATAL) << "Cannot launch executors before initialization!";
@@ -57,59 +70,63 @@ pid_t ProcessBasedIsolationModule::launchExecutor(const FrameworkID& frameworkId
     // In parent process, record the pgid for killpg later.
     LOG(INFO) << "Started executor, OS pid = " << pid;
     pgids[frameworkId][executorInfo.executor_id()] = pid;
+
+    // Tell the slave this executor has started.
+    dispatch(slave, &Slave::executorStarted,
+             frameworkId, executorInfo.executor_id(), pid);
   } else {
     // In child process, make cleanup easier.
-//     if (setpgid(0, 0) < 0)
-//       PLOG(FATAL) << "Failed to put executor in own process group";
     if ((pid = setsid()) == -1) {
       PLOG(FATAL) << "Failed to put executor in own session";
     }
-    
-    createExecutorLauncher(frameworkId, frameworkInfo,
-                           executorInfo, directory)->run();
-  }
 
-  return pid;
+    ExecutorLauncher* launcher = 
+      createExecutorLauncher(frameworkId, frameworkInfo,
+                             executorInfo, directory);
+
+    launcher->run();
+  }
 }
 
 
-void ProcessBasedIsolationModule::killExecutor(const FrameworkID& frameworkId,
-                                               const FrameworkInfo& frameworkInfo,
-                                               const ExecutorInfo& executorInfo)
+void ProcessBasedIsolationModule::killExecutor(
+    const FrameworkID& frameworkId,
+    const ExecutorID& executorId)
 {
-  if (pgids[frameworkId][executorInfo.executor_id()] != -1) {
+  if (pgids[frameworkId][executorId] != -1) {
     // TODO(benh): Consider sending a SIGTERM, then after so much time
     // if it still hasn't exited do a SIGKILL (can use a libprocess
     // process for this).
-    LOG(INFO) << "Sending SIGKILL to pgid "
-              << pgids[frameworkId][executorInfo.executor_id()];
-    killpg(pgids[frameworkId][executorInfo.executor_id()], SIGKILL);
-    pgids[frameworkId][executorInfo.executor_id()] = -1;
+    LOG(INFO) << "Sending SIGKILL to process group "
+              << pgids[frameworkId][executorId];
+
+    killpg(pgids[frameworkId][executorId], SIGKILL);
+
+    pgids[frameworkId].erase(executorId);
 
     // TODO(benh): Kill all of the process's descendants? Perhaps
     // create a new libprocess process that continually tries to kill
     // all the processes that are a descendant of the executor, trying
     // to kill the executor last ... maybe this is just too much of a
     // burden?
-
-    pgids[frameworkId].erase(executorInfo.executor_id());
   }
 }
 
 
-void ProcessBasedIsolationModule::resourcesChanged(const FrameworkID& frameworkId,
-                                                   const FrameworkInfo& frameworkInfo,
-                                                   const ExecutorInfo& executorInfo,
-                                                   const Resources& resources)
+void ProcessBasedIsolationModule::resourcesChanged(
+    const FrameworkID& frameworkId,
+    const ExecutorID& executorId,
+    const Resources& resources)
 {
   // Do nothing; subclasses may override this.
 }
 
 
-ExecutorLauncher* ProcessBasedIsolationModule::createExecutorLauncher(const FrameworkID& frameworkId,
-                                                                      const FrameworkInfo& frameworkInfo,
-                                                                      const ExecutorInfo& executorInfo,
-                                                                      const string& directory)
+ExecutorLauncher* ProcessBasedIsolationModule::createExecutorLauncher(
+    const FrameworkID& frameworkId,
+    const FrameworkInfo& frameworkInfo,
+    const ExecutorInfo& executorInfo,
+    const string& directory)
 {
   // Create a map of parameters for the executor launcher.
   map<string, string> params;
@@ -131,4 +148,24 @@ ExecutorLauncher* ProcessBasedIsolationModule::createExecutorLauncher(const Fram
                               !local,
                               conf.get("switch_user", true),
                               params);
+}
+
+
+void ProcessBasedIsolationModule::processExited(pid_t pid, int status)
+{
+  foreachkey (const FrameworkID& frameworkId, pgids) {
+    foreachpair (const ExecutorID& executorId, pid_t pgid, pgids[frameworkId]) {
+      if (pgid == pid) {
+        // Kill the process group to clean up the tasks.
+        killExecutor(frameworkId, executorId);
+
+        LOG(INFO) << "Telling slave of lost executor " << executorId
+                  << " of framework " << frameworkId;
+
+        dispatch(slave, &Slave::executorExited,
+                 frameworkId, executorId, status);
+        break;
+      }
+    }
+  }
 }

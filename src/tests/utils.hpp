@@ -44,7 +44,7 @@ void enterTestDirectory(const char* testCase, const char* testName);
  */
 #define TEST_WITH_WORKDIR(testCase, testName) \
   void runTestBody_##testCase##_##testName(); \
-  TEST(testCase, testName) { \
+  TEST(testCase, testName) {                  \
     enterTestDirectory(#testCase, #testName); \
     runTestBody_##testCase##_##testName(); \
   } \
@@ -56,17 +56,17 @@ void enterTestDirectory(const char* testCase, const char* testName);
  * create one out of an ExecutorID and string.
  */
 #define DEFAULT_EXECUTOR_INFO                                           \
-  ({ ExecutorInfo executor;                                             \
-    executor.mutable_executor_id()->set_value("default");               \
-    executor.set_uri("noexecutor");                                     \
-    executor; })
+      ({ ExecutorInfo executor;                                         \
+        executor.mutable_executor_id()->set_value("default");           \
+        executor.set_uri("noexecutor");                                 \
+        executor; })
 
 
 #define CREATE_EXECUTOR_INFO(executorId, uri)                           \
-  ({ ExecutorInfo executor;                                             \
-    executor.mutable_executor_id()->MergeFrom(executorId);              \
-    executor.set_uri(uri);                                              \
-    executor; })
+      ({ ExecutorInfo executor;                                         \
+        executor.mutable_executor_id()->MergeFrom(executorId);          \
+        executor.set_uri(uri);                                          \
+        executor; })
 
 
 #define DEFAULT_EXECUTOR_ID						\
@@ -161,6 +161,18 @@ ACTION_P(Trigger, trigger) { trigger->value = true; }
 
 
 /**
+ * Definition of the SendStatusUpdate action to be used with gmock.
+ */
+ACTION_P(SendStatusUpdate, state)
+{
+  TaskStatus status;
+  status.mutable_task_id()->MergeFrom(arg1.task_id());
+  status.set_state(state);
+  arg0->sendStatusUpdate(status);
+}
+
+
+/**
  * This macro can be used to wait until some trigger has
  * occured. Currently, a test will wait no longer than approxiamtely 2
  * seconds (10 us * 200000). At some point we may add a mechanism to
@@ -176,7 +188,7 @@ ACTION_P(Trigger, trigger) { trigger->value = true; }
       usleep(10);                                                       \
       if (sleeps++ >= 200000) {                                         \
         FAIL() << "Waited too long for trigger!";                       \
-        abort; /* TODO(benh): Don't abort here ... */                   \
+        exit(-1); /* TODO(benh): Figure out how not to exit! */         \
         break;                                                          \
       }                                                                 \
     } while (true);                                                     \
@@ -191,17 +203,17 @@ public:
 
   virtual ~TestingIsolationModule() {}
 
-  virtual void initialize(const process::PID<slave::Slave>& slave,
-                          const Configuration& conf,
-                          bool local)
+  virtual void initialize(const Configuration& conf,
+                          bool local,
+                          const process::PID<slave::Slave>& _slave)
   {
-    this->slave = slave;
+    slave = _slave;
   }
 
-  virtual pid_t launchExecutor(const FrameworkID& frameworkId,
-                               const FrameworkInfo& frameworkInfo,
-                               const ExecutorInfo& executorInfo,
-                               const std::string& directory)
+  virtual void launchExecutor(const FrameworkID& frameworkId,
+                              const FrameworkInfo& frameworkInfo,
+                              const ExecutorInfo& executorInfo,
+                              const std::string& directory)
   {
     if (executors.count(executorInfo.executor_id()) > 0) {
       Executor* executor = executors[executorInfo.executor_id()];
@@ -222,30 +234,26 @@ public:
       utils::os::unsetenv("MESOS_FRAMEWORK_ID");
       utils::os::unsetenv("MESOS_EXECUTOR_ID");
     } else {
-      ADD_FAILURE() << "Cannot launch executor";
+      FAIL() << "Cannot launch executor";
     }
-
-    return 0;
   }
 
   virtual void killExecutor(const FrameworkID& frameworkId,
-                            const FrameworkInfo& frameworkInfo,
-                            const ExecutorInfo& executorInfo)
+                            const ExecutorID& executorId)
   {
-    if (drivers.count(executorInfo.executor_id()) > 0) {
-      MesosExecutorDriver* driver = drivers[executorInfo.executor_id()];
+    if (drivers.count(executorId) > 0) {
+      MesosExecutorDriver* driver = drivers[executorId];
       driver->stop();
       driver->join();
       delete driver;
-      drivers.erase(executorInfo.executor_id());
+      drivers.erase(executorId);
     } else {
-      ADD_FAILURE() << "Cannot kill executor";
+      FAIL() << "Cannot kill executor";
     }
   }
 
   virtual void resourcesChanged(const FrameworkID& frameworkId,
-                                const FrameworkInfo& frameworkInfo,
-                                const ExecutorInfo& executorInfo,
+                                const ExecutorID& executorId,
                                 const Resources& resources)
   {}
 

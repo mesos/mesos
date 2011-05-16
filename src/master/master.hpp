@@ -127,7 +127,8 @@ public:
 			const std::string& data);
   void statusUpdateAcknowledgement(const FrameworkID& frameworkId,
                                    const TaskID& taskId,
-                                   const SlaveID& slaveId);
+                                   const SlaveID& slaveId,
+                                   int32_t sequence);
   void registerSlave(const SlaveInfo& slaveInfo);
   void reregisterSlave(const SlaveID& slaveId,
                        const SlaveInfo& slaveInfo,
@@ -141,7 +142,7 @@ public:
   void exitedExecutor(const SlaveID& slaveId,
                       const FrameworkID& frameworkId,
                       const ExecutorID& executorId,
-                      int32_t result);
+                      int32_t status);
   void activatedSlaveHostnamePort(const std::string& hostname, uint16_t port);
   void deactivatedSlaveHostnamePort(const std::string& hostname, uint16_t port);
   void timerTick();
