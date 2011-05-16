@@ -1,5 +1,5 @@
-#ifndef __FUTURE_HPP__
-#define __FUTURE_HPP__
+#ifndef __PROCESS_FUTURE_HPP__
+#define __PROCESS_FUTURE_HPP__
 
 #include <process/latch.hpp>
 
@@ -171,4 +171,4 @@ void Future<T>::set(const T& _t)
 
 }  // namespace process {
 
-#endif // __FUTURE_HPP__
+#endif // __PROCESS_FUTURE_HPP__

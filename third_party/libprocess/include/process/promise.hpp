@@ -1,5 +1,5 @@
-#ifndef __PROMISE_HPP__
-#define __PROMISE_HPP__
+#ifndef __PROCESS_PROMISE_HPP__
+#define __PROCESS_PROMISE_HPP__
 
 #include <process/future.hpp>
 
@@ -171,4 +171,4 @@ void Promise<T>::associate(const Future<T>& _future)
 
 }  // namespace process {
 
-#endif // __PROMISE_HPP__
+#endif // __PROCESS_PROMISE_HPP__

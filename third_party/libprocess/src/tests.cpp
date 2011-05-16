@@ -3,12 +3,14 @@
 #include <process/latch.hpp>
 #include <process/process.hpp>
 #include <process/run.hpp>
+#include <process/timer.hpp>
 
 using process::Latch;
 using process::Future;
 using process::PID;
 using process::Process;
 using process::Promise;
+using process::Timer;
 using process::UPID;
 
 using testing::_;
@@ -302,6 +304,41 @@ TEST(libprocess, terminate)
   latch.trigger();
   
   process::wait(process.self());
+}
+
+
+class TimeoutProcess : public Process<TimeoutProcess>
+{
+public:
+  TimeoutProcess() {}
+  MOCK_METHOD0(timeout, void());
+};
+
+
+TEST(libprocess, DISABLED_timer)
+{
+  ASSERT_TRUE(GTEST_IS_THREADSAFE);
+
+  process::Clock::pause();
+
+  TimeoutProcess process;
+
+  EXPECT_CALL(process, timeout())
+    .Times(1);
+
+  process::spawn(&process);
+
+  double timeout = 5.0;
+
+  Timer timer =
+    process::delay(timeout, process.self(), &TimeoutProcess::timeout);
+
+  process::Clock::advance(timeout);
+
+  process::post(process.self(), process::TERMINATE);
+  process::wait(process.self());
+
+  process::Clock::resume();
 }
 
 

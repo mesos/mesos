@@ -1686,7 +1686,7 @@ bool ProcessManager::deliver(Message *message, ProcessBase *sender)
     }
 
     VLOG(2) << "Delivering message name '" << message->name
-            << "' for " << message->to << " from " << message->from;
+            << "' to " << message->to << " from " << message->from;
 
     receiver->enqueue(message);
   } else {
@@ -1714,7 +1714,9 @@ bool ProcessManager::deliver(int c, HttpRequest *request, ProcessBase *sender)
   // Treat this as an HTTP request and check for a valid receiver.
   string temp = request->path.substr(1, request->path.find('/', 1) - 1);
 
-  if (ProcessReference receiver = use(UPID(temp, ip, port))) {
+  UPID to(temp, ip, port);
+
+  if (ProcessReference receiver = use(to)) {
     // If we have a local sender AND we are using a manual clock
     // then update the current time of the receiver to preserve
     // the happens-before relationship between the sender and
@@ -1739,6 +1741,9 @@ bool ProcessManager::deliver(int c, HttpRequest *request, ProcessBase *sender)
 
     // Let the HttpProxy know about this request.
     dispatch(proxy, &HttpProxy::handle, *future, request->keepAlive);
+
+    VLOG(2) << "Delivering HTTP request for '" << request->path
+            << "' to " << to;
 
     // Enqueue request and future for receiver.
     receiver->enqueue(new pair<HttpRequest*, Future<HttpResponse>*>(request, future));
@@ -1786,6 +1791,8 @@ bool ProcessManager::deliver(const UPID& to, function<void(ProcessBase*)>* dispa
         }
       }
     }
+
+    VLOG(2) << "Delivering dispatcher to " << to;
 
     receiver->enqueue(dispatcher);
   } else {
@@ -2520,6 +2527,18 @@ void ProcessManager::cancel_timeout(const timeout &timeout)
 }
 
 
+double Clock::elapsed()
+{
+  synchronized (timeouts) {
+    if (clk != NULL) {
+      return clk->getElapsed();
+    } else {
+      return ev_time();
+    }
+  }
+}
+
+
 void Clock::pause()
 {
   initialize();
@@ -2853,8 +2872,8 @@ string ProcessBase::receive(double secs)
 
  timeout:
   CHECK(current == NULL);
-  current = encode(UPID(), pid, TIMEOUT);
-  return name();
+  current = encode(self(), pid, TIMEOUT);
+  return TIMEOUT;
 }
 
 
@@ -2869,11 +2888,12 @@ string ProcessBase::serve(double secs, bool once)
       current = NULL;
     }
 
-    // Check if there is a message, an HTTP request, or a dispatcher.
+    // Check if there is a message, an HTTP request, or a dispatch.
   check:
-    pair<HttpRequest*, Future<HttpResponse>*>* request;
-    function<void(ProcessBase*)>* dispatcher;
-    if ((request = dequeue<pair<HttpRequest*, Future<HttpResponse>*> >()) != NULL) {
+    pair<HttpRequest*, Future<HttpResponse>*>* request =
+      dequeue<pair<HttpRequest*, Future<HttpResponse>*> >();
+
+    if (request != NULL) {
       size_t index = request->first->path.find('/', 1);
       index = index != string::npos ? index + 1 : request->first->path.size();
       const string& name = request->first->path.substr(index);
@@ -2888,11 +2908,48 @@ string ProcessBase::serve(double secs, bool once)
       delete request->second;
       delete request;
       continue;
-    } else if ((dispatcher = dequeue<function<void(ProcessBase*)> >()) != NULL) {
+    }
+
+    function<void(ProcessBase*)>* dispatcher =
+      dequeue<function<void(ProcessBase*)> >();
+
+    if (dispatcher != NULL) {
       (*dispatcher)(this);
       delete dispatcher;
       continue;
-    } else if ((current = dequeue<Message>()) != NULL) {
+    }
+
+    // We drain the message queue last because otherwise a bunch of
+    // dispatches might get enqueued but then a single TERMINATE get's
+    // enqueued and none of the dispatches get processed (even if they
+    // got enqueued first). There needs to be a better way of having a
+    // single queue holding something like a boost var type that we
+    // can switch on to determine how to handle the next message.
+
+//     struct Element
+//     {
+//       enum {
+//         HTTP,
+//         DISPATCH,
+//         MESSAGE
+//       } type;
+
+//       pair<HttpRequest*, Future<HttpResponse>*>* http() {}
+//       function<void(ProcessBase*)>* dispatch() {}
+//       Message* message() {}
+
+//       void* value;
+//     };
+
+//     switch (queue.head().type()) {
+//       case HTTP:
+//     }
+
+//     if (queue.head().type() == HTTP) {
+
+//     }
+
+    if ((current = dequeue<Message>()) != NULL) {
       if (messageHandlers.count(name()) > 0) {
         messageHandlers[name()]();
 	continue;
@@ -2939,8 +2996,8 @@ string ProcessBase::serve(double secs, bool once)
 
  timeout:
   CHECK(current == NULL);
-  current = encode(UPID(), pid, TIMEOUT);
-  return name();
+  current = encode(self(), pid, TIMEOUT);
+  return TIMEOUT;
 }
 
 

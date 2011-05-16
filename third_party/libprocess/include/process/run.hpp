@@ -1,5 +1,5 @@
-#ifndef __RUN_HPP__
-#define __RUN_HPP__
+#ifndef __PROCESS_RUN_HPP__
+#define __PROCESS_RUN_HPP__
 
 #include <process/process.hpp>
 
@@ -169,4 +169,4 @@ Future<R> run(R (*method)(P1, P2, P3, P4, P5),
 
 } // namespace process {
 
-#endif // __RUN_HPP__
+#endif // __PROCESS_RUN_HPP__

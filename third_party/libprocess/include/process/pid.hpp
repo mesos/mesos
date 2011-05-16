@@ -1,5 +1,5 @@
-#ifndef __PID_HPP__
-#define __PID_HPP__
+#ifndef __PROCESS_PID_HPP__
+#define __PROCESS_PID_HPP__
 
 #include <stdint.h>
 
@@ -82,6 +82,7 @@ struct PID : UPID
 {
   PID() : UPID() {}
 
+  PID(const T* t) : UPID(static_cast<const ProcessBase&>(*t)) {}
   PID(const T& t) : UPID(static_cast<const ProcessBase&>(t)) {}
 
   template <typename Base>
@@ -111,4 +112,4 @@ std::size_t hash_value(const UPID&);
 
 
 
-#endif // __PID_HPP__
+#endif // __PROCESS_PID_HPP__

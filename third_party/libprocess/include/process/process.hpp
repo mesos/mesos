@@ -1,5 +1,5 @@
-#ifndef __PROCESS_HPP__
-#define __PROCESS_HPP__
+#ifndef __PROCESS_PROCESS_HPP__
+#define __PROCESS_PROCESS_HPP__
 
 #include <assert.h>
 #include <stdint.h>
@@ -38,6 +38,7 @@ struct Message {
 
 class Clock {
 public:
+  static double elapsed();
   static void pause();
   static void resume();
   static void advance(double secs);
@@ -354,12 +355,14 @@ template <typename T>
 void dispatch(const PID<T>& pid, void (T::*method)())
 {
   std::tr1::function<void(T*)>* thunk =
-    new std::tr1::function<void(T*)>(std::tr1::bind(method, std::tr1::placeholders::_1));
+    new std::tr1::function<void(T*)>(
+        std::tr1::bind(method, std::tr1::placeholders::_1));
 
   std::tr1::function<void(ProcessBase*)>* dispatcher =
-    new std::tr1::function<void(ProcessBase*)>(std::tr1::bind(&internal::vdispatcher<T>,
-                                                              std::tr1::placeholders::_1,
-                                                              thunk));
+    new std::tr1::function<void(ProcessBase*)>(
+        std::tr1::bind(&internal::vdispatcher<T>,
+                       std::tr1::placeholders::_1,
+                       thunk));
 
   internal::dispatch(pid, dispatcher);
 }
@@ -376,13 +379,15 @@ template <typename T, typename P1, typename A1>
 void dispatch(const PID<T>& pid, void (T::*method)(P1), A1 a1)
 {
   std::tr1::function<void(T*)>* thunk =
-    new std::tr1::function<void(T*)>(std::tr1::bind(method, std::tr1::placeholders::_1,
-                                                    a1));
+    new std::tr1::function<void(T*)>(
+        std::tr1::bind(method, std::tr1::placeholders::_1,
+                       a1));
 
   std::tr1::function<void(ProcessBase*)>* dispatcher =
-    new std::tr1::function<void(ProcessBase*)>(std::tr1::bind(&internal::vdispatcher<T>,
-                                                              std::tr1::placeholders::_1,
-                                                              thunk));
+    new std::tr1::function<void(ProcessBase*)>(
+        std::tr1::bind(&internal::vdispatcher<T>,
+                       std::tr1::placeholders::_1,
+                       thunk));
 
   internal::dispatch(pid, dispatcher);
 }
@@ -402,13 +407,15 @@ template <typename T,
 void dispatch(const PID<T>& pid, void (T::*method)(P1, P2), A1 a1, A2 a2)
 {
   std::tr1::function<void(T*)>* thunk =
-    new std::tr1::function<void(T*)>(std::tr1::bind(method, std::tr1::placeholders::_1,
-                                                    a1, a2));
+    new std::tr1::function<void(T*)>(
+        std::tr1::bind(method, std::tr1::placeholders::_1,
+                       a1, a2));
 
   std::tr1::function<void(ProcessBase*)>* dispatcher =
-    new std::tr1::function<void(ProcessBase*)>(std::tr1::bind(&internal::vdispatcher<T>,
-                                                              std::tr1::placeholders::_1,
-                                                              thunk));
+    new std::tr1::function<void(ProcessBase*)>(
+        std::tr1::bind(&internal::vdispatcher<T>,
+                       std::tr1::placeholders::_1,
+                       thunk));
 
   internal::dispatch(pid, dispatcher);
 }
@@ -430,13 +437,15 @@ void dispatch(const PID<T>& pid, void (T::*method)(P1, P2, P3),
               A1 a1, A2 a2, A3 a3)
 {
   std::tr1::function<void(T*)>* thunk =
-    new std::tr1::function<void(T*)>(std::tr1::bind(method, std::tr1::placeholders::_1,
-                                                    a1, a2, a3));
+    new std::tr1::function<void(T*)>(
+        std::tr1::bind(method, std::tr1::placeholders::_1,
+                       a1, a2, a3));
 
   std::tr1::function<void(ProcessBase*)>* dispatcher =
-    new std::tr1::function<void(ProcessBase*)>(std::tr1::bind(&internal::vdispatcher<T>,
-                                                              std::tr1::placeholders::_1,
-                                                              thunk));
+    new std::tr1::function<void(ProcessBase*)>(
+        std::tr1::bind(&internal::vdispatcher<T>,
+                       std::tr1::placeholders::_1,
+                       thunk));
 
   internal::dispatch(pid, dispatcher);
 }
@@ -459,13 +468,15 @@ void dispatch(const PID<T>& pid, void (T::*method)(P1, P2, P3, P4),
               A1 a1, A2 a2, A3 a3, A4 a4)
 {
   std::tr1::function<void(T*)>* thunk =
-    new std::tr1::function<void(T*)>(std::tr1::bind(method, std::tr1::placeholders::_1,
-                                                    a1, a2, a3, a4));
+    new std::tr1::function<void(T*)>(
+        std::tr1::bind(method, std::tr1::placeholders::_1,
+                       a1, a2, a3, a4));
 
   std::tr1::function<void(ProcessBase*)>* dispatcher =
-    new std::tr1::function<void(ProcessBase*)>(std::tr1::bind(&internal::vdispatcher<T>,
-                                                              std::tr1::placeholders::_1,
-                                                              thunk));
+    new std::tr1::function<void(ProcessBase*)>(
+        std::tr1::bind(&internal::vdispatcher<T>,
+                       std::tr1::placeholders::_1,
+                       thunk));
 
   internal::dispatch(pid, dispatcher);
 }
@@ -489,13 +500,15 @@ void dispatch(const PID<T>& pid, void (T::*method)(P1, P2, P3, P4, P5),
               A1 a1, A2 a2, A3 a3, A4 a4, A5 a5)
 {
   std::tr1::function<void(T*)>* thunk =
-    new std::tr1::function<void(T*)>(std::tr1::bind(method, std::tr1::placeholders::_1,
-                                                    a1, a2, a3, a4, a5));
+    new std::tr1::function<void(T*)>(
+        std::tr1::bind(method, std::tr1::placeholders::_1,
+                       a1, a2, a3, a4, a5));
 
   std::tr1::function<void(ProcessBase*)>* dispatcher =
-    new std::tr1::function<void(ProcessBase*)>(std::tr1::bind(&internal::vdispatcher<T>,
-                                                              std::tr1::placeholders::_1,
-                                                              thunk));
+    new std::tr1::function<void(ProcessBase*)>(
+        std::tr1::bind(&internal::vdispatcher<T>,
+                       std::tr1::placeholders::_1,
+                       thunk));
 
   internal::dispatch(pid, dispatcher);
 }
@@ -513,14 +526,16 @@ template <typename R, typename T>
 Future<R> dispatch(const PID<T>& pid, Promise<R> (T::*method)())
 {
   std::tr1::function<Promise<R>(T*)>* thunk =
-    new std::tr1::function<Promise<R>(T*)>(std::tr1::bind(method, std::tr1::placeholders::_1));
+    new std::tr1::function<Promise<R>(T*)>(
+        std::tr1::bind(method, std::tr1::placeholders::_1));
 
   Future<R>* future = new Future<R>();
 
   std::tr1::function<void(ProcessBase*)>* dispatcher =
-    new std::tr1::function<void(ProcessBase*)>(std::tr1::bind(&internal::pdispatcher<R, T>,
-                                                              std::tr1::placeholders::_1,
-                                                              thunk, future));
+    new std::tr1::function<void(ProcessBase*)>(
+        std::tr1::bind(&internal::pdispatcher<R, T>,
+                       std::tr1::placeholders::_1,
+                       thunk, future));
 
   internal::dispatch(pid, dispatcher);
 
@@ -541,15 +556,17 @@ template <typename R, typename T, typename P1, typename A1>
 Future<R> dispatch(const PID<T>& pid, Promise<R> (T::*method)(P1), A1 a1)
 {
   std::tr1::function<Promise<R>(T*)>* thunk =
-    new std::tr1::function<Promise<R>(T*)>(std::tr1::bind(method, std::tr1::placeholders::_1,
-                                                          a1));
+    new std::tr1::function<Promise<R>(T*)>(
+        std::tr1::bind(method, std::tr1::placeholders::_1,
+                       a1));
 
   Future<R>* future = new Future<R>();
 
   std::tr1::function<void(ProcessBase*)>* dispatcher =
-    new std::tr1::function<void(ProcessBase*)>(std::tr1::bind(&internal::pdispatcher<R, T>,
-                                                              std::tr1::placeholders::_1,
-                                                              thunk, future));
+    new std::tr1::function<void(ProcessBase*)>(
+        std::tr1::bind(&internal::pdispatcher<R, T>,
+                       std::tr1::placeholders::_1,
+                       thunk, future));
 
   internal::dispatch(pid, dispatcher);
 
@@ -574,15 +591,17 @@ Future<R> dispatch(const PID<T>& pid, Promise<R> (T::*method)(P1, P2),
                    A1 a1, A2 a2)
 {
   std::tr1::function<Promise<R>(T*)>* thunk =
-    new std::tr1::function<Promise<R>(T*)>(std::tr1::bind(method, std::tr1::placeholders::_1,
-                                                          a1, a2));
+    new std::tr1::function<Promise<R>(T*)>(
+        std::tr1::bind(method, std::tr1::placeholders::_1,
+                       a1, a2));
 
   Future<R>* future = new Future<R>();
 
   std::tr1::function<void(ProcessBase*)>* dispatcher =
-    new std::tr1::function<void(ProcessBase*)>(std::tr1::bind(&internal::pdispatcher<R, T>,
-                                                              std::tr1::placeholders::_1,
-                                                              thunk, future));
+    new std::tr1::function<void(ProcessBase*)>(
+        std::tr1::bind(&internal::pdispatcher<R, T>,
+                       std::tr1::placeholders::_1,
+                       thunk, future));
 
   internal::dispatch(pid, dispatcher);
 
@@ -608,15 +627,17 @@ Future<R> dispatch(const PID<T>& pid, Promise<R> (T::*method)(P1, P2, P3),
                    A1 a1, A2 a2, A3 a3)
 {
   std::tr1::function<Promise<R>(T*)>* thunk =
-    new std::tr1::function<Promise<R>(T*)>(std::tr1::bind(method, std::tr1::placeholders::_1,
-                                                          a1, a2, a3));
+    new std::tr1::function<Promise<R>(T*)>(
+        std::tr1::bind(method, std::tr1::placeholders::_1,
+                       a1, a2, a3));
 
   Future<R>* future = new Future<R>();
 
   std::tr1::function<void(ProcessBase*)>* dispatcher =
-    new std::tr1::function<void(ProcessBase*)>(std::tr1::bind(&internal::pdispatcher<R, T>,
-                                                              std::tr1::placeholders::_1,
-                                                              thunk, future));
+    new std::tr1::function<void(ProcessBase*)>(
+        std::tr1::bind(&internal::pdispatcher<R, T>,
+                       std::tr1::placeholders::_1,
+                       thunk, future));
 
   internal::dispatch(pid, dispatcher);
 
@@ -643,15 +664,17 @@ Future<R> dispatch(const PID<T>& pid, Promise<R> (T::*method)(P1, P2, P3, P4),
                    A1 a1, A2 a2, A3 a3, A4 a4)
 {
   std::tr1::function<Promise<R>(T*)>* thunk =
-    new std::tr1::function<Promise<R>(T*)>(std::tr1::bind(method, std::tr1::placeholders::_1,
-                                                          a1, a2, a3, a4));
+    new std::tr1::function<Promise<R>(T*)>(
+        std::tr1::bind(method, std::tr1::placeholders::_1,
+                       a1, a2, a3, a4));
 
   Future<R>* future = new Future<R>();
 
   std::tr1::function<void(ProcessBase*)>* dispatcher =
-    new std::tr1::function<void(ProcessBase*)>(std::tr1::bind(&internal::pdispatcher<R, T>,
-                                                              std::tr1::placeholders::_1,
-                                                              thunk, future));
+    new std::tr1::function<void(ProcessBase*)>(
+        std::tr1::bind(&internal::pdispatcher<R, T>,
+                       std::tr1::placeholders::_1,
+                       thunk, future));
 
   internal::dispatch(pid, dispatcher);
 
@@ -679,15 +702,17 @@ Future<R> dispatch(const PID<T>& pid, Promise<R> (T::*method)(P1, P2, P3, P4, P5
                    A1 a1, A2 a2, A3 a3, A4 a4, A5 a5)
 {
   std::tr1::function<Promise<R>(T*)>* thunk =
-    new std::tr1::function<Promise<R>(T*)>(std::tr1::bind(method, std::tr1::placeholders::_1,
-                                                          a1, a2, a3, a4, a5));
+    new std::tr1::function<Promise<R>(T*)>(
+        std::tr1::bind(method, std::tr1::placeholders::_1,
+                       a1, a2, a3, a4, a5));
 
   Future<R>* future = new Future<R>();
 
   std::tr1::function<void(ProcessBase*)>* dispatcher =
-    new std::tr1::function<void(ProcessBase*)>(std::tr1::bind(&internal::pdispatcher<R, T>,
-                                                              std::tr1::placeholders::_1,
-                                                              thunk, future));
+    new std::tr1::function<void(ProcessBase*)>(
+        std::tr1::bind(&internal::pdispatcher<R, T>,
+                       std::tr1::placeholders::_1,
+                       thunk, future));
 
   internal::dispatch(pid, dispatcher);
 
@@ -706,14 +731,16 @@ template <typename R, typename T>
 Future<R> dispatch(const PID<T>& pid, R (T::*method)())
 {
   std::tr1::function<R(T*)>* thunk =
-    new std::tr1::function<R(T*)>(std::tr1::bind(method, std::tr1::placeholders::_1));
+    new std::tr1::function<R(T*)>(
+        std::tr1::bind(method, std::tr1::placeholders::_1));
 
   Future<R>* future = new Future<R>();
 
   std::tr1::function<void(ProcessBase*)>* dispatcher =
-    new std::tr1::function<void(ProcessBase*)>(std::tr1::bind(&internal::dispatcher<R, T>,
-                                                              std::tr1::placeholders::_1,
-                                                              thunk, future));
+    new std::tr1::function<void(ProcessBase*)>(
+        std::tr1::bind(&internal::dispatcher<R, T>,
+                       std::tr1::placeholders::_1,
+                       thunk, future));
 
   internal::dispatch(pid, dispatcher);
 
@@ -733,15 +760,17 @@ template <typename R, typename T, typename P1, typename A1>
 Future<R> dispatch(const PID<T>& pid, R (T::*method)(P1), A1 a1)
 {
   std::tr1::function<R(T*)>* thunk =
-    new std::tr1::function<R(T*)>(std::tr1::bind(method, std::tr1::placeholders::_1,
-                                                 a1));
+    new std::tr1::function<R(T*)>(
+        std::tr1::bind(method, std::tr1::placeholders::_1,
+                       a1));
 
   Future<R>* future = new Future<R>();
 
   std::tr1::function<void(ProcessBase*)>* dispatcher =
-    new std::tr1::function<void(ProcessBase*)>(std::tr1::bind(&internal::dispatcher<R, T>,
-                                                              std::tr1::placeholders::_1,
-                                                              thunk, future));
+    new std::tr1::function<void(ProcessBase*)>(
+        std::tr1::bind(&internal::dispatcher<R, T>,
+                       std::tr1::placeholders::_1,
+                       thunk, future));
 
   internal::dispatch(pid, dispatcher);
 
@@ -766,15 +795,17 @@ Future<R> dispatch(const PID<T>& pid, R (T::*method)(P1, P2),
                    A1 a1, A2 a2)
 {
   std::tr1::function<R(T*)>* thunk =
-    new std::tr1::function<R(T*)>(std::tr1::bind(method, std::tr1::placeholders::_1,
-                                                 a1, a2));
+    new std::tr1::function<R(T*)>(
+        std::tr1::bind(method, std::tr1::placeholders::_1,
+                       a1, a2));
 
   Future<R>* future = new Future<R>();
 
   std::tr1::function<void(ProcessBase*)>* dispatcher =
-    new std::tr1::function<void(ProcessBase*)>(std::tr1::bind(&internal::dispatcher<R, T>,
-                                                              std::tr1::placeholders::_1,
-                                                              thunk, future));
+    new std::tr1::function<void(ProcessBase*)>(
+        std::tr1::bind(&internal::dispatcher<R, T>,
+                       std::tr1::placeholders::_1,
+                       thunk, future));
 
   internal::dispatch(pid, dispatcher);
 
@@ -800,15 +831,17 @@ Future<R> dispatch(const PID<T>& pid, R (T::*method)(P1, P2, P3),
                    A1 a1, A2 a2, A3 a3)
 {
   std::tr1::function<R(T*)>* thunk =
-    new std::tr1::function<R(T*)>(std::tr1::bind(method, std::tr1::placeholders::_1,
-                                                 a1, a2, a3));
+    new std::tr1::function<R(T*)>(
+        std::tr1::bind(method, std::tr1::placeholders::_1,
+                       a1, a2, a3));
 
   Future<R>* future = new Future<R>();
 
   std::tr1::function<void(ProcessBase*)>* dispatcher =
-    new std::tr1::function<void(ProcessBase*)>(std::tr1::bind(&internal::dispatcher<R, T>,
-                                                              std::tr1::placeholders::_1,
-                                                              thunk, future));
+    new std::tr1::function<void(ProcessBase*)>(
+        std::tr1::bind(&internal::dispatcher<R, T>,
+                       std::tr1::placeholders::_1,
+                       thunk, future));
 
   internal::dispatch(pid, dispatcher);
 
@@ -835,15 +868,17 @@ Future<R> dispatch(const PID<T>& pid, R (T::*method)(P1, P2, P3, P4),
                    A1 a1, A2 a2, A3 a3, A4 a4)
 {
   std::tr1::function<R(T*)>* thunk =
-    new std::tr1::function<R(T*)>(std::tr1::bind(method, std::tr1::placeholders::_1,
-                                                 a1, a2, a3, a4));
+    new std::tr1::function<R(T*)>(
+        std::tr1::bind(method, std::tr1::placeholders::_1,
+                       a1, a2, a3, a4));
 
   Future<R>* future = new Future<R>();
 
   std::tr1::function<void(ProcessBase*)>* dispatcher =
-    new std::tr1::function<void(ProcessBase*)>(std::tr1::bind(&internal::dispatcher<R, T>,
-                                                              std::tr1::placeholders::_1,
-                                                              thunk, future));
+    new std::tr1::function<void(ProcessBase*)>(
+        std::tr1::bind(&internal::dispatcher<R, T>,
+                       std::tr1::placeholders::_1,
+                       thunk, future));
 
   internal::dispatch(pid, dispatcher);
 
@@ -871,15 +906,17 @@ Future<R> dispatch(const PID<T>& pid, R (T::*method)(P1, P2, P3, P4, P5),
                             A1 a1, A2 a2, A3 a3, A4 a4, A5 a5)
 {
   std::tr1::function<R(T*)>* thunk =
-    new std::tr1::function<R(T*)>(std::tr1::bind(method, std::tr1::placeholders::_1,
-                                                 a1, a2, a3, a4, a5));
+    new std::tr1::function<R(T*)>(
+        std::tr1::bind(method, std::tr1::placeholders::_1,
+                       a1, a2, a3, a4, a5));
 
   Future<R>* future = new Future<R>();
 
   std::tr1::function<void(ProcessBase*)>* dispatcher =
-    new std::tr1::function<void(ProcessBase*)>(std::tr1::bind(&internal::dispatcher<R, T>,
-                                                              std::tr1::placeholders::_1,
-                                                              thunk, future));
+    new std::tr1::function<void(ProcessBase*)>(
+        std::tr1::bind(&internal::dispatcher<R, T>,
+                       std::tr1::placeholders::_1,
+                       thunk, future));
 
   internal::dispatch(pid, dispatcher);
 
@@ -1120,4 +1157,4 @@ R call(const PID<T>& pid, R (T::*method)(P1, P2, P3, P4, P5),
 
 } // namespace process {
 
-#endif // __PROCESS_HPP__
+#endif // __PROCESS_PROCESS_HPP__
