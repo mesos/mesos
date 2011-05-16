@@ -14,7 +14,7 @@
 #include "common/zookeeper.hpp"
 #endif
 
-#include "messaging/messages.hpp"
+#include "messages/messages.hpp"
 
 #include "detector.hpp"
 #include "url_processor.hpp"

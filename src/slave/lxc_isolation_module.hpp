@@ -8,7 +8,7 @@
 #include "isolation_module.hpp"
 #include "slave.hpp"
 
-#include "messaging/messages.hpp"
+#include "messages/messages.hpp"
 
 
 namespace mesos { namespace internal { namespace slave {

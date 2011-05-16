@@ -14,7 +14,7 @@
 #include "common/utils.hpp"
 #include "common/type_utils.hpp"
 
-#include "messaging/messages.hpp"
+#include "messages/messages.hpp"
 
 #include "slave/isolation_module.hpp"
 #include "slave/slave.hpp"
@@ -188,7 +188,7 @@ ACTION_P(SendStatusUpdate, state)
       usleep(10);                                                       \
       if (sleeps++ >= 200000) {                                         \
         FAIL() << "Waited too long for trigger!";                       \
-        exit(-1); /* TODO(benh): Figure out how not to exit! */         \
+        ::exit(-1); /* TODO(benh): Figure out how not to exit! */       \
         break;                                                          \
       }                                                                 \
     } while (true);                                                     \

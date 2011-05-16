@@ -7,7 +7,7 @@
 
 #include <boost/functional/hash.hpp>
 
-#include "messaging/messages.pb.h"
+#include "messages/messages.hpp"
 
 
 // Some memory unit constants.

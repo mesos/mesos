@@ -34,7 +34,7 @@
 
 #include "local/local.hpp"
 
-#include "messaging/messages.hpp"
+#include "messages/messages.hpp"
 
 using namespace mesos;
 using namespace mesos::internal;

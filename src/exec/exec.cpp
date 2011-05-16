@@ -19,7 +19,7 @@
 #include "common/logging.hpp"
 #include "common/type_utils.hpp"
 
-#include "messaging/messages.hpp"
+#include "messages/messages.hpp"
 
 using namespace mesos;
 using namespace mesos::internal;
