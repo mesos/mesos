@@ -92,8 +92,8 @@ protected:
     google::protobuf::Message* m = new M();
     T* t = static_cast<T*>(this);
     protobufHandlers[m->GetTypeName()] =
-      std::tr1::bind(&ProtobufProcess<T>::handler0, t,
-                     method,
+      std::tr1::bind(&ProtobufProcess<T>::handler0,
+                     t, method,
                      std::tr1::placeholders::_1);
     delete m;
   }
@@ -106,8 +106,8 @@ protected:
     google::protobuf::Message* m = new M();
     T* t = static_cast<T*>(this);
     protobufHandlers[m->GetTypeName()] =
-      std::tr1::bind(&handler1<M, P1, P1C>, t,
-                     method, param1,
+      std::tr1::bind(&handler1<M, P1, P1C>,
+                     t, method, param1,
                      std::tr1::placeholders::_1);
     delete m;
   }
@@ -122,8 +122,8 @@ protected:
     google::protobuf::Message* m = new M();
     T* t = static_cast<T*>(this);
     protobufHandlers[m->GetTypeName()] =
-      std::tr1::bind(&handler2<M, P1, P1C, P2, P2C>, t,
-                     method, p1, p2,
+      std::tr1::bind(&handler2<M, P1, P1C, P2, P2C>,
+                     t, method, p1, p2,
                      std::tr1::placeholders::_1);
     delete m;
   }
@@ -140,8 +140,8 @@ protected:
     google::protobuf::Message* m = new M();
     T* t = static_cast<T*>(this);
     protobufHandlers[m->GetTypeName()] =
-      std::tr1::bind(&handler3<M, P1, P1C, P2, P2C, P3, P3C>, t,
-                     method, p1, p2, p3,
+      std::tr1::bind(&handler3<M, P1, P1C, P2, P2C, P3, P3C>,
+                     t, method, p1, p2, p3,
                      std::tr1::placeholders::_1);
     delete m;
   }
@@ -160,8 +160,8 @@ protected:
     google::protobuf::Message* m = new M();
     T* t = static_cast<T*>(this);
     protobufHandlers[m->GetTypeName()] =
-      std::tr1::bind(&handler4<M, P1, P1C, P2, P2C, P3, P3C, P4, P4C>, t,
-                     method, p1, p2, p3, p4,
+      std::tr1::bind(&handler4<M, P1, P1C, P2, P2C, P3, P3C, P4, P4C>,
+                     t, method, p1, p2, p3, p4,
                      std::tr1::placeholders::_1);
     delete m;
   }
@@ -182,8 +182,8 @@ protected:
     google::protobuf::Message* m = new M();
     T* t = static_cast<T*>(this);
     protobufHandlers[m->GetTypeName()] =
-      std::tr1::bind(&handler5<M, P1, P1C, P2, P2C, P3, P3C, P4, P4C, P5, P5C>, t,
-                     method, p1, p2, p3, p4, p5,
+      std::tr1::bind(&handler5<M, P1, P1C, P2, P2C, P3, P3C, P4, P4C, P5, P5C>,
+                     t, method, p1, p2, p3, p4, p5,
                      std::tr1::placeholders::_1);
     delete m;
   }
@@ -319,6 +319,51 @@ inline void post(const process::UPID& to,
   message.SerializeToString(&data);
   post(to, message.GetTypeName(), data.data(), data.size());
 }
+
+
+template <typename Request, typename Response>
+class RequestResponseProcess
+  : public ProtobufProcess<RequestResponseProcess<Request, Response> >
+{
+public:
+  RequestResponseProcess(
+      const UPID& _pid,
+      const Request& _request,
+      const Promise<Response>& _promise)
+    : pid(_pid), request(_request), promise(_promise) {}
+
+protected:
+  virtual void operator () ()
+  {
+    send(pid, request);
+    ProcessBase::receive();
+    Response response;
+    CHECK(ProcessBase::name() == response.GetTypeName());
+    response.ParseFromString(ProcessBase::body());
+    promise.set(response);
+  }
+
+private:
+  const UPID pid;
+  const Request request;
+  Promise<Response> promise;
+};
+
+
+template <typename Request, typename Response>
+struct Protocol
+{
+  Future<Response> operator () (const UPID& pid, const Request& request)
+  {
+    Future<Response> future;
+    Promise<Response> promise;
+    promise.associate(future);
+    RequestResponseProcess<Request, Response>* process =
+      new RequestResponseProcess<Request, Response>(pid, request, promise);
+    spawn(process, true);
+    return future;
+  }
+};
 
 } // namespace process {
 
