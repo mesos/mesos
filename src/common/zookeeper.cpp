@@ -11,6 +11,9 @@
 
 #include "common/fatal.hpp"
 
+// DO NOT REMOVE! Removing this will require also changing which
+// ZooKeeper library get's used for linking, right now the Makefile is
+// assuming the multithreaded library will get used ...
 #define USE_THREADED_ZOOKEEPER
 
 using boost::cref;
