@@ -326,13 +326,13 @@ void ZooKeeperMasterDetector::connected()
 	    zk->error(ret), servers.c_str());
     }
 
-    // Save the sequnce id but only grab the basename, e.g.,
+    // Save the sequence id but only grab the basename, e.g.,
     // "/path/to/znode/000000131" => "000000131".
     size_t index;
     if ((index = result.find_last_of('/')) != string::npos) {  
       mySeq = result.erase(0, index + 1);
     } else {
-      mySeq = "";
+      mySeq = result;
     }
 
     LOG(INFO) << "Created ephemeral/sequence:" << mySeq;
