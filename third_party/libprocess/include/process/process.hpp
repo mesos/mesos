@@ -73,7 +73,7 @@ protected:
   /* Returns the name of the last dequeued (current) message. */
   const std::string& name() const;
 
-  /* Returns pointer and length of body of last dequeued (current) message. */
+  /* Returns the body of the last dequeued (current) message. */
   const std::string& body() const;
 
   /* Put a message at front of queue. */
