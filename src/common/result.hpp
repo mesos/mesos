@@ -36,6 +36,13 @@ public:
     message = that.message;
   }
 
+  virtual ~Result()
+  {
+    if (t != NULL) {
+      delete t;
+    }
+  }
+
   Result<T>& operator = (const Result<T>& that)
   {
     if (this != &that) {
@@ -49,13 +56,6 @@ public:
     }
 
     return *this;
-  }
-
-  virtual ~Result()
-  {
-    if (t != NULL) {
-      delete t;
-    }
   }
 
   bool isSome() { return state == SOME; }
