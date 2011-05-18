@@ -221,7 +221,14 @@ message FrameworkExpiredMessage {
 }
 
 
+message ShutdownMessage {}
+
+
+// Master detector messages.
+
+
 message NoMasterDetectedMessage {}
+
 
 message NewMasterDetectedMessage {
   required string pid = 2;
@@ -233,4 +240,23 @@ message GotMasterTokenMessage {
 }
 
 
-message ShutdownMessage {}
+// Replicated log messages.
+
+
+message AppendRequest {
+  required uint64 position = 1;
+  required bytes bytes = 2;
+}
+
+
+message AppendResponse {
+  required uint64 position = 1;
+}
+
+
+message PositionRequest {}
+
+
+message PositionResponse {
+  required uint64 position = 1;
+}

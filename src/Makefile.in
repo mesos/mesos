@@ -131,7 +131,8 @@ ifeq ($(WITH_ZOOKEEPER),1)
 endif
 
 EXEC_LIB_OBJ = exec/exec.o
-SCHED_LIB_OBJ = sched/sched.o local/local.o
+
+SCHED_LIB_OBJ = sched/sched.o local/local.o log/log.o
 
 BASIC_OBJ = $(MASTER_OBJ) $(SLAVE_OBJ) $(COMMON_OBJ)  \
 	    $(SCHED_LIB_OBJ) $(EXEC_LIB_OBJ)
@@ -230,7 +231,7 @@ DEPLOY_FILES = $(DEPLOYDIR)/deploy-to-slaves             \
 
 # Create rules for building the directories that aren't created
 # automagically by configure.
-OBJ_DIRECTORIES = common configurator detector exec launcher local	\
+OBJ_DIRECTORIES = common configurator detector exec launcher local log	\
                   master messages sched slave
 
 WEBUI_DIRECTORIES = $(BINDIR)/webui/common $(BINDIR)/webui/master	\
