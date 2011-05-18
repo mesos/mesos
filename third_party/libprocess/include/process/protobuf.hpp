@@ -321,49 +321,49 @@ inline void post(const process::UPID& to,
 }
 
 
-template <typename Request, typename Response>
-class RequestResponseProcess
-  : public ProtobufProcess<RequestResponseProcess<Request, Response> >
-{
-public:
-  RequestResponseProcess(
-      const UPID& _pid,
-      const Request& _request,
-      const Promise<Response>& _promise)
-    : pid(_pid), request(_request), promise(_promise) {}
+// template <typename Request, typename Response>
+// class RequestResponseProcess
+//   : public ProtobufProcess<RequestResponseProcess<Request, Response> >
+// {
+// public:
+//   RequestResponseProcess(
+//       const UPID& _pid,
+//       const Request& _request,
+//       const Promise<Response>& _promise)
+//     : pid(_pid), request(_request), promise(_promise) {}
 
-protected:
-  virtual void operator () ()
-  {
-    send(pid, request);
-    ProcessBase::receive();
-    Response response;
-    CHECK(ProcessBase::name() == response.GetTypeName());
-    response.ParseFromString(ProcessBase::body());
-    promise.set(response);
-  }
+// protected:
+//   virtual void operator () ()
+//   {
+//     send(pid, request);
+//     ProcessBase::receive();
+//     Response response;
+//     CHECK(ProcessBase::name() == response.GetTypeName());
+//     response.ParseFromString(ProcessBase::body());
+//     promise.set(response);
+//   }
 
-private:
-  const UPID pid;
-  const Request request;
-  Promise<Response> promise;
-};
+// private:
+//   const UPID pid;
+//   const Request request;
+//   Promise<Response> promise;
+// };
 
 
-template <typename Request, typename Response>
-struct Protocol
-{
-  Future<Response> operator () (const UPID& pid, const Request& request)
-  {
-    Future<Response> future;
-    Promise<Response> promise;
-    promise.associate(future);
-    RequestResponseProcess<Request, Response>* process =
-      new RequestResponseProcess<Request, Response>(pid, request, promise);
-    spawn(process, true);
-    return future;
-  }
-};
+// template <typename Request, typename Response>
+// struct Protocol
+// {
+//   Future<Response> operator () (const UPID& pid, const Request& request)
+//   {
+//     Future<Response> future;
+//     Promise<Response> promise;
+//     promise.associate(future);
+//     RequestResponseProcess<Request, Response>* process =
+//       new RequestResponseProcess<Request, Response>(pid, request, promise);
+//     spawn(process, true);
+//     return future;
+//   }
+// };
 
 } // namespace process {
 
