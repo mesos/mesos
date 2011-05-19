@@ -148,7 +148,7 @@ struct DominantShareComparator
 
     if (share1 == share2)
       // Make the sort deterministic for unit testing.
-      return f1->frameworkId.value() < f2->frameworkId.value();
+      return f1->id.value() < f2->id.value();
     else
       return share1 < share2;
   }
@@ -251,7 +251,7 @@ void SimpleAllocator::makeNewOffers(const vector<Slave*>& slaves)
       if (refusers[slave].find(framework) == refusers[slave].end() &&
           !framework->filters(slave, resources)) {
         VLOG(1) << "Offering " << resources << " on " << slave
-                << " to framework " << framework->frameworkId;
+                << " to framework " << framework->id;
         offerable.push_back(SlaveResources(slave, resources));
       }
     }

@@ -4,8 +4,6 @@
 #include <string>
 #include <vector>
 
-#include <glog/logging.h>
-
 #include <boost/unordered_map.hpp>
 #include <boost/unordered_set.hpp>
 
@@ -267,22 +265,23 @@ private:
 // A resource offer.
 struct Offer
 {
-  OfferID offerId;
-  FrameworkID frameworkId;
-  std::vector<SlaveResources> resources;
-
-  Offer(const OfferID& _offerId,
+  Offer(const OfferID& _id,
         const FrameworkID& _frameworkId,
         const std::vector<SlaveResources>& _resources)
-    : offerId(_offerId), frameworkId(_frameworkId), resources(_resources) {}
+    : id(_id), frameworkId(_frameworkId), resources(_resources) {}
+
+  const OfferID id;
+  const FrameworkID frameworkId;
+  std::vector<SlaveResources> resources;
 };
 
 
 // A connected slave.
 struct Slave
 {
-  SlaveInfo info;
-  SlaveID slaveId;
+  const SlaveInfo info;
+  const SlaveID id;
+
   process::UPID pid;
 
   bool active; // Turns false when slave is being removed
@@ -297,9 +296,9 @@ struct Slave
 
   SlaveObserver* observer;
   
-  Slave(const SlaveInfo& _info, const SlaveID& _slaveId,
+  Slave(const SlaveInfo& _info, const SlaveID& _id,
         const process::UPID& _pid, double time)
-    : info(_info), slaveId(_slaveId), pid(_pid), active(true),
+    : info(_info), id(_id), pid(_pid), active(true),
       registeredTime(time), lastHeartbeat(time) {}
 
   ~Slave() {}
@@ -362,8 +361,9 @@ struct SlaveResources
 // An connected framework.
 struct Framework
 {
-  FrameworkInfo info;
-  FrameworkID frameworkId;
+  const FrameworkInfo info;
+  const FrameworkID id;
+
   process::UPID pid;
 
   bool active; // Turns false when framework is being removed
@@ -379,9 +379,9 @@ struct Framework
   // or 0 for slaves that we want to keep filtered forever
   boost::unordered_map<Slave*, double> slaveFilter;
 
-  Framework(const FrameworkInfo& _info, const FrameworkID& _frameworkId,
+  Framework(const FrameworkInfo& _info, const FrameworkID& _id,
             const process::UPID& _pid, double time)
-    : info(_info), frameworkId(_frameworkId), pid(_pid), active(true),
+    : info(_info), id(_id), pid(_pid), active(true),
       registeredTime(time), reregisteredTime(time) {}
 
   virtual ~Framework() {}
@@ -453,21 +453,21 @@ struct Framework
 
 inline std::ostream& operator << (std::ostream& stream, const Offer *o)
 {
-  stream << "offer " << o->offerId;
+  stream << "offer " << o->id;
   return stream;
 }
 
 
 inline std::ostream& operator << (std::ostream& stream, const Slave *s)
 {
-  stream << "slave " << s->slaveId;
+  stream << "slave " << s->id;
   return stream;
 }
 
 
 inline std::ostream& operator << (std::ostream& stream, const Framework *f)
 {
-  stream << "framework " << f->frameworkId;
+  stream << "framework " << f->id;
   return stream;
 }
 
