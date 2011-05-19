@@ -27,16 +27,16 @@ struct SlaveResources
 };
 
 
-struct SlotOffer
+struct Offer
 {  
   std::string id;
   std::string framework_id;
   std::vector<SlaveResources *> resources;
   
-  SlotOffer(std::string _id, std::string _frameworkId)
+  Offer(std::string _id, std::string _frameworkId)
     : id(_id), framework_id(_frameworkId) {}
     
-  ~SlotOffer()
+  ~Offer()
   {
     foreach (SlaveResources *sr, resources)
       delete sr;
@@ -96,7 +96,7 @@ struct Framework
   {
     foreach (Task *task, tasks)
       delete task;
-    foreach (SlotOffer *offer, offers)
+    foreach (Offer *offer, offers)
       delete offer;
   }
 
@@ -109,7 +109,7 @@ struct Framework
   int64_t connect_time;
 
   std::vector<Task *> tasks;
-  std::vector<SlotOffer *> offers;
+  std::vector<Offer *> offers;
 };
 
 

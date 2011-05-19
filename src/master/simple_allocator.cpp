@@ -66,7 +66,7 @@ void SimpleAllocator::taskRemoved(Task* task, TaskRemovalReason reason)
 }
 
 
-void SimpleAllocator::offerReturned(SlotOffer* offer,
+void SimpleAllocator::offerReturned(Offer* offer,
                                     OfferReturnReason reason,
                                     const vector<SlaveResources>& resLeft)
 {
