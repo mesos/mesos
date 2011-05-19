@@ -1973,9 +1973,3 @@ SlaveID Master::newSlaveId()
   slaveId.set_value(masterId + "-" + lexical_cast<string>(nextSlaveId++));
   return slaveId;
 }
-
-
-const Configuration& Master::getConfiguration()
-{
-  return conf;
-}

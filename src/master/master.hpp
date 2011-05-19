@@ -205,8 +205,6 @@ protected:
   OfferID newOfferId();
   SlaveID newSlaveId();
 
-  const Configuration& getConfiguration();
-
 private:
   // TODO(benh): Better naming and name scope for these http handlers.
   process::Promise<process::HttpResponse> http_info_json(const process::HttpRequest& request);
