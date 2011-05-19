@@ -35,7 +35,12 @@ Timer::Timer(double secs,
 }
 
 
-Timer::~Timer() {}
+Timer::~Timer()
+{
+  // NOTE: Do not terminate the timer! Some users will simply ignore
+  // saving the timer because they never want to cancel, thus
+  // we can not terminate it here!
+}
 
 
 void Timer::cancel()
