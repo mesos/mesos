@@ -5,11 +5,13 @@
 #include <glog/logging.h>
 
 #include <process/run.hpp>
+#include <process/timer.hpp>
 
 #include "config/config.hpp"
 
 #include "common/build.hpp"
 #include "common/date_utils.hpp"
+#include "common/utils.hpp"
 
 #include "allocator.hpp"
 #include "allocator_factory.hpp"
@@ -17,12 +19,6 @@
 #include "slaves_manager.hpp"
 #include "webui.hpp"
 
-using namespace mesos;
-using namespace mesos::internal;
-using namespace mesos::internal::master;
-
-using boost::bad_lexical_cast;
-using boost::lexical_cast;
 using boost::unordered_map;
 using boost::unordered_set;
 
@@ -34,99 +30,8 @@ using process::Process;
 using process::Promise;
 using process::UPID;
 
-using std::endl;
-using std::map;
-using std::max;
-using std::ostringstream;
-using std::pair;
-using std::set;
-using std::setfill;
-using std::setw;
 using std::string;
 using std::vector;
-
-
-namespace {
-
-// A process that periodically pings the master to check filter
-// expiries, etc.
-class AllocatorTimer : public Process<AllocatorTimer>
-{
-public:
-  AllocatorTimer(const PID<Master>& _master) : master(_master) {}
-
-protected:
-  virtual void operator () ()
-  {
-    link(master);
-    while (true) {
-      receive(1);
-      if (name() == process::TIMEOUT) {
-        process::dispatch(master, &Master::timerTick);
-      } else if (name() == process::EXITED) {
-	return;
-      }
-    }
-  }
-
-private:
-  const PID<Master> master;
-};
-
-
-// A process that periodically prints frameworks' shares to a file
-class SharesPrinter : public Process<SharesPrinter>
-{
-public:
-  SharesPrinter(const PID<Master>& _master) : master(_master) {}
-  ~SharesPrinter() {}
-
-protected:
-  virtual void operator () ()
-  {
-    int tick = 0;
-
-    std::ofstream file ("/mnt/shares");
-    if (!file.is_open()) {
-      LOG(FATAL) << "Could not open /mnt/shares";
-    }
-
-    while (true) {
-      pause(1);
-
-      state::MasterState* state = call(master, &Master::getState);
-
-      uint32_t total_cpus = 0;
-      uint32_t total_mem = 0;
-
-      foreach (state::Slave* s, state->slaves) {
-        total_cpus += s->cpus;
-        total_mem += s->mem;
-      }
-      
-      if (state->frameworks.empty()) {
-        file << "--------------------------------" << endl;
-      } else {
-        foreach (state::Framework* f, state->frameworks) {
-          double cpu_share = f->cpus / (double) total_cpus;
-          double mem_share = f->mem / (double) total_mem;
-          double max_share = max(cpu_share, mem_share);
-          file << tick << "#" << f->id << "#" << f->name << "#" 
-               << f->cpus << "#" << f->mem << "#"
-               << cpu_share << "#" << mem_share << "#" << max_share << endl;
-        }
-      }
-      delete state;
-      tick++;
-    }
-    file.close();
-  }
-
-private:
-  const PID<Master> master;
-};
-
-} // namespace {
 
 
 namespace mesos { namespace internal { namespace master {
@@ -189,7 +94,65 @@ private:
   bool pinged;
 };
 
-}}} // namespace mesos { namespace master { namespace internal {
+
+// Performs slave registration asynchronously. There are two means of
+// doing this, one first tries to add this slave to the slaves
+// manager, while the other one simply tells the master to add the
+// slave.
+struct SlaveRegistrar
+{
+  static bool run(Slave* slave, const PID<Master>& master)
+  {
+    // TODO(benh): Do a reverse lookup to ensure IP maps to
+    // hostname, or check credentials of this slave.
+    process::dispatch(master, &Master::addSlave, slave, false);
+  }
+
+  static bool run(Slave* slave,
+                  const PID<Master>& master,
+                  const PID<SlavesManager>& slavesManager)
+  {
+    if (!process::call(slavesManager, &SlavesManager::add,
+                       slave->info.hostname(), slave->pid.port)) {
+      LOG(WARNING) << "Could not register slave because failed"
+                   << " to add it to the slaves maanger";
+      delete slave;
+      return false;
+    }
+
+    return run(slave, master);
+  }
+};
+
+
+// Performs slave re-registration asynchronously as above.
+struct SlaveReregistrar
+{
+  static bool run(Slave* slave,
+                  const vector<Task>& tasks,
+                  const PID<Master>& master)
+  {
+    // TODO(benh): Do a reverse lookup to ensure IP maps to
+    // hostname, or check credentials of this slave.
+    process::dispatch(master, &Master::readdSlave, slave, tasks);
+  }
+
+  static bool run(Slave* slave,
+                  const vector<Task>& tasks,
+                  const PID<Master>& master,
+                  const PID<SlavesManager>& slavesManager)
+  {
+    if (!process::call(slavesManager, &SlavesManager::add,
+                       slave->info.hostname(), slave->pid.port)) {
+      LOG(WARNING) << "Could not register slave because failed"
+                   << " to add it to the slaves maanger";
+      delete slave;
+      return false;
+    }
+
+    return run(slave, tasks, master);
+  }
+};
 
 
 Master::Master()
@@ -219,26 +182,31 @@ Master::~Master()
     removeSlave(slave);
   }
 
-  delete allocator;
-
-  CHECK(slotOffers.size() == 0);
+  CHECK(offers.size() == 0);
 
   process::post(slavesManager->self(), process::TERMINATE);
   process::wait(slavesManager->self());
 
   delete slavesManager;
+
+  delete allocator;
 }
 
 
 void Master::registerOptions(Configurator* configurator)
 {
   SlavesManager::registerOptions(configurator);
-  configurator->addOption<string>("allocator", 'a',
-                                  "Allocation module name",
-                                  "simple");
-  configurator->addOption<bool>("root_submissions",
-                                "Can root submit frameworks?",
-                                true);
+
+  configurator->addOption<string>(
+      "allocator",
+      'a',
+      "Allocation module name",
+      "simple");
+
+  configurator->addOption<bool>(
+      "root_submissions",
+      "Can root submit frameworks?",
+      true);
 }
 
 
@@ -257,9 +225,9 @@ Promise<state::MasterState*> Master::getState()
     mem = resources.getScalar("mem", mem);
 
     state::Slave* slave =
-      new state::Slave(s->slaveId.value(), s->info.hostname(),
+      new state::Slave(s->id.value(), s->info.hostname(),
                        s->info.public_hostname(), cpus.value(),
-                       mem.value(), s->connectTime);
+                       mem.value(), s->registeredTime);
 
     state->slaves.push_back(slave);
   }
@@ -274,9 +242,9 @@ Promise<state::MasterState*> Master::getState()
     mem = resources.getScalar("mem", mem);
 
     state::Framework* framework =
-      new state::Framework(f->frameworkId.value(), f->info.user(),
+      new state::Framework(f->id.value(), f->info.user(),
                            f->info.name(), f->info.executor().uri(),
-                           cpus.value(), mem.value(), f->connectTime);
+                           cpus.value(), mem.value(), f->registeredTime);
 
     state->frameworks.push_back(framework);
 
@@ -298,9 +266,9 @@ Promise<state::MasterState*> Master::getState()
       framework->tasks.push_back(task);
     }
 
-    foreach (SlotOffer* o, f->slotOffers) {
-      state::SlotOffer* offer =
-        new state::SlotOffer(o->offerId.value(), o->frameworkId.value());
+    foreach (Offer* o, f->offers) {
+      state::Offer* offer =
+        new state::Offer(o->id.value(), o->frameworkId.value());
 
       foreach (const SlaveResources& r, o->resources) {
         Resources resources(r.resources);
@@ -312,7 +280,7 @@ Promise<state::MasterState*> Master::getState()
         mem = resources.getScalar("mem", mem);
 
         state::SlaveResources* sr =
-          new state::SlaveResources(r.slave->slaveId.value(),
+          new state::SlaveResources(r.slave->id.value(),
                                     cpus.value(), mem.value());
 
         offer->resources.push_back(sr);
@@ -352,36 +320,6 @@ vector<Slave*> Master::getActiveSlaves()
 }
 
 
-Framework* Master::lookupFramework(const FrameworkID& frameworkId)
-{
-  if (frameworks.count(frameworkId) > 0) {
-    return frameworks[frameworkId];
-  } else {
-    return NULL;
-  }
-}
-
-
-Slave* Master::lookupSlave(const SlaveID& slaveId)
-{
-  if (slaves.count(slaveId) > 0) {
-    return slaves[slaveId];
-  } else {
-    return NULL;
-  }
-}
-
-
-SlotOffer* Master::lookupSlotOffer(const OfferID& offerId)
-{
-  if (slotOffers.count(offerId) > 0) {
-    return slotOffers[offerId];
-  } else {
-    return NULL;
-  }
-}
-
-
 void Master::operator () ()
 {
   LOG(INFO) << "Master started at mesos://" << self();
@@ -407,13 +345,16 @@ void Master::operator () ()
 
   // Create the allocator (we do this after the constructor because it
   // leaks 'this').
-  allocator = createAllocator();
+  string type = conf.get("allocator", "simple");
+  LOG(INFO) << "Creating \"" << type << "\" allocator";
+  allocator = AllocatorFactory::instantiate(type, this);
+
   if (!allocator) {
-    LOG(FATAL) << "Unrecognized allocator type: " << allocatorType;
+    LOG(FATAL) << "Unrecognized allocator type: " << type;
   }
 
-  link(spawn(new AllocatorTimer(self())));
-  //link(spawn(new SharesPrinter(self())));
+  // Start our timer ticks.
+  process::delay(1.0, self(), &Master::timerTick);
 
   while (true) {
     serve();
@@ -439,89 +380,106 @@ void Master::initialize()
   nextSlaveId = 0;
   nextOfferId = 0;
 
-  allocatorType = conf.get("allocator", "simple");
-
   // Start all the statistics at 0.
-  statistics.launched_tasks = 0;
-  statistics.finished_tasks = 0;
-  statistics.killed_tasks = 0;
-  statistics.failed_tasks = 0;
-  statistics.lost_tasks = 0;
-  statistics.valid_status_updates = 0;
-  statistics.invalid_status_updates = 0;
-  statistics.valid_framework_messages = 0;
-  statistics.invalid_framework_messages = 0;
+  CHECK(TASK_STARTING == TaskState_MIN);
+  CHECK(TASK_LOST == TaskState_MAX);
+  stats.tasks[TASK_STARTING] = 0;
+  stats.tasks[TASK_RUNNING] = 0;
+  stats.tasks[TASK_FINISHED] = 0;
+  stats.tasks[TASK_FAILED] = 0;
+  stats.tasks[TASK_KILLED] = 0;
+  stats.tasks[TASK_LOST] = 0;
+  stats.validStatusUpdates = 0;
+  stats.invalidStatusUpdates = 0;
+  stats.validFrameworkMessages = 0;
+  stats.invalidFrameworkMessages = 0;
 
   startTime = elapsedTime();
 
   // Install handler functions for certain messages.
-  installProtobufHandler(&Master::newMasterDetected,
-                         &NewMasterDetectedMessage::pid);
+  installProtobufHandler<NewMasterDetectedMessage>(
+      &Master::newMasterDetected,
+      &NewMasterDetectedMessage::pid);
 
-  installProtobufHandler<NoMasterDetectedMessage>(&Master::noMasterDetected);
+  installProtobufHandler<NoMasterDetectedMessage>(
+      &Master::noMasterDetected);
 
-  installProtobufHandler(&Master::registerFramework,
-                         &RegisterFrameworkMessage::framework);
+  installProtobufHandler<RegisterFrameworkMessage>(
+      &Master::registerFramework,
+      &RegisterFrameworkMessage::framework);
 
-  installProtobufHandler(&Master::reregisterFramework,
-                         &ReregisterFrameworkMessage::framework_id,
-                         &ReregisterFrameworkMessage::framework,
-                         &ReregisterFrameworkMessage::generation);
+  installProtobufHandler<ReregisterFrameworkMessage>(
+      &Master::reregisterFramework,
+      &ReregisterFrameworkMessage::framework_id,
+      &ReregisterFrameworkMessage::framework,
+      &ReregisterFrameworkMessage::generation);
 
-  installProtobufHandler(&Master::unregisterFramework,
-                         &UnregisterFrameworkMessage::framework_id);
+  installProtobufHandler<UnregisterFrameworkMessage>(
+      &Master::unregisterFramework,
+      &UnregisterFrameworkMessage::framework_id);
 
-  installProtobufHandler(&Master::resourceOfferReply,
-                         &ResourceOfferReplyMessage::framework_id,
-                         &ResourceOfferReplyMessage::offer_id,
-                         &ResourceOfferReplyMessage::tasks,
-                         &ResourceOfferReplyMessage::params);
+  installProtobufHandler<ResourceOfferReplyMessage>(
+      &Master::resourceOfferReply,
+      &ResourceOfferReplyMessage::framework_id,
+      &ResourceOfferReplyMessage::offer_id,
+      &ResourceOfferReplyMessage::tasks,
+      &ResourceOfferReplyMessage::params);
 
-  installProtobufHandler(&Master::reviveOffers,
-                         &ReviveOffersMessage::framework_id);
+  installProtobufHandler<ReviveOffersMessage>(
+      &Master::reviveOffers,
+      &ReviveOffersMessage::framework_id);
 
-  installProtobufHandler(&Master::killTask,
-                         &KillTaskMessage::framework_id,
-                         &KillTaskMessage::task_id);
+  installProtobufHandler<KillTaskMessage>(
+      &Master::killTask,
+      &KillTaskMessage::framework_id,
+      &KillTaskMessage::task_id);
 
-  installProtobufHandler(&Master::schedulerMessage,
-                         &FrameworkToExecutorMessage::slave_id,
-                         &FrameworkToExecutorMessage::framework_id,
-                         &FrameworkToExecutorMessage::executor_id,
-                         &FrameworkToExecutorMessage::data);
+  installProtobufHandler<FrameworkToExecutorMessage>(
+      &Master::schedulerMessage,
+      &FrameworkToExecutorMessage::slave_id,
+      &FrameworkToExecutorMessage::framework_id,
+      &FrameworkToExecutorMessage::executor_id,
+      &FrameworkToExecutorMessage::data);
 
-  installProtobufHandler(&Master::statusUpdateAcknowledgement,
-                         &StatusUpdateAcknowledgementMessage::framework_id,
-                         &StatusUpdateAcknowledgementMessage::task_id,
-                         &StatusUpdateAcknowledgementMessage::slave_id,
-                         &StatusUpdateAcknowledgementMessage::sequence);
+  installProtobufHandler<StatusUpdateAcknowledgementMessage>(
+      &Master::statusUpdateAcknowledgement,
+      &StatusUpdateAcknowledgementMessage::framework_id,
+      &StatusUpdateAcknowledgementMessage::task_id,
+      &StatusUpdateAcknowledgementMessage::slave_id,
+      &StatusUpdateAcknowledgementMessage::sequence);
 
-  installProtobufHandler(&Master::registerSlave,
-                         &RegisterSlaveMessage::slave);
+  installProtobufHandler<RegisterSlaveMessage>(
+      &Master::registerSlave,
+      &RegisterSlaveMessage::slave);
 
-  installProtobufHandler(&Master::reregisterSlave,
-                         &ReregisterSlaveMessage::slave_id,
-                         &ReregisterSlaveMessage::slave,
-                         &ReregisterSlaveMessage::tasks);
+  installProtobufHandler<ReregisterSlaveMessage>(
+      &Master::reregisterSlave,
+      &ReregisterSlaveMessage::slave_id,
+      &ReregisterSlaveMessage::slave,
+      &ReregisterSlaveMessage::tasks);
 
-  installProtobufHandler(&Master::unregisterSlave,
-                         &UnregisterSlaveMessage::slave_id);
+  installProtobufHandler<UnregisterSlaveMessage>(
+      &Master::unregisterSlave,
+      &UnregisterSlaveMessage::slave_id);
 
-  installProtobufHandler(&Master::statusUpdate,
-                         &StatusUpdateMessage::update,
-                         &StatusUpdateMessage::reliable);
+  installProtobufHandler<StatusUpdateMessage>(
+      &Master::statusUpdate,
+      &StatusUpdateMessage::update,
+      &StatusUpdateMessage::reliable);
 
-  installProtobufHandler(&Master::executorMessage,
-                         &ExecutorToFrameworkMessage::slave_id,
-                         &ExecutorToFrameworkMessage::framework_id,
-                         &ExecutorToFrameworkMessage::executor_id,
-                         &ExecutorToFrameworkMessage::data);
+  installProtobufHandler<ExecutorToFrameworkMessage>(
+      &Master::executorMessage,
+      &ExecutorToFrameworkMessage::slave_id,
+      &ExecutorToFrameworkMessage::framework_id,
+      &ExecutorToFrameworkMessage::executor_id,
+      &ExecutorToFrameworkMessage::data);
 
-  installProtobufHandler(&Master::exitedExecutor,
-                         &ExitedExecutorMessage::slave_id,
-                         &ExitedExecutorMessage::framework_id,
-                         &ExitedExecutorMessage::executor_id,
-                         &ExitedExecutorMessage::status);
+  installProtobufHandler<ExitedExecutorMessage>(
+      &Master::exitedExecutor,
+      &ExitedExecutorMessage::slave_id,
+      &ExitedExecutorMessage::framework_id,
+      &ExitedExecutorMessage::executor_id,
+      &ExitedExecutorMessage::status);
 
   // Install some message handlers.
   installMessageHandler(process::EXITED, &Master::exited);
@@ -630,10 +588,10 @@ void Master::reregisterFramework(const FrameworkID& frameworkId,
       // (if necessary) by the master and the master will always
       // know which scheduler is the correct one.
       if (generation == 0) {
-        LOG(INFO) << "Framework " << frameworkId << " failed over";
-        failoverFramework(frameworks[frameworkId], from());
         // TODO: Should we check whether the new scheduler has given
         // us a different framework name, user name or executor info?
+        LOG(INFO) << "Framework " << frameworkId << " failed over";
+        failoverFramework(frameworks[frameworkId], from());
       } else {
         LOG(INFO) << "Framework " << frameworkId
                   << " re-registering with an already used id "
@@ -658,7 +616,7 @@ void Master::reregisterFramework(const FrameworkID& frameworkId,
       // Add any running tasks reported by slaves for this framework.
       foreachpair (const SlaveID& slaveId, Slave* slave, slaves) {
         foreachvalue (Task* task, slave->tasks) {
-          if (framework->frameworkId == task->framework_id()) {
+          if (framework->id == task->framework_id()) {
             framework->addTask(task);
           }
         }
@@ -685,7 +643,7 @@ void Master::unregisterFramework(const FrameworkID& frameworkId)
 {
   LOG(INFO) << "Asked to unregister framework " << frameworkId;
 
-  Framework* framework = lookupFramework(frameworkId);
+  Framework* framework = getFramework(frameworkId);
   if (framework != NULL) {
     if (framework->pid == from()) {
       removeFramework(framework);
@@ -702,9 +660,9 @@ void Master::resourceOfferReply(const FrameworkID& frameworkId,
                                 const vector<TaskDescription>& tasks,
                                 const Params& params)
 {
-  Framework* framework = lookupFramework(frameworkId);
+  Framework* framework = getFramework(frameworkId);
   if (framework != NULL) {
-    SlotOffer* offer = lookupSlotOffer(offerId);
+    Offer* offer = getOffer(offerId);
     if (offer != NULL) {
       processOfferReply(offer, tasks, params);
     } else {
@@ -732,7 +690,7 @@ void Master::resourceOfferReply(const FrameworkID& frameworkId,
 
 void Master::reviveOffers(const FrameworkID& frameworkId)
 {
-  Framework* framework = lookupFramework(frameworkId);
+  Framework* framework = getFramework(frameworkId);
   if (framework != NULL) {
     LOG(INFO) << "Reviving offers for " << framework;
     framework->slaveFilter.clear();
@@ -747,14 +705,14 @@ void Master::killTask(const FrameworkID& frameworkId,
   LOG(INFO) << "Asked to kill task " << taskId
             << " of framework " << frameworkId;
 
-  Framework* framework = lookupFramework(frameworkId);
+  Framework* framework = getFramework(frameworkId);
   if (framework != NULL) {
-    Task* task = framework->lookupTask(taskId);
+    Task* task = framework->getTask(taskId);
     if (task != NULL) {
-      Slave* slave = lookupSlave(task->slave_id());
+      Slave* slave = getSlave(task->slave_id());
       CHECK(slave != NULL);
 
-      LOG(INFO) << "Telling slave " << slave->slaveId
+      LOG(INFO) << "Telling slave " << slave->id
                 << " to kill task " << taskId
                 << " of framework " << frameworkId;
 
@@ -791,27 +749,32 @@ void Master::schedulerMessage(const SlaveID& slaveId,
 			      const ExecutorID& executorId,
                               const string& data)
 {
-  Framework* framework = lookupFramework(frameworkId);
+  Framework* framework = getFramework(frameworkId);
   if (framework != NULL) {
-    Slave* slave = lookupSlave(slaveId);
+    Slave* slave = getSlave(slaveId);
     if (slave != NULL) {
       LOG(INFO) << "Sending framework message for framework "
                 << frameworkId << " to slave " << slaveId;
+
       FrameworkToExecutorMessage message;
       message.mutable_slave_id()->MergeFrom(slaveId);
       message.mutable_framework_id()->MergeFrom(frameworkId);
       message.mutable_executor_id()->MergeFrom(executorId);
       message.set_data(data);
       send(slave->pid, message);
+
+      stats.validFrameworkMessages++;
     } else {
       LOG(WARNING) << "Cannot send framework message for framework "
                    << frameworkId << " to slave " << slaveId
                    << " because slave does not exist";
+      stats.invalidFrameworkMessages++;
     }
   } else {
     LOG(WARNING) << "Cannot send framework message for framework "
                  << frameworkId << " to slave " << slaveId
                  << " because framework does not exist";
+    stats.invalidFrameworkMessages++;
   }
 }
 
@@ -821,9 +784,9 @@ void Master::statusUpdateAcknowledgement(const FrameworkID& frameworkId,
                                          const SlaveID& slaveId,
                                          int32_t sequence)
 {
-  Framework* framework = lookupFramework(frameworkId);
+  Framework* framework = getFramework(frameworkId);
   if (framework != NULL) {
-    Slave* slave = lookupSlave(slaveId);
+    Slave* slave = getSlave(slaveId);
     if (slave != NULL) {
       LOG(INFO) << "Sending slave " << slaveId
                 << " status update acknowledgement for task " << taskId
@@ -853,35 +816,10 @@ void Master::registerSlave(const SlaveInfo& slaveInfo)
 {
   Slave* slave = new Slave(slaveInfo, newSlaveId(), from(), elapsedTime());
 
-  LOG(INFO) << "Attempting to register slave " << slave->slaveId
+  LOG(INFO) << "Attempting to register slave " << slave->id
             << " at " << slave->pid;
 
-  struct SlaveRegistrar
-  {
-    static bool run(Slave* slave, const PID<Master>& master)
-    {
-      // TODO(benh): Do a reverse lookup to ensure IP maps to
-      // hostname, or check credentials of this slave.
-      process::dispatch(master, &Master::addSlave, slave, false);
-    }
-
-    static bool run(Slave* slave,
-                    const PID<Master>& master,
-                    const PID<SlavesManager>& slavesManager)
-    {
-      if (!process::call(slavesManager, &SlavesManager::add,
-                         slave->info.hostname(), slave->pid.port)) {
-        LOG(WARNING) << "Could not register slave because failed"
-                     << " to add it to the slaves maanger";
-        delete slave;
-        return false;
-      }
-
-      return run(slave, master);
-    }
-  };
-
-  // Check whether this slave can be accepted, or if all slaves are accepted.
+  // Checks if this slave, or if all slaves, can be accepted.
   if (slaveHostnamePorts.count(slaveInfo.hostname(), from().port) > 0) {
     process::run(&SlaveRegistrar::run, slave, self());
   } else if (conf.get<string>("slaves", "*") == "*") {
@@ -903,7 +841,7 @@ void Master::reregisterSlave(const SlaveID& slaveId,
     LOG(ERROR) << "Slave re-registered without an id!";
     send(from(), process::TERMINATE);
   } else {
-    Slave* slave = lookupSlave(slaveId);
+    Slave* slave = getSlave(slaveId);
     if (slave != NULL) {
       // TODO(benh): It's still unclear whether or not
       // MasterDetector::detectMaster will cause spurious
@@ -925,38 +863,10 @@ void Master::reregisterSlave(const SlaveID& slaveId,
     } else {
       Slave* slave = new Slave(slaveInfo, slaveId, from(), elapsedTime());
 
-      LOG(INFO) << "Attempting to re-register slave " << slave->slaveId
+      LOG(INFO) << "Attempting to re-register slave " << slave->id
                 << " at " << slave->pid;
 
-      struct SlaveReregistrar
-      {
-        static bool run(Slave* slave,
-                        const vector<Task>& tasks,
-                        const PID<Master>& master)
-        {
-          // TODO(benh): Do a reverse lookup to ensure IP maps to
-          // hostname, or check credentials of this slave.
-          process::dispatch(master, &Master::readdSlave, slave, tasks);
-        }
-
-        static bool run(Slave* slave,
-                        const vector<Task>& tasks,
-                        const PID<Master>& master,
-                        const PID<SlavesManager>& slavesManager)
-        {
-          if (!process::call(slavesManager, &SlavesManager::add,
-                             slave->info.hostname(), slave->pid.port)) {
-            LOG(WARNING) << "Could not register slave because failed"
-                         << " to add it to the slaves maanger";
-            delete slave;
-            return false;
-          }
-
-          return run(slave, tasks, master);
-        }
-      };
-
-      // Check whether this slave can be accepted, or if all slaves are accepted.
+      // Checks if this slave, or if all slaves, can be accepted.
       if (slaveHostnamePorts.count(slaveInfo.hostname(), from().port) > 0) {
         process::run(&SlaveReregistrar::run, slave, tasks, self());
       } else if (conf.get<string>("slaves", "*") == "*") {
@@ -979,7 +889,7 @@ void Master::unregisterSlave(const SlaveID& slaveId)
 
   // TODO(benh): Check that only the slave is asking to unregister?
 
-  Slave* slave = lookupSlave(slaveId);
+  Slave* slave = getSlave(slaveId);
   if (slave != NULL) {
     removeSlave(slave);
   }
@@ -995,9 +905,9 @@ void Master::statusUpdate(const StatusUpdate& update, bool reliable)
             << " of framework " << update.framework_id()
             << " is now in state " << status.state();
 
-  Slave* slave = lookupSlave(update.slave_id());
+  Slave* slave = getSlave(update.slave_id());
   if (slave != NULL) {
-    Framework* framework = lookupFramework(update.framework_id());
+    Framework* framework = getFramework(update.framework_id());
     if (framework != NULL) {
       // Pass on the (transformed) status update to the framework.
       StatusUpdateMessage message;
@@ -1006,48 +916,38 @@ void Master::statusUpdate(const StatusUpdate& update, bool reliable)
       send(framework->pid, message);
 
       // Lookup the task and see if we need to update anything locally.
-      Task* task = slave->lookupTask(update.framework_id(), status.task_id());
+      Task* task = slave->getTask(update.framework_id(), status.task_id());
       if (task != NULL) {
         task->set_state(status.state());
 
-        // Remove the task if necessary, and update statistics.
-	switch (status.state()) {
-	  case TASK_FINISHED:
-	    statistics.finished_tasks++;
-	    removeTask(task, TRR_TASK_ENDED);
-	    break;
-	  case TASK_FAILED:
-	    statistics.failed_tasks++;
-	    removeTask(task, TRR_TASK_ENDED);
-	    break;
-	  case TASK_KILLED:
-	    statistics.killed_tasks++;
-	    removeTask(task, TRR_TASK_ENDED);
-	    break;
-	  case TASK_LOST:
-	    statistics.lost_tasks++;
-	    removeTask(task, TRR_TASK_ENDED);
-	    break;
-	}
+        // Handle the task appropriately if it's terminated.
+        if (status.state() == TASK_FINISHED ||
+            status.state() == TASK_FAILED ||
+            status.state() == TASK_KILLED ||
+            status.state() == TASK_LOST) {
+          removeTask(framework, slave, task, TRR_TASK_ENDED);
+        }
 
-	statistics.valid_status_updates++;
+        stats.tasks[status.state()]++;
+
+        stats.validStatusUpdates++;
       } else {
         LOG(WARNING) << "Status update from " << from()
                      << ": error, couldn't lookup "
                      << "task " << status.task_id();
-	statistics.invalid_status_updates++;
+	stats.invalidStatusUpdates++;
       }
     } else {
       LOG(WARNING) << "Status update from " << from()
                    << ": error, couldn't lookup "
                    << "framework " << update.framework_id();
-      statistics.invalid_status_updates++;
+      stats.invalidStatusUpdates++;
     }
   } else {
     LOG(WARNING) << "Status update from " << from()
                  << ": error, couldn't lookup slave "
                  << update.slave_id();
-    statistics.invalid_status_updates++;
+    stats.invalidStatusUpdates++;
   }
 }
 
@@ -1057,9 +957,9 @@ void Master::executorMessage(const SlaveID& slaveId,
 			     const ExecutorID& executorId,
                              const string& data)
 {
-  Slave* slave = lookupSlave(slaveId);
+  Slave* slave = getSlave(slaveId);
   if (slave != NULL) {
-    Framework* framework = lookupFramework(frameworkId);
+    Framework* framework = getFramework(frameworkId);
     if (framework != NULL) {
       LOG(INFO) << "Sending framework message from slave " << slaveId
                 << " to framework " << frameworkId;
@@ -1070,18 +970,18 @@ void Master::executorMessage(const SlaveID& slaveId,
       message.set_data(data);
       send(framework->pid, message);
 
-      statistics.valid_framework_messages++;
+      stats.validFrameworkMessages++;
     } else {
       LOG(WARNING) << "Cannot send framework message from slave "
                    << slaveId << " to framework " << frameworkId
                    << " because framework does not exist";
-      statistics.invalid_framework_messages++;
+      stats.invalidFrameworkMessages++;
     }
   } else {
     LOG(WARNING) << "Cannot send framework message from slave "
                  << slaveId << " to framework " << frameworkId
                  << " because slave does not exist";
-    statistics.invalid_framework_messages++;
+    stats.invalidFrameworkMessages++;
   }
 }
 
@@ -1095,13 +995,13 @@ void Master::exitedExecutor(const SlaveID& slaveId,
   // executor from the slave! Maybe requires adding an extra "reason"
   // so that people can see that the tasks were lost because of 
 
-  Slave* slave = lookupSlave(slaveId);
+  Slave* slave = getSlave(slaveId);
   if (slave != NULL) {
-    Framework* framework = lookupFramework(frameworkId);
+    Framework* framework = getFramework(frameworkId);
     if (framework != NULL) {
       LOG(INFO) << "Executor " << executorId
-                << " of framework " << framework->frameworkId
-                << " on slave " << slave->slaveId
+                << " of framework " << framework->id
+                << " on slave " << slave->id
                 << " (" << slave->info.hostname() << ") "
                 << "exited with status " << status;
 
@@ -1117,7 +1017,7 @@ void Master::exitedExecutor(const SlaveID& slaveId,
 
       // Tell the framework which tasks have been lost.
       foreachvalue (Task* task, utils::copy(framework->tasks)) {
-        if (task->slave_id() == slave->slaveId &&
+        if (task->slave_id() == slave->id &&
             task->executor_id() == executorId) {
           StatusUpdateMessage message;
           StatusUpdate* update = message.mutable_update();
@@ -1135,7 +1035,7 @@ void Master::exitedExecutor(const SlaveID& slaveId,
                     << " of framework " << frameworkId
                     << " because of lost executor";
 
-          removeTask(task, TRR_EXECUTOR_LOST);
+          removeTask(framework, slave, task, TRR_EXECUTOR_LOST);
         }
       }
 
@@ -1155,13 +1055,14 @@ void Master::activatedSlaveHostnamePort(const string& hostname, uint16_t port)
 }
 
 
-void Master::deactivatedSlaveHostnamePort(const string& hostname, uint16_t port)
+void Master::deactivatedSlaveHostnamePort(const string& hostname,
+                                          uint16_t port)
 {
   if (slaveHostnamePorts.count(hostname, port) > 0) {
     // Look for a connected slave and remove it.
     foreachvalue (Slave* slave, slaves) {
       if (slave->info.hostname() == hostname && slave->pid.port == port) {
-        LOG(WARNING) << "Removing slave " << slave->slaveId << " at "
+        LOG(WARNING) << "Removing slave " << slave->id << " at "
 		     << hostname << ":" << port
                      << " because it has been deactivated";
 	send(slave->pid, process::TERMINATE);
@@ -1186,15 +1087,20 @@ void Master::timerTick()
 
   // Do allocations!
   allocator->timerTick();
+
+  // Scheduler another timer tick!
+  process::delay(1.0, self(), &Master::timerTick);
 }
 
 
-void Master::frameworkExpired(const FrameworkID& frameworkId)
+void Master::frameworkFailoverTimeout(const FrameworkID& frameworkId,
+                                      double reregisteredTime)
 {
-  Framework* framework = lookupFramework(frameworkId);
-  if (framework != NULL) {
-    LOG(INFO) << "Framework failover timer expired, removing "
-              << framework;
+  Framework* framework = getFramework(frameworkId);
+  if (framework != NULL && !framework->active &&
+      framework->reregisteredTime == reregisteredTime) {
+    LOG(INFO) << "Framework failover timeout, removing framework "
+              << framework->id;
     removeFramework(framework);
   }
 }
@@ -1202,253 +1108,35 @@ void Master::frameworkExpired(const FrameworkID& frameworkId)
 
 void Master::exited()
 {
-  // TODO(benh): Could we get PROCESS_EXIT from a network partition?
-  LOG(INFO) << "Process exited: " << from();
-  if (pidToFrameworkId.count(from()) > 0) {
-    const FrameworkID& frameworkId = pidToFrameworkId[from()];
-    Framework* framework = lookupFramework(frameworkId);
-    if (framework != NULL) {
-      LOG(INFO) << "Framework " << frameworkId << " disconnected";
+  foreachvalue (Framework* framework, frameworks) {
+    if (framework->pid == from()) {
+      LOG(INFO) << "Framework " << framework->id << " disconnected";
+
+//       removeFramework(framework);
 
       // Stop sending offers here for now.
       framework->active = false;
 
+      // Delay dispatching a message to ourselves for the timeout.
+      process::delay(FRAMEWORK_FAILOVER_TIMEOUT,
+                     self(), &Master::frameworkFailoverTimeout,
+                     framework->id, framework->reregisteredTime);
+
       // Remove the framework's slot offers.
-      foreach (SlotOffer* offer, utils::copy(framework->slotOffers)) {
-        removeSlotOffer(offer, ORR_FRAMEWORK_FAILOVER, offer->resources);
+      foreach (Offer* offer, utils::copy(framework->offers)) {
+        removeOffer(offer, ORR_FRAMEWORK_FAILOVER, offer->resources);
       }
-
-//       framework->failoverTimer =
-//         new FrameworkFailoverTimer(self(), frameworkId);
-//       link(spawn(framework->failoverTimer));
-      removeFramework(framework);
-    }
-  } else if (pidToSlaveId.count(from()) > 0) {
-    const SlaveID& slaveId = pidToSlaveId[from()];
-    Slave* slave = lookupSlave(slaveId);
-    if (slave != NULL) {
-      LOG(INFO) << slave << " disconnected";
-      removeSlave(slave);
-    }
-  } else {
-    foreachvalue (Framework* framework, frameworks) {
-      if (framework->failoverTimer != NULL &&
-          framework->failoverTimer->self() == from()) {
-        LOG(ERROR) << "Bad framework failover timer, removing "
-                   << framework;
-        removeFramework(framework);
-        break;
-      }
+      return;
     }
   }
-}
-
-
-Promise<HttpResponse> Master::http_info_json(const HttpRequest& request)
-{
-  LOG(INFO) << "HTTP request for '/master/info.json'";
-
-  ostringstream out;
-
-  out <<
-    "{" <<
-    "\"built_date\":\"" << build::DATE << "\"," <<
-    "\"build_user\":\"" << build::USER << "\"," <<
-    "\"start_time\":\"" << startTime << "\"," <<
-    "\"pid\":\"" << self() << "\"" <<
-    "}";
-
-  HttpOKResponse response;
-  response.headers["Content-Type"] = "text/x-json;charset=UTF-8";
-  response.headers["Content-Length"] = lexical_cast<string>(out.str().size());
-  response.body = out.str().data();
-  return response;
-}
-
-
-Promise<HttpResponse> Master::http_frameworks_json(const HttpRequest& request)
-{
-  LOG(INFO) << "HTTP request for '/master/frameworks.json'";
-
-  ostringstream out;
-
-  out << "[";
-
-  foreachvalue (Framework* framework, frameworks) {
-    out <<
-      "{" <<
-      "\"id\":\"" << framework->frameworkId << "\"," <<
-      "\"name\":\"" << framework->info.name() << "\"," <<
-      "\"user\":\"" << framework->info.user() << "\""
-      "},";
-  }
-
-  // Backup the put pointer to overwrite the last comma (hack).
-  if (frameworks.size() > 0) {
-    long pos = out.tellp();
-    out.seekp(pos - 1);
-  }
-
-  out << "]";
-
-  HttpOKResponse response;
-  response.headers["Content-Type"] = "text/x-json;charset=UTF-8";
-  response.headers["Content-Length"] = lexical_cast<string>(out.str().size());
-  response.body = out.str().data();
-  return response;
-}
-
-
-Promise<HttpResponse> Master::http_slaves_json(const HttpRequest& request)
-{
-  LOG(INFO) << "HTTP request for '/master/slaves.json'";
-
-  ostringstream out;
-
-  out << "[";
 
   foreachvalue (Slave* slave, slaves) {
-    // TODO(benh): Send all of the resources (as JSON).
-    Resources resources(slave->info.resources());
-    Resource::Scalar cpus = resources.getScalar("cpus", Resource::Scalar());
-    Resource::Scalar mem = resources.getScalar("mem", Resource::Scalar());
-    out <<
-      "{" <<
-      "\"id\":\"" << slave->slaveId << "\"," <<
-      "\"hostname\":\"" << slave->info.hostname() << "\"," <<
-      "\"cpus\":" << cpus.value() << "," <<
-      "\"mem\":" << mem.value() <<
-      "},";
-  }
-
-  // Backup the put pointer to overwrite the last comma (hack).
-  if (slaves.size() > 0) {
-    long pos = out.tellp();
-    out.seekp(pos - 1);
-  }
-
-  out << "]";
-
-  HttpOKResponse response;
-  response.headers["Content-Type"] = "text/x-json;charset=UTF-8";
-  response.headers["Content-Length"] = lexical_cast<string>(out.str().size());
-  response.body = out.str().data();
-  return response;
-}
-
-
-Promise<HttpResponse> Master::http_tasks_json(const HttpRequest& request)
-{
-  LOG(INFO) << "HTTP request for '/master/tasks.json'";
-
-  ostringstream out;
-
-  out << "[";
-
-  foreachvalue (Framework* framework, frameworks) {
-    foreachvalue (Task* task, framework->tasks) {
-      // TODO(benh): Send all of the resources (as JSON).
-      Resources resources(task->resources());
-      Resource::Scalar cpus = resources.getScalar("cpus", Resource::Scalar());
-      Resource::Scalar mem = resources.getScalar("mem", Resource::Scalar());
-      out <<
-        "{" <<
-        "\"task_id\":\"" << task->task_id() << "\"," <<
-        "\"framework_id\":\"" << task->framework_id() << "\"," <<
-        "\"slave_id\":\"" << task->slave_id() << "\"," <<
-        "\"name\":\"" << task->name() << "\"," <<
-        "\"state\":\"" << task->state() << "\"," <<
-        "\"cpus\":" << cpus.value() << "," <<
-        "\"mem\":" << mem.value() <<
-        "},";
+    if (slave->pid == from()) {
+      LOG(INFO) << "Slave " << slave->id << " disconnected";
+      removeSlave(slave);
+      return;
     }
   }
-
-  // Backup the put pointer to overwrite the last comma (hack).
-  if (frameworks.size() > 0) {
-    long pos = out.tellp();
-    out.seekp(pos - 1);
-  }
-
-  out << "]";
-
-  HttpOKResponse response;
-  response.headers["Content-Type"] = "text/x-json;charset=UTF-8";
-  response.headers["Content-Length"] = lexical_cast<string>(out.str().size());
-  response.body = out.str().data();
-  return response;
-}
-
-
-Promise<HttpResponse> Master::http_stats_json(const HttpRequest& request)
-{
-  LOG(INFO) << "Http request for '/master/stats.json'";
-
-  ostringstream out;
-
-  out <<
-    "{" <<
-    "\"uptime\":" << elapsedTime() - startTime << "," <<
-    "\"total_schedulers\":" << frameworks.size() << "," <<
-    "\"active_schedulers\":" << getActiveFrameworks().size() << "," <<
-    "\"activated_slaves\":" << slaveHostnamePorts.size() << "," <<
-    "\"connected_slaves\":" << slaves.size() << "," <<
-    "\"launched_tasks\":" << statistics.launched_tasks << "," <<
-    "\"finished_tasks\":" << statistics.finished_tasks << "," <<
-    "\"killed_tasks\":" << statistics.killed_tasks << "," <<
-    "\"failed_tasks\":" << statistics.failed_tasks << "," <<
-    "\"lost_tasks\":" << statistics.lost_tasks << "," <<
-    "\"valid_status_updates\":" << statistics.valid_status_updates << "," <<
-    "\"invalid_status_updates\":" << statistics.invalid_status_updates << "," <<
-    "\"valid_framework_messages\":" << statistics.valid_framework_messages << "," <<
-    "\"invalid_framework_messages\":" << statistics.invalid_framework_messages <<
-    "}";
-
-  HttpOKResponse response;
-  response.headers["Content-Type"] = "text/x-json;charset=UTF-8";
-  response.headers["Content-Length"] = lexical_cast<string>(out.str().size());
-  response.body = out.str().data();
-  return response;
-}
-
-
-Promise<HttpResponse> Master::http_vars(const HttpRequest& request)
-{
-  LOG(INFO) << "HTTP request for '/master/vars'";
-
-  ostringstream out;
-
-  out <<
-    "build_date " << build::DATE << "\n" <<
-    "build_user " << build::USER << "\n" <<
-    "build_flags " << build::FLAGS << "\n";
-
-  // Also add the configuration values.
-  foreachpair (const string& key, const string& value, conf.getMap()) {
-    out << key << " " << value << "\n";
-  }
-
-  out <<
-    "uptime " << elapsedTime() - startTime << "\n" <<
-    "total_schedulers " << frameworks.size() << "\n" <<
-    "active_schedulers " << getActiveFrameworks().size() << "\n" <<
-    "activated_slaves " << slaveHostnamePorts.size() << "\n" <<
-    "connected_slaves " << slaves.size() << "\n" <<
-    "launched_tasks " << statistics.launched_tasks << "\n" <<
-    "finished_tasks " << statistics.finished_tasks << "\n" <<
-    "killed_tasks " << statistics.killed_tasks << "\n" <<
-    "failed_tasks " << statistics.failed_tasks << "\n" <<
-    "lost_tasks " << statistics.lost_tasks << "\n" <<
-    "valid_status_updates " << statistics.valid_status_updates << "\n" <<
-    "invalid_status_updates " << statistics.invalid_status_updates << "\n" <<
-    "valid_framework_messages " << statistics.valid_framework_messages << "\n" <<
-    "invalid_framework_messages " << statistics.invalid_framework_messages << "\n";
-
-  HttpOKResponse response;
-  response.headers["Content-Type"] = "text/plain";
-  response.headers["Content-Length"] = lexical_cast<string>(out.str().size());
-  response.body = out.str().data();
-  return response;
 }
 
 
@@ -1457,26 +1145,26 @@ OfferID Master::makeOffer(Framework* framework,
 {
   const OfferID& offerId = newOfferId();
 
-  SlotOffer* offer = new SlotOffer(offerId, framework->frameworkId, resources);
+  Offer* offer = new Offer(offerId, framework->id, resources);
 
-  slotOffers[offer->offerId] = offer;
+  offers[offer->id] = offer;
   framework->addOffer(offer);
 
   // Update the resource information within each of the slave objects. Gross!
   foreach (const SlaveResources& r, resources) {
-    r.slave->slotOffers.insert(offer);
+    r.slave->offers.insert(offer);
     r.slave->resourcesOffered += r.resources;
   }
 
-  LOG(INFO) << "Sending offer " << offer->offerId
-            << " to framework " << framework->frameworkId;
+  LOG(INFO) << "Sending offer " << offer->id
+            << " to framework " << framework->id;
 
   ResourceOfferMessage message;
   message.mutable_offer_id()->MergeFrom(offerId);
 
   foreach (const SlaveResources& r, resources) {
     SlaveOffer* offer = message.add_offers();
-    offer->mutable_slave_id()->MergeFrom(r.slave->slaveId);
+    offer->mutable_slave_id()->MergeFrom(r.slave->id);
     offer->set_hostname(r.slave->info.hostname());
     offer->mutable_resources()->MergeFrom(r.resources);
 
@@ -1492,13 +1180,13 @@ OfferID Master::makeOffer(Framework* framework,
 // Process a resource offer reply (for a non-cancelled offer) by launching
 // the desired tasks (if the offer contains a valid set of tasks) and
 // reporting any unused resources to the allocator.
-void Master::processOfferReply(SlotOffer* offer,
+void Master::processOfferReply(Offer* offer,
                                const vector<TaskDescription>& tasks,
                                const Params& params)
 {
   LOG(INFO) << "Received reply for " << offer;
 
-  Framework* framework = lookupFramework(offer->frameworkId);
+  Framework* framework = getFramework(offer->frameworkId);
   CHECK(framework != NULL);
 
   // Count resources in the offer.
@@ -1511,7 +1199,7 @@ void Master::processOfferReply(SlotOffer* offer,
   unordered_map<Slave*, Resources> resourcesUsed;
   foreach (const TaskDescription& task, tasks) {
     // Check whether the task is on a valid slave.
-    Slave* slave = lookupSlave(task.slave_id());
+    Slave* slave = getSlave(task.slave_id());
     if (slave == NULL || resourcesOffered.count(slave) == 0) {
       terminateFramework(framework, 0, "Invalid slave in offer reply");
       return;
@@ -1551,8 +1239,8 @@ void Master::processOfferReply(SlotOffer* offer,
   foreach (const TaskDescription& task, tasks) {
     if (framework->tasks.count(task.task_id()) > 0 ||
         idsInResponse.count(task.task_id()) > 0) {
-      terminateFramework(framework, 0, "Duplicate task ID: " +
-                         lexical_cast<string>(task.task_id()));
+      string error = "Duplicate task ID: " + task.task_id().value();
+      terminateFramework(framework, 0, error);
       return;
     }
     idsInResponse.insert(task.task_id());
@@ -1569,7 +1257,14 @@ void Master::processOfferReply(SlotOffer* offer,
 
   for (int i = 0; i < params.param_size(); i++) {
     if (params.param(i).key() == "timeout") {
-      timeout = lexical_cast<int>(params.param(i).value());
+      try {
+        timeout = boost::lexical_cast<int>(params.param(i).value());
+      } catch (boost::bad_lexical_cast&) {
+        string error = "Failed to convert value '" +
+          params.param(i).value() + "' for key 'timeout' to an integer";
+        terminateFramework(framework, 0, error);
+        return;
+      }
       break;
     }
   }
@@ -1600,7 +1295,7 @@ void Master::processOfferReply(SlotOffer* offer,
   }
   
   // Return the resources left to the allocator.
-  removeSlotOffer(offer, ORR_FRAMEWORK_REPLIED, resourcesUnused);
+  removeOffer(offer, ORR_FRAMEWORK_REPLIED, resourcesUnused);
 }
 
 
@@ -1609,7 +1304,7 @@ void Master::launchTask(Framework* framework, const TaskDescription& task)
   // The invariant right now is that launchTask is called only for
   // TaskDescriptions where the slave is still valid (see the code
   // above in processOfferReply).
-  Slave* slave = lookupSlave(task.slave_id());
+  Slave* slave = getSlave(task.slave_id());
   CHECK(slave != NULL);
 
   // Determine the executor ID for this task.
@@ -1618,7 +1313,7 @@ void Master::launchTask(Framework* framework, const TaskDescription& task)
     : framework->info.executor().executor_id();
 
   Task* t = new Task();
-  t->mutable_framework_id()->MergeFrom(framework->frameworkId);
+  t->mutable_framework_id()->MergeFrom(framework->id);
   t->mutable_executor_id()->MergeFrom(executorId);
   t->set_state(TASK_STARTING);
   t->set_name(task.name());
@@ -1635,17 +1330,66 @@ void Master::launchTask(Framework* framework, const TaskDescription& task)
 
   RunTaskMessage message;
   message.mutable_framework()->MergeFrom(framework->info);
-  message.mutable_framework_id()->MergeFrom(framework->frameworkId);
+  message.mutable_framework_id()->MergeFrom(framework->id);
   message.set_pid(framework->pid);
   message.mutable_task()->MergeFrom(task);
   send(slave->pid, message);
 
-  statistics.launched_tasks++;
+  stats.tasks[TASK_STARTING]++;
 }
 
 
-// Terminate a framework, sending it a particular error message
-// TODO: Make the error codes and messages programmer-friendly
+void Master::addFramework(Framework* framework)
+{
+  CHECK(frameworks.count(framework->id) == 0);
+
+  frameworks[framework->id] = framework;
+
+  link(framework->pid);
+
+  FrameworkRegisteredMessage message;
+  message.mutable_framework_id()->MergeFrom(framework->id);
+  send(framework->pid, message);
+
+  allocator->frameworkAdded(framework);
+}
+
+
+// Replace the scheduler for a framework with a new process ID, in the
+// event of a scheduler failover.
+void Master::failoverFramework(Framework* framework, const UPID& newPid)
+{
+  const UPID& oldPid = framework->pid;
+
+  // Remove the framework's slot offers (if they weren't removed before).
+  // TODO(benh): Consider just reoffering these to the new framework.
+  foreach (Offer* offer, utils::copy(framework->offers)) {
+    removeOffer(offer, ORR_FRAMEWORK_FAILOVER, offer->resources);
+  }
+
+  {
+    FrameworkErrorMessage message;
+    message.set_code(1);
+    message.set_message("Framework failover");
+    send(oldPid, message);
+  }
+
+  // TODO(benh): unlink(oldPid);
+
+  framework->pid = newPid;
+  link(newPid);
+
+  // Make sure we can get offers again.
+  framework->active = true;
+
+  framework->reregisteredTime = elapsedTime();
+
+  FrameworkRegisteredMessage message;
+  message.mutable_framework_id()->MergeFrom(framework->id);
+  send(newPid, message);
+}
+
+
 void Master::terminateFramework(Framework* framework,
                                 int32_t code,
                                 const string& error)
@@ -1661,101 +1405,6 @@ void Master::terminateFramework(Framework* framework,
 }
 
 
-// Remove a slot offer (because it was replied or we lost a framework or slave)
-void Master::removeSlotOffer(SlotOffer* offer,
-                             OfferReturnReason reason,
-                             const vector<SlaveResources>& resourcesUnused)
-{
-  // Remove from slaves.
-  foreach (SlaveResources& r, offer->resources) {
-    CHECK(r.slave != NULL);
-    r.slave->resourcesOffered -= r.resources;
-    r.slave->slotOffers.erase(offer);
-  }
-    
-  // Remove from framework
-  Framework *framework = lookupFramework(offer->frameworkId);
-  CHECK(framework != NULL);
-  framework->removeOffer(offer);
-
-  // Also send framework a rescind message unless the reason we are
-  // removing the offer is that the framework replied to it
-  if (reason != ORR_FRAMEWORK_REPLIED) {
-    RescindResourceOfferMessage message;
-    message.mutable_offer_id()->MergeFrom(offer->offerId);
-    send(framework->pid, message);
-  }
-  
-  // Tell the allocator about the unused resources.
-  allocator->offerReturned(offer, reason, resourcesUnused);
-  
-  // Delete it
-  slotOffers.erase(offer->offerId);
-  delete offer;
-}
-
-
-void Master::addFramework(Framework* framework)
-{
-  CHECK(frameworks.count(framework->frameworkId) == 0);
-
-  frameworks[framework->frameworkId] = framework;
-  pidToFrameworkId[framework->pid] = framework->frameworkId;
-  link(framework->pid);
-
-  FrameworkRegisteredMessage message;
-  message.mutable_framework_id()->MergeFrom(framework->frameworkId);
-  send(framework->pid, message);
-
-  allocator->frameworkAdded(framework);
-}
-
-
-// Replace the scheduler for a framework with a new process ID, in the
-// event of a scheduler failover.
-void Master::failoverFramework(Framework* framework, const UPID& newPid)
-{
-  const UPID& oldPid = framework->pid;
-
-  // Remove the framework's slot offers (if they weren't removed before)..
-  // TODO(benh): Consider just reoffering these to the new framework.
-  foreach (SlotOffer* offer, utils::copy(framework->slotOffers)) {
-    removeSlotOffer(offer, ORR_FRAMEWORK_FAILOVER, offer->resources);
-  }
-
-  {
-    FrameworkErrorMessage message;
-    message.set_code(1);
-    message.set_message("Framework failover");
-    send(oldPid, message);
-  }
-
-  // TODO(benh): unlink(oldPid);
-  pidToFrameworkId.erase(oldPid);
-  pidToFrameworkId[newPid] = framework->frameworkId;
-
-  framework->pid = newPid;
-  link(newPid);
-
-  // Kill the failover timer.
-  if (framework->failoverTimer != NULL) {
-    process::post(framework->failoverTimer->self(), process::TERMINATE);
-    process::wait(framework->failoverTimer->self());
-    delete framework->failoverTimer;
-    framework->failoverTimer = NULL;
-  }
-
-  // Make sure we can get offers again.
-  framework->active = true;
-
-  FrameworkRegisteredMessage message;
-  message.mutable_framework_id()->MergeFrom(framework->frameworkId);
-  send(newPid, message);
-}
-
-
-// Kill all of a framework's tasks, delete the framework object, and
-// reschedule slot offers for slots that were assigned to this framework
 void Master::removeFramework(Framework* framework)
 { 
   framework->active = false;
@@ -1764,30 +1413,29 @@ void Master::removeFramework(Framework* framework)
   // Tell slaves to kill the framework
   foreachvalue (Slave* slave, slaves) {
     KillFrameworkMessage message;
-    message.mutable_framework_id()->MergeFrom(framework->frameworkId);
+    message.mutable_framework_id()->MergeFrom(framework->id);
     send(slave->pid, message);
   }
 
   // Remove pointers to the framework's tasks in slaves
   foreachvalue (Task* task, utils::copy(framework->tasks)) {
-    Slave* slave = lookupSlave(task->slave_id());
+    Slave* slave = getSlave(task->slave_id());
     CHECK(slave != NULL);
-    removeTask(task, TRR_FRAMEWORK_LOST);
+    removeTask(framework, slave, task, TRR_FRAMEWORK_LOST);
   }
   
   // Remove the framework's slot offers (if they weren't removed before).
-  foreach (SlotOffer* offer, utils::copy(framework->slotOffers)) {
-    removeSlotOffer(offer, ORR_FRAMEWORK_LOST, offer->resources);
+  foreach (Offer* offer, utils::copy(framework->offers)) {
+    removeOffer(offer, ORR_FRAMEWORK_LOST, offer->resources);
   }
 
   // TODO(benh): Similar code between removeFramework and
   // failoverFramework needs to be shared!
 
   // TODO(benh): unlink(framework->pid);
-  pidToFrameworkId.erase(framework->pid);
 
   // Delete it.
-  frameworks.erase(framework->frameworkId);
+  frameworks.erase(framework->id);
   allocator->frameworkRemoved(framework);
   delete framework;
 }
@@ -1797,30 +1445,30 @@ void Master::addSlave(Slave* slave, bool reregister)
 {
   CHECK(slave != NULL);
 
-  slaves[slave->slaveId] = slave;
-  pidToSlaveId[slave->pid] = slave->slaveId;
+  slaves[slave->id] = slave;
+
   link(slave->pid);
 
   allocator->slaveAdded(slave);
 
   if (!reregister) {
     SlaveRegisteredMessage message;
-    message.mutable_slave_id()->MergeFrom(slave->slaveId);
+    message.mutable_slave_id()->MergeFrom(slave->id);
     send(slave->pid, message);
   } else {
     SlaveReregisteredMessage message;
-    message.mutable_slave_id()->MergeFrom(slave->slaveId);
+    message.mutable_slave_id()->MergeFrom(slave->id);
     send(slave->pid, message);
   }
 
   // TODO(benh):
   //     // Ask the slaves manager to monitor this slave for us.
   //     process::dispatch(slavesManager->self(), &SlavesManager::monitor,
-  //                       slave->pid, slave->info, slave->slaveId);
+  //                       slave->pid, slave->info, slave->id);
 
   // Set up an observer for the slave.
   slave->observer = new SlaveObserver(slave->pid, slave->info,
-                                      slave->slaveId, slavesManager->self());
+                                      slave->id, slavesManager->self());
   process::spawn(slave->observer);
 }
 
@@ -1843,11 +1491,11 @@ void Master::readdSlave(Slave* slave, const vector<Task>& tasks)
     // will add them then. We also tell this slave the current
     // framework pid for this task. Again, we do the same thing
     // if a framework currently isn't registered.
-    Framework* framework = lookupFramework(task->framework_id());
+    Framework* framework = getFramework(task->framework_id());
     if (framework != NULL) {
       framework->addTask(task);
       UpdateFrameworkMessage message;
-      message.mutable_framework_id()->MergeFrom(framework->frameworkId);
+      message.mutable_framework_id()->MergeFrom(framework->id);
       message.set_pid(framework->pid);
       send(slave->pid, message);
     } else {
@@ -1856,7 +1504,7 @@ void Master::readdSlave(Slave* slave, const vector<Task>& tasks)
       // reregister and claim them.
       LOG(WARNING) << "Possibly orphaned task " << task->task_id()
                    << " of framework " << task->framework_id()
-                   << " running on slave " << slave->slaveId;
+                   << " running on slave " << slave->id;
     }
   }
 }
@@ -1871,7 +1519,7 @@ void Master::removeSlave(Slave* slave)
   
   // Remove pointers to slave's tasks in frameworks, and send status updates
   foreachvalue (Task* task, utils::copy(slave->tasks)) {
-    Framework* framework = lookupFramework(task->framework_id());
+    Framework* framework = getFramework(task->framework_id());
     // A framework might not actually exist because the master failed
     // over and the framework hasn't reconnected. This can be a tricky
     // situation for frameworks that want to have high-availability,
@@ -1893,11 +1541,11 @@ void Master::removeSlave(Slave* slave)
       message.set_reliable(false);
       send(framework->pid, message);
     }
-    removeTask(task, TRR_SLAVE_LOST);
+    removeTask(framework, slave, task, TRR_SLAVE_LOST);
   }
 
   // Remove slot offers from the slave; this will also rescind them
-  foreach (SlotOffer* offer, utils::copy(slave->slotOffers)) {
+  foreach (Offer* offer, utils::copy(slave->offers)) {
     // Only report resources on slaves other than this one to the allocator
     vector<SlaveResources> otherSlaveResources;
     foreach (const SlaveResources& r, offer->resources) {
@@ -1905,7 +1553,7 @@ void Master::removeSlave(Slave* slave)
         otherSlaveResources.push_back(r);
       }
     }
-    removeSlotOffer(offer, ORR_SLAVE_LOST, otherSlaveResources);
+    removeOffer(offer, ORR_SLAVE_LOST, otherSlaveResources);
   }
   
   // Remove slave from any filters
@@ -1917,14 +1565,14 @@ void Master::removeSlave(Slave* slave)
   // previously finished tasks whose output was on the lost slave)
   foreachvalue (Framework* framework, frameworks) {
     LostSlaveMessage message;
-    message.mutable_slave_id()->MergeFrom(slave->slaveId);
+    message.mutable_slave_id()->MergeFrom(slave->id);
     send(framework->pid, message);
   }
 
   // TODO(benh):
   //     // Tell the slaves manager to stop monitoring this slave for us.
   //     process::dispatch(slavesManager->self(), &SlavesManager::forget,
-  //                       slave->pid, slave->info, slave->slaveId);
+  //                       slave->pid, slave->info, slave->id);
 
   // Kill the slave observer.
   process::post(slave->observer->self(), process::TERMINATE);
@@ -1932,22 +1580,20 @@ void Master::removeSlave(Slave* slave)
   delete slave->observer;
 
   // TODO(benh): unlink(slave->pid);
-  pidToSlaveId.erase(slave->pid);
 
   // Delete it
-  slaves.erase(slave->slaveId);
+  slaves.erase(slave->id);
   allocator->slaveRemoved(slave);
   delete slave;
 }
 
 
 // Remove a slot offer (because it was replied or we lost a framework or slave)
-void Master::removeTask(Task* task, TaskRemovalReason reason)
+void Master::removeTask(Framework* framework,
+                        Slave* slave,
+                        Task* task,
+                        TaskRemovalReason reason)
 {
-  Framework* framework = lookupFramework(task->framework_id());
-  Slave* slave = lookupSlave(task->slave_id());
-  CHECK(framework != NULL);
-  CHECK(slave != NULL);
   framework->removeTask(task->task_id());
   slave->removeTask(task);
   allocator->taskRemoved(task, reason);
@@ -1955,10 +1601,66 @@ void Master::removeTask(Task* task, TaskRemovalReason reason)
 }
 
 
-Allocator* Master::createAllocator()
+void Master::removeOffer(Offer* offer,
+                         OfferReturnReason reason,
+                         const vector<SlaveResources>& resourcesUnused)
 {
-  LOG(INFO) << "Creating \"" << allocatorType << "\" allocator";
-  return AllocatorFactory::instantiate(allocatorType, this);
+  // Remove from slaves.
+  foreach (SlaveResources& r, offer->resources) {
+    CHECK(r.slave != NULL);
+    r.slave->resourcesOffered -= r.resources;
+    r.slave->offers.erase(offer);
+  }
+    
+  // Remove from framework
+  Framework *framework = getFramework(offer->frameworkId);
+  CHECK(framework != NULL);
+  framework->removeOffer(offer);
+
+  // Also send framework a rescind message unless the reason we are
+  // removing the offer is that the framework replied to it
+  if (reason != ORR_FRAMEWORK_REPLIED) {
+    RescindResourceOfferMessage message;
+    message.mutable_offer_id()->MergeFrom(offer->id);
+    send(framework->pid, message);
+  }
+  
+  // Tell the allocator about the unused resources.
+  allocator->offerReturned(offer, reason, resourcesUnused);
+  
+  // Delete it
+  offers.erase(offer->id);
+  delete offer;
+}
+
+
+Framework* Master::getFramework(const FrameworkID& frameworkId)
+{
+  if (frameworks.count(frameworkId) > 0) {
+    return frameworks[frameworkId];
+  } else {
+    return NULL;
+  }
+}
+
+
+Slave* Master::getSlave(const SlaveID& slaveId)
+{
+  if (slaves.count(slaveId) > 0) {
+    return slaves[slaveId];
+  } else {
+    return NULL;
+  }
+}
+
+
+Offer* Master::getOffer(const OfferID& offerId)
+{
+  if (offers.count(offerId) > 0) {
+    return offers[offerId];
+  } else {
+    return NULL;
+  }
 }
 
 
@@ -1967,10 +1669,14 @@ Allocator* Master::createAllocator()
 // and FWID is an increasing integer.
 FrameworkID Master::newFrameworkId()
 {
-  ostringstream oss;
-  oss << masterId << "-" << setw(4) << setfill('0') << nextFrameworkId++;
+  std::ostringstream out;
+
+  out << masterId << "-" << std::setw(4)
+      << std::setfill('0') << nextFrameworkId++;
+
   FrameworkID frameworkId;
-  frameworkId.set_value(oss.str());
+  frameworkId.set_value(out.str());
+
   return frameworkId;
 }
 
@@ -1978,7 +1684,7 @@ FrameworkID Master::newFrameworkId()
 OfferID Master::newOfferId()
 {
   OfferID offerId;
-  offerId.set_value(masterId + "-" + lexical_cast<string>(nextOfferId++));
+  offerId.set_value(masterId + "-" + utils::stringify(nextOfferId++));
   return offerId;
 }
 
@@ -1986,12 +1692,216 @@ OfferID Master::newOfferId()
 SlaveID Master::newSlaveId()
 {
   SlaveID slaveId;
-  slaveId.set_value(masterId + "-" + lexical_cast<string>(nextSlaveId++));
+  slaveId.set_value(masterId + "-" + utils::stringify(nextSlaveId++));
   return slaveId;
 }
 
 
-const Configuration& Master::getConfiguration()
+Promise<HttpResponse> Master::http_info_json(const HttpRequest& request)
 {
-  return conf;
+  LOG(INFO) << "HTTP request for '/master/info.json'";
+
+  std::ostringstream out;
+
+  out <<
+    "{" <<
+    "\"built_date\":\"" << build::DATE << "\"," <<
+    "\"build_user\":\"" << build::USER << "\"," <<
+    "\"start_time\":\"" << startTime << "\"," <<
+    "\"pid\":\"" << self() << "\"" <<
+    "}";
+
+  HttpOKResponse response;
+  response.headers["Content-Type"] = "text/x-json;charset=UTF-8";
+  response.headers["Content-Length"] = utils::stringify(out.str().size());
+  response.body = out.str().data();
+  return response;
 }
+
+
+Promise<HttpResponse> Master::http_frameworks_json(const HttpRequest& request)
+{
+  LOG(INFO) << "HTTP request for '/master/frameworks.json'";
+
+  std::ostringstream out;
+
+  out << "[";
+
+  foreachvalue (Framework* framework, frameworks) {
+    out <<
+      "{" <<
+      "\"id\":\"" << framework->id << "\"," <<
+      "\"name\":\"" << framework->info.name() << "\"," <<
+      "\"user\":\"" << framework->info.user() << "\""
+      "},";
+  }
+
+  // Backup the put pointer to overwrite the last comma (hack).
+  if (frameworks.size() > 0) {
+    long pos = out.tellp();
+    out.seekp(pos - 1);
+  }
+
+  out << "]";
+
+  HttpOKResponse response;
+  response.headers["Content-Type"] = "text/x-json;charset=UTF-8";
+  response.headers["Content-Length"] = utils::stringify(out.str().size());
+  response.body = out.str().data();
+  return response;
+}
+
+
+Promise<HttpResponse> Master::http_slaves_json(const HttpRequest& request)
+{
+  LOG(INFO) << "HTTP request for '/master/slaves.json'";
+
+  std::ostringstream out;
+
+  out << "[";
+
+  foreachvalue (Slave* slave, slaves) {
+    // TODO(benh): Send all of the resources (as JSON).
+    Resources resources(slave->info.resources());
+    Resource::Scalar cpus = resources.getScalar("cpus", Resource::Scalar());
+    Resource::Scalar mem = resources.getScalar("mem", Resource::Scalar());
+    out <<
+      "{" <<
+      "\"id\":\"" << slave->id << "\"," <<
+      "\"hostname\":\"" << slave->info.hostname() << "\"," <<
+      "\"cpus\":" << cpus.value() << "," <<
+      "\"mem\":" << mem.value() <<
+      "},";
+  }
+
+  // Backup the put pointer to overwrite the last comma (hack).
+  if (slaves.size() > 0) {
+    long pos = out.tellp();
+    out.seekp(pos - 1);
+  }
+
+  out << "]";
+
+  HttpOKResponse response;
+  response.headers["Content-Type"] = "text/x-json;charset=UTF-8";
+  response.headers["Content-Length"] = utils::stringify(out.str().size());
+  response.body = out.str().data();
+  return response;
+}
+
+
+Promise<HttpResponse> Master::http_tasks_json(const HttpRequest& request)
+{
+  LOG(INFO) << "HTTP request for '/master/tasks.json'";
+
+  std::ostringstream out;
+
+  out << "[";
+
+  foreachvalue (Framework* framework, frameworks) {
+    foreachvalue (Task* task, framework->tasks) {
+      // TODO(benh): Send all of the resources (as JSON).
+      Resources resources(task->resources());
+      Resource::Scalar cpus = resources.getScalar("cpus", Resource::Scalar());
+      Resource::Scalar mem = resources.getScalar("mem", Resource::Scalar());
+      out <<
+        "{" <<
+        "\"task_id\":\"" << task->task_id() << "\"," <<
+        "\"framework_id\":\"" << task->framework_id() << "\"," <<
+        "\"slave_id\":\"" << task->slave_id() << "\"," <<
+        "\"name\":\"" << task->name() << "\"," <<
+        "\"state\":\"" << task->state() << "\"," <<
+        "\"cpus\":" << cpus.value() << "," <<
+        "\"mem\":" << mem.value() <<
+        "},";
+    }
+  }
+
+  // Backup the put pointer to overwrite the last comma (hack).
+  if (frameworks.size() > 0) {
+    long pos = out.tellp();
+    out.seekp(pos - 1);
+  }
+
+  out << "]";
+
+  HttpOKResponse response;
+  response.headers["Content-Type"] = "text/x-json;charset=UTF-8";
+  response.headers["Content-Length"] = utils::stringify(out.str().size());
+  response.body = out.str().data();
+  return response;
+}
+
+
+Promise<HttpResponse> Master::http_stats_json(const HttpRequest& request)
+{
+  LOG(INFO) << "Http request for '/master/stats.json'";
+
+  std::ostringstream out;
+
+  out <<
+    "{" <<
+    "\"uptime\":" << elapsedTime() - startTime << "," <<
+    "\"total_schedulers\":" << frameworks.size() << "," <<
+    "\"active_schedulers\":" << getActiveFrameworks().size() << "," <<
+    "\"activated_slaves\":" << slaveHostnamePorts.size() << "," <<
+    "\"connected_slaves\":" << slaves.size() << "," <<
+    "\"started_tasks\":" << stats.tasks[TASK_STARTING] << "," <<
+    "\"finished_tasks\":" << stats.tasks[TASK_FINISHED] << "," <<
+    "\"killed_tasks\":" << stats.tasks[TASK_KILLED] << "," <<
+    "\"failed_tasks\":" << stats.tasks[TASK_FAILED] << "," <<
+    "\"lost_tasks\":" << stats.tasks[TASK_LOST] << "," <<
+    "\"valid_status_updates\":" << stats.validStatusUpdates << "," <<
+    "\"invalid_status_updates\":" << stats.invalidStatusUpdates << "," <<
+    "\"valid_framework_messages\":" << stats.validFrameworkMessages << "," <<
+    "\"invalid_framework_messages\":" << stats.invalidFrameworkMessages <<
+    "}";
+
+  HttpOKResponse response;
+  response.headers["Content-Type"] = "text/x-json;charset=UTF-8";
+  response.headers["Content-Length"] = utils::stringify(out.str().size());
+  response.body = out.str().data();
+  return response;
+}
+
+
+Promise<HttpResponse> Master::http_vars(const HttpRequest& request)
+{
+  LOG(INFO) << "HTTP request for '/master/vars'";
+
+  std::ostringstream out;
+
+  out <<
+    "build_date " << build::DATE << "\n" <<
+    "build_user " << build::USER << "\n" <<
+    "build_flags " << build::FLAGS << "\n";
+
+  // Also add the configuration values.
+  foreachpair (const string& key, const string& value, conf.getMap()) {
+    out << key << " " << value << "\n";
+  }
+
+  out <<
+    "uptime " << elapsedTime() - startTime << "\n" <<
+    "total_schedulers " << frameworks.size() << "\n" <<
+    "active_schedulers " << getActiveFrameworks().size() << "\n" <<
+    "activated_slaves " << slaveHostnamePorts.size() << "\n" <<
+    "connected_slaves " << slaves.size() << "\n" <<
+    "started_tasks " << stats.tasks[TASK_STARTING] << "\n" <<
+    "finished_tasks " << stats.tasks[TASK_FINISHED] << "\n" <<
+    "killed_tasks " << stats.tasks[TASK_KILLED] << "\n" <<
+    "failed_tasks " << stats.tasks[TASK_FAILED] << "\n" <<
+    "lost_tasks " << stats.tasks[TASK_LOST] << "\n" <<
+    "valid_status_updates " << stats.validStatusUpdates << "\n" <<
+    "invalid_status_updates " << stats.invalidStatusUpdates << "\n" <<
+    "valid_framework_messages " << stats.validFrameworkMessages << "\n" <<
+    "invalid_framework_messages " << stats.invalidFrameworkMessages << "\n";
+
+  HttpOKResponse response;
+  response.headers["Content-Type"] = "text/plain";
+  response.headers["Content-Length"] = utils::stringify(out.str().size());
+  response.body = out.str().data();
+  return response;
+}
+
+}}} // namespace mesos { namespace master { namespace internal {
