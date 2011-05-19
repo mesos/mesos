@@ -19,10 +19,6 @@
 #include "slaves_manager.hpp"
 #include "webui.hpp"
 
-using namespace mesos;
-using namespace mesos::internal;
-using namespace mesos::internal::master;
-
 using boost::unordered_map;
 using boost::unordered_set;
 
@@ -36,90 +32,6 @@ using process::UPID;
 
 using std::string;
 using std::vector;
-
-
-namespace {
-
-// A process that periodically pings the master to check filter
-// expiries, etc.
-class AllocatorTimer : public Process<AllocatorTimer>
-{
-public:
-  AllocatorTimer(const PID<Master>& _master) : master(_master) {}
-
-protected:
-  virtual void operator () ()
-  {
-    link(master);
-    while (true) {
-      receive(1);
-      if (name() == process::TIMEOUT) {
-        process::dispatch(master, &Master::timerTick);
-      } else if (name() == process::EXITED) {
-	return;
-      }
-    }
-  }
-
-private:
-  const PID<Master> master;
-};
-
-
-// A process that periodically prints frameworks' shares to a file
-class SharesPrinter : public Process<SharesPrinter>
-{
-public:
-  SharesPrinter(const PID<Master>& _master) : master(_master) {}
-  ~SharesPrinter() {}
-
-protected:
-  virtual void operator () ()
-  {
-    int tick = 0;
-
-    std::ofstream file ("/mnt/shares");
-    if (!file.is_open()) {
-      LOG(FATAL) << "Could not open /mnt/shares";
-    }
-
-    while (true) {
-      pause(1);
-
-      state::MasterState* state = call(master, &Master::getState);
-
-      uint32_t total_cpus = 0;
-      uint32_t total_mem = 0;
-
-      foreach (state::Slave* s, state->slaves) {
-        total_cpus += s->cpus;
-        total_mem += s->mem;
-      }
-      
-      if (state->frameworks.empty()) {
-        file << "--------------------------------" << std::endl;
-      } else {
-        foreach (state::Framework* f, state->frameworks) {
-          double cpu_share = f->cpus / (double) total_cpus;
-          double mem_share = f->mem / (double) total_mem;
-          double max_share = std::max(cpu_share, mem_share);
-          file << tick << "#" << f->id << "#" << f->name << "#" 
-               << f->cpus << "#" << f->mem << "#"
-               << cpu_share << "#" << mem_share << "#"
-               << max_share << std::endl;
-        }
-      }
-      delete state;
-      tick++;
-    }
-    file.close();
-  }
-
-private:
-  const PID<Master> master;
-};
-
-} // namespace {
 
 
 namespace mesos { namespace internal { namespace master {
@@ -182,7 +94,65 @@ private:
   bool pinged;
 };
 
-}}} // namespace mesos { namespace master { namespace internal {
+
+// Performs slave registration asynchronously. There are two means of
+// doing this, one first tries to add this slave to the slaves
+// manager, while the other one simply tells the master to add the
+// slave.
+struct SlaveRegistrar
+{
+  static bool run(Slave* slave, const PID<Master>& master)
+  {
+    // TODO(benh): Do a reverse lookup to ensure IP maps to
+    // hostname, or check credentials of this slave.
+    process::dispatch(master, &Master::addSlave, slave, false);
+  }
+
+  static bool run(Slave* slave,
+                  const PID<Master>& master,
+                  const PID<SlavesManager>& slavesManager)
+  {
+    if (!process::call(slavesManager, &SlavesManager::add,
+                       slave->info.hostname(), slave->pid.port)) {
+      LOG(WARNING) << "Could not register slave because failed"
+                   << " to add it to the slaves maanger";
+      delete slave;
+      return false;
+    }
+
+    return run(slave, master);
+  }
+};
+
+
+// Performs slave re-registration asynchronously as above.
+struct SlaveReregistrar
+{
+  static bool run(Slave* slave,
+                  const vector<Task>& tasks,
+                  const PID<Master>& master)
+  {
+    // TODO(benh): Do a reverse lookup to ensure IP maps to
+    // hostname, or check credentials of this slave.
+    process::dispatch(master, &Master::readdSlave, slave, tasks);
+  }
+
+  static bool run(Slave* slave,
+                  const vector<Task>& tasks,
+                  const PID<Master>& master,
+                  const PID<SlavesManager>& slavesManager)
+  {
+    if (!process::call(slavesManager, &SlavesManager::add,
+                       slave->info.hostname(), slave->pid.port)) {
+      LOG(WARNING) << "Could not register slave because failed"
+                   << " to add it to the slaves maanger";
+      delete slave;
+      return false;
+    }
+
+    return run(slave, tasks, master);
+  }
+};
 
 
 Master::Master()
@@ -383,8 +353,8 @@ void Master::operator () ()
     LOG(FATAL) << "Unrecognized allocator type: " << type;
   }
 
-  link(spawn(new AllocatorTimer(self())));
-  //link(spawn(new SharesPrinter(self())));
+  // Start our timer ticks.
+  process::delay(1.0, self(), &Master::timerTick);
 
   while (true) {
     serve();
@@ -849,32 +819,7 @@ void Master::registerSlave(const SlaveInfo& slaveInfo)
   LOG(INFO) << "Attempting to register slave " << slave->id
             << " at " << slave->pid;
 
-  struct SlaveRegistrar
-  {
-    static bool run(Slave* slave, const PID<Master>& master)
-    {
-      // TODO(benh): Do a reverse lookup to ensure IP maps to
-      // hostname, or check credentials of this slave.
-      process::dispatch(master, &Master::addSlave, slave, false);
-    }
-
-    static bool run(Slave* slave,
-                    const PID<Master>& master,
-                    const PID<SlavesManager>& slavesManager)
-    {
-      if (!process::call(slavesManager, &SlavesManager::add,
-                         slave->info.hostname(), slave->pid.port)) {
-        LOG(WARNING) << "Could not register slave because failed"
-                     << " to add it to the slaves maanger";
-        delete slave;
-        return false;
-      }
-
-      return run(slave, master);
-    }
-  };
-
-  // Check whether this slave can be accepted, or if all slaves are accepted.
+  // Checks if this slave, or if all slaves, can be accepted.
   if (slaveHostnamePorts.count(slaveInfo.hostname(), from().port) > 0) {
     process::run(&SlaveRegistrar::run, slave, self());
   } else if (conf.get<string>("slaves", "*") == "*") {
@@ -921,35 +866,7 @@ void Master::reregisterSlave(const SlaveID& slaveId,
       LOG(INFO) << "Attempting to re-register slave " << slave->id
                 << " at " << slave->pid;
 
-      struct SlaveReregistrar
-      {
-        static bool run(Slave* slave,
-                        const vector<Task>& tasks,
-                        const PID<Master>& master)
-        {
-          // TODO(benh): Do a reverse lookup to ensure IP maps to
-          // hostname, or check credentials of this slave.
-          process::dispatch(master, &Master::readdSlave, slave, tasks);
-        }
-
-        static bool run(Slave* slave,
-                        const vector<Task>& tasks,
-                        const PID<Master>& master,
-                        const PID<SlavesManager>& slavesManager)
-        {
-          if (!process::call(slavesManager, &SlavesManager::add,
-                             slave->info.hostname(), slave->pid.port)) {
-            LOG(WARNING) << "Could not register slave because failed"
-                         << " to add it to the slaves maanger";
-            delete slave;
-            return false;
-          }
-
-          return run(slave, tasks, master);
-        }
-      };
-
-      // Check whether this slave can be accepted, or if all slaves are accepted.
+      // Checks if this slave, or if all slaves, can be accepted.
       if (slaveHostnamePorts.count(slaveInfo.hostname(), from().port) > 0) {
         process::run(&SlaveReregistrar::run, slave, tasks, self());
       } else if (conf.get<string>("slaves", "*") == "*") {
@@ -1170,6 +1087,9 @@ void Master::timerTick()
 
   // Do allocations!
   allocator->timerTick();
+
+  // Scheduler another timer tick!
+  process::delay(1.0, self(), &Master::timerTick);
 }
 
 
@@ -1984,3 +1904,5 @@ Promise<HttpResponse> Master::http_vars(const HttpRequest& request)
   response.body = out.str().data();
   return response;
 }
+
+}}} // namespace mesos { namespace master { namespace internal {

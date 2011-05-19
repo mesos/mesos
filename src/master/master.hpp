@@ -204,8 +204,10 @@ protected:
   SlaveID newSlaveId();
 
 private:
-  // TODO(benh): Remove this once the simple allocator gets updated.
-  friend class SimpleAllocator;
+  friend struct SlaveRegistrar;
+  friend struct SlaveReregistrar;
+  // TODO(benh): Remove once SimpleAllocator doesn't use Master::lookup*.
+  friend class SimpleAllocator; 
 
   // TODO(benh): Better naming and name scope for these http handlers.
   process::Promise<process::HttpResponse> http_info_json(const process::HttpRequest& request);
