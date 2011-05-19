@@ -272,23 +272,6 @@ struct Offer
 // A connected slave.
 struct Slave
 {
-  const SlaveInfo info;
-  const SlaveID id;
-
-  process::UPID pid;
-
-  bool active; // Turns false when slave is being removed
-  double registeredTime;
-  double lastHeartbeat;
-  
-  Resources resourcesOffered; // Resources currently in offers
-  Resources resourcesInUse;   // Resources currently used by tasks
-
-  boost::unordered_map<std::pair<FrameworkID, TaskID>, Task*> tasks;
-  boost::unordered_set<Offer*> offers; // Active offers on this slave.
-
-  SlaveObserver* observer;
-  
   Slave(const SlaveInfo& _info, const SlaveID& _id,
         const process::UPID& _pid, double time)
     : info(_info), id(_id), pid(_pid), active(true),
@@ -337,6 +320,23 @@ struct Slave
     }
     return resources - (resourcesOffered + resourcesInUse);
   }
+
+  const SlaveID id;
+  const SlaveInfo info;
+
+  process::UPID pid;
+
+  bool active; // Turns false when slave is being removed
+  double registeredTime;
+  double lastHeartbeat;
+
+  Resources resourcesOffered; // Resources currently in offers
+  Resources resourcesInUse;   // Resources currently used by tasks
+
+  boost::unordered_map<std::pair<FrameworkID, TaskID>, Task*> tasks;
+  boost::unordered_set<Offer*> offers; // Active offers on this slave.
+
+  SlaveObserver* observer;
 };
 
 
@@ -354,30 +354,12 @@ struct SlaveResources
 // An connected framework.
 struct Framework
 {
-  const FrameworkInfo info;
-  const FrameworkID id;
-
-  process::UPID pid;
-
-  bool active; // Turns false when framework is being removed
-  double registeredTime;
-  double reregisteredTime;
-
-  boost::unordered_map<TaskID, Task*> tasks;
-  boost::unordered_set<Offer*> offers; // Active offers for framework.
-
-  Resources resources; // Total resources owned by framework (tasks + offers)
-  
-  // Contains a time of unfiltering for each slave we've filtered,
-  // or 0 for slaves that we want to keep filtered forever
-  boost::unordered_map<Slave*, double> slaveFilter;
-
   Framework(const FrameworkInfo& _info, const FrameworkID& _id,
             const process::UPID& _pid, double time)
     : info(_info), id(_id), pid(_pid), active(true),
       registeredTime(time), reregisteredTime(time) {}
 
-  virtual ~Framework() {}
+  ~Framework() {}
   
   Task* lookupTask(const TaskID& taskId)
   {
@@ -439,6 +421,24 @@ struct Framework
       }
     }
   }
+
+  const FrameworkID id;
+  const FrameworkInfo info;
+
+  process::UPID pid;
+
+  bool active; // Turns false when framework is being removed
+  double registeredTime;
+  double reregisteredTime;
+
+  boost::unordered_map<TaskID, Task*> tasks;
+  boost::unordered_set<Offer*> offers; // Active offers for framework.
+
+  Resources resources; // Total resources owned by framework (tasks + offers)
+
+  // Contains a time of unfiltering for each slave we've filtered,
+  // or 0 for slaves that we want to keep filtered forever
+  boost::unordered_map<Slave*, double> slaveFilter;
 };
 
 
