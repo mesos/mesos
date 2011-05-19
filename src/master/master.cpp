@@ -11,6 +11,7 @@
 
 #include "common/build.hpp"
 #include "common/date_utils.hpp"
+#include "common/utils.hpp"
 
 #include "allocator.hpp"
 #include "allocator_factory.hpp"
@@ -22,8 +23,6 @@ using namespace mesos;
 using namespace mesos::internal;
 using namespace mesos::internal::master;
 
-using boost::bad_lexical_cast;
-using boost::lexical_cast;
 using boost::unordered_map;
 using boost::unordered_set;
 
@@ -35,14 +34,6 @@ using process::Process;
 using process::Promise;
 using process::UPID;
 
-using std::endl;
-using std::map;
-using std::max;
-using std::ostringstream;
-using std::pair;
-using std::set;
-using std::setfill;
-using std::setw;
 using std::string;
 using std::vector;
 
@@ -106,15 +97,16 @@ protected:
       }
       
       if (state->frameworks.empty()) {
-        file << "--------------------------------" << endl;
+        file << "--------------------------------" << std::endl;
       } else {
         foreach (state::Framework* f, state->frameworks) {
           double cpu_share = f->cpus / (double) total_cpus;
           double mem_share = f->mem / (double) total_mem;
-          double max_share = max(cpu_share, mem_share);
+          double max_share = std::max(cpu_share, mem_share);
           file << tick << "#" << f->id << "#" << f->name << "#" 
                << f->cpus << "#" << f->mem << "#"
-               << cpu_share << "#" << mem_share << "#" << max_share << endl;
+               << cpu_share << "#" << mem_share << "#"
+               << max_share << std::endl;
         }
       }
       delete state;
@@ -1327,8 +1319,8 @@ void Master::processOfferReply(Offer* offer,
   foreach (const TaskDescription& task, tasks) {
     if (framework->tasks.count(task.task_id()) > 0 ||
         idsInResponse.count(task.task_id()) > 0) {
-      terminateFramework(framework, 0, "Duplicate task ID: " +
-                         lexical_cast<string>(task.task_id()));
+      string error = "Duplicate task ID: " + task.task_id().value();
+      terminateFramework(framework, 0, error);
       return;
     }
     idsInResponse.insert(task.task_id());
@@ -1345,7 +1337,14 @@ void Master::processOfferReply(Offer* offer,
 
   for (int i = 0; i < params.param_size(); i++) {
     if (params.param(i).key() == "timeout") {
-      timeout = lexical_cast<int>(params.param(i).value());
+      try {
+        timeout = boost::lexical_cast<int>(params.param(i).value());
+      } catch (boost::bad_lexical_cast&) {
+        string error = "Failed to convert value '" +
+          params.param(i).value() + "' for key 'timeout' to an integer";
+        terminateFramework(framework, 0, error);
+        return;
+      }
       break;
     }
   }
@@ -1751,10 +1750,14 @@ Offer* Master::lookupOffer(const OfferID& offerId)
 // and FWID is an increasing integer.
 FrameworkID Master::newFrameworkId()
 {
-  ostringstream oss;
-  oss << masterId << "-" << setw(4) << setfill('0') << nextFrameworkId++;
+  std::ostringstream out;
+
+  out << masterId << "-" << std::setw(4)
+      << std::setfill('0') << nextFrameworkId++;
+
   FrameworkID frameworkId;
-  frameworkId.set_value(oss.str());
+  frameworkId.set_value(out.str());
+
   return frameworkId;
 }
 
@@ -1762,7 +1765,7 @@ FrameworkID Master::newFrameworkId()
 OfferID Master::newOfferId()
 {
   OfferID offerId;
-  offerId.set_value(masterId + "-" + lexical_cast<string>(nextOfferId++));
+  offerId.set_value(masterId + "-" + utils::stringify(nextOfferId++));
   return offerId;
 }
 
@@ -1770,7 +1773,7 @@ OfferID Master::newOfferId()
 SlaveID Master::newSlaveId()
 {
   SlaveID slaveId;
-  slaveId.set_value(masterId + "-" + lexical_cast<string>(nextSlaveId++));
+  slaveId.set_value(masterId + "-" + utils::stringify(nextSlaveId++));
   return slaveId;
 }
 
@@ -1779,7 +1782,7 @@ Promise<HttpResponse> Master::http_info_json(const HttpRequest& request)
 {
   LOG(INFO) << "HTTP request for '/master/info.json'";
 
-  ostringstream out;
+  std::ostringstream out;
 
   out <<
     "{" <<
@@ -1791,7 +1794,7 @@ Promise<HttpResponse> Master::http_info_json(const HttpRequest& request)
 
   HttpOKResponse response;
   response.headers["Content-Type"] = "text/x-json;charset=UTF-8";
-  response.headers["Content-Length"] = lexical_cast<string>(out.str().size());
+  response.headers["Content-Length"] = utils::stringify(out.str().size());
   response.body = out.str().data();
   return response;
 }
@@ -1801,7 +1804,7 @@ Promise<HttpResponse> Master::http_frameworks_json(const HttpRequest& request)
 {
   LOG(INFO) << "HTTP request for '/master/frameworks.json'";
 
-  ostringstream out;
+  std::ostringstream out;
 
   out << "[";
 
@@ -1824,7 +1827,7 @@ Promise<HttpResponse> Master::http_frameworks_json(const HttpRequest& request)
 
   HttpOKResponse response;
   response.headers["Content-Type"] = "text/x-json;charset=UTF-8";
-  response.headers["Content-Length"] = lexical_cast<string>(out.str().size());
+  response.headers["Content-Length"] = utils::stringify(out.str().size());
   response.body = out.str().data();
   return response;
 }
@@ -1834,7 +1837,7 @@ Promise<HttpResponse> Master::http_slaves_json(const HttpRequest& request)
 {
   LOG(INFO) << "HTTP request for '/master/slaves.json'";
 
-  ostringstream out;
+  std::ostringstream out;
 
   out << "[";
 
@@ -1862,7 +1865,7 @@ Promise<HttpResponse> Master::http_slaves_json(const HttpRequest& request)
 
   HttpOKResponse response;
   response.headers["Content-Type"] = "text/x-json;charset=UTF-8";
-  response.headers["Content-Length"] = lexical_cast<string>(out.str().size());
+  response.headers["Content-Length"] = utils::stringify(out.str().size());
   response.body = out.str().data();
   return response;
 }
@@ -1872,7 +1875,7 @@ Promise<HttpResponse> Master::http_tasks_json(const HttpRequest& request)
 {
   LOG(INFO) << "HTTP request for '/master/tasks.json'";
 
-  ostringstream out;
+  std::ostringstream out;
 
   out << "[";
 
@@ -1905,7 +1908,7 @@ Promise<HttpResponse> Master::http_tasks_json(const HttpRequest& request)
 
   HttpOKResponse response;
   response.headers["Content-Type"] = "text/x-json;charset=UTF-8";
-  response.headers["Content-Length"] = lexical_cast<string>(out.str().size());
+  response.headers["Content-Length"] = utils::stringify(out.str().size());
   response.body = out.str().data();
   return response;
 }
@@ -1915,7 +1918,7 @@ Promise<HttpResponse> Master::http_stats_json(const HttpRequest& request)
 {
   LOG(INFO) << "Http request for '/master/stats.json'";
 
-  ostringstream out;
+  std::ostringstream out;
 
   out <<
     "{" <<
@@ -1937,7 +1940,7 @@ Promise<HttpResponse> Master::http_stats_json(const HttpRequest& request)
 
   HttpOKResponse response;
   response.headers["Content-Type"] = "text/x-json;charset=UTF-8";
-  response.headers["Content-Length"] = lexical_cast<string>(out.str().size());
+  response.headers["Content-Length"] = utils::stringify(out.str().size());
   response.body = out.str().data();
   return response;
 }
@@ -1947,7 +1950,7 @@ Promise<HttpResponse> Master::http_vars(const HttpRequest& request)
 {
   LOG(INFO) << "HTTP request for '/master/vars'";
 
-  ostringstream out;
+  std::ostringstream out;
 
   out <<
     "build_date " << build::DATE << "\n" <<
@@ -1977,7 +1980,7 @@ Promise<HttpResponse> Master::http_vars(const HttpRequest& request)
 
   HttpOKResponse response;
   response.headers["Content-Type"] = "text/plain";
-  response.headers["Content-Length"] = lexical_cast<string>(out.str().size());
+  response.headers["Content-Length"] = utils::stringify(out.str().size());
   response.body = out.str().data();
   return response;
 }

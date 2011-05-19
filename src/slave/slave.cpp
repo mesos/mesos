@@ -12,11 +12,7 @@
 
 using namespace process;
 
-using std::make_pair;
-using std::ostringstream;
-using std::pair;
 using std::string;
-using std::queue;
 
 
 namespace mesos { namespace internal { namespace slave {
@@ -1160,7 +1156,7 @@ Promise<HttpResponse> Slave::http_info_json(const HttpRequest& request)
 {
   LOG(INFO) << "HTTP request for '/slave/info.json'";
 
-  ostringstream out;
+  std::ostringstream out;
 
   out <<
     "{" <<
@@ -1182,7 +1178,7 @@ Promise<HttpResponse> Slave::http_frameworks_json(const HttpRequest& request)
 {
   LOG(INFO) << "HTTP request for '/slave/frameworks.json'";
 
-  ostringstream out;
+  std::ostringstream out;
 
   out << "[";
 
@@ -1215,7 +1211,7 @@ Promise<HttpResponse> Slave::http_tasks_json(const HttpRequest& request)
 {
   LOG(INFO) << "HTTP request for '/slave/tasks.json'";
 
-  ostringstream out;
+  std::ostringstream out;
 
   out << "[";
 
@@ -1260,7 +1256,7 @@ Promise<HttpResponse> Slave::http_stats_json(const HttpRequest& request)
 {
   LOG(INFO) << "Http request for '/slave/stats.json'";
 
-  ostringstream out;
+  std::ostringstream out;
 
   out <<
     "{" <<
@@ -1289,7 +1285,7 @@ Promise<HttpResponse> Slave::http_vars(const HttpRequest& request)
 {
   LOG(INFO) << "HTTP request for '/slave/vars'";
 
-  ostringstream out;
+  std::ostringstream out;
 
   out <<
     "build_date " << build::DATE << "\n" <<
@@ -1624,8 +1620,8 @@ string Slave::getUniqueWorkDirectory(const FrameworkID& frameworkId,
 
   workDir = workDir + "/work";
 
-  ostringstream os(std::ios_base::app | std::ios_base::out);
-  os << workDir << "/slave-" << id
+  std::ostringstream out(std::ios_base::app | std::ios_base::out);
+  out << workDir << "/slave-" << id
      << "/fw-" << frameworkId << "-" << executorId;
 
   // TODO(benh): Make executor id be in it's own directory.
@@ -1633,22 +1629,22 @@ string Slave::getUniqueWorkDirectory(const FrameworkID& frameworkId,
   // Find a unique directory based on the path given by the slave
   // (this is because we might launch multiple executors from the same
   // framework on this slave).
-  os << "/";
+  out << "/";
 
   string dir;
-  dir = os.str();
+  dir = out.str();
 
   for (int i = 0; i < INT_MAX; i++) {
-    os << i;
-    if (opendir(os.str().c_str()) == NULL && errno == ENOENT)
+    out << i;
+    if (opendir(out.str().c_str()) == NULL && errno == ENOENT)
       break;
 
     // TODO(benh): Does one need to do any sort of closedir?
 
-    os.str(dir);
+    out.str(dir);
   }
 
-  return os.str();
+  return out.str();
 }
 
 

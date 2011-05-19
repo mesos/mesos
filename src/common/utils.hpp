@@ -10,6 +10,8 @@
 #include <stddef.h>
 #include <unistd.h>
 
+#include <google/protobuf/message.h>
+
 #include <glog/logging.h>
 
 #include <sys/stat.h>
