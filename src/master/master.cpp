@@ -234,12 +234,17 @@ Master::~Master()
 void Master::registerOptions(Configurator* configurator)
 {
   SlavesManager::registerOptions(configurator);
-  configurator->addOption<string>("allocator", 'a',
-                                  "Allocation module name",
-                                  "simple");
-  configurator->addOption<bool>("root_submissions",
-                                "Can root submit frameworks?",
-                                true);
+
+  configurator->addOption<string>(
+      "allocator",
+      'a',
+      "Allocation module name",
+      "simple");
+
+  configurator->addOption<bool>(
+      "root_submissions",
+      "Can root submit frameworks?",
+      true);
 }
 
 
@@ -430,73 +435,89 @@ void Master::initialize()
   startTime = elapsedTime();
 
   // Install handler functions for certain messages.
-  installProtobufHandler(&Master::newMasterDetected,
-                         &NewMasterDetectedMessage::pid);
+  installProtobufHandler<NewMasterDetectedMessage>(
+      &Master::newMasterDetected,
+      &NewMasterDetectedMessage::pid);
 
-  installProtobufHandler<NoMasterDetectedMessage>(&Master::noMasterDetected);
+  installProtobufHandler<NoMasterDetectedMessage>(
+      &Master::noMasterDetected);
 
-  installProtobufHandler(&Master::registerFramework,
-                         &RegisterFrameworkMessage::framework);
+  installProtobufHandler<RegisterFrameworkMessage>(
+      &Master::registerFramework,
+      &RegisterFrameworkMessage::framework);
 
-  installProtobufHandler(&Master::reregisterFramework,
-                         &ReregisterFrameworkMessage::framework_id,
-                         &ReregisterFrameworkMessage::framework,
-                         &ReregisterFrameworkMessage::generation);
+  installProtobufHandler<ReregisterFrameworkMessage>(
+      &Master::reregisterFramework,
+      &ReregisterFrameworkMessage::framework_id,
+      &ReregisterFrameworkMessage::framework,
+      &ReregisterFrameworkMessage::generation);
 
-  installProtobufHandler(&Master::unregisterFramework,
-                         &UnregisterFrameworkMessage::framework_id);
+  installProtobufHandler<UnregisterFrameworkMessage>(
+      &Master::unregisterFramework,
+      &UnregisterFrameworkMessage::framework_id);
 
-  installProtobufHandler(&Master::resourceOfferReply,
-                         &ResourceOfferReplyMessage::framework_id,
-                         &ResourceOfferReplyMessage::offer_id,
-                         &ResourceOfferReplyMessage::tasks,
-                         &ResourceOfferReplyMessage::params);
+  installProtobufHandler<ResourceOfferReplyMessage>(
+      &Master::resourceOfferReply,
+      &ResourceOfferReplyMessage::framework_id,
+      &ResourceOfferReplyMessage::offer_id,
+      &ResourceOfferReplyMessage::tasks,
+      &ResourceOfferReplyMessage::params);
 
-  installProtobufHandler(&Master::reviveOffers,
-                         &ReviveOffersMessage::framework_id);
+  installProtobufHandler<ReviveOffersMessage>(
+      &Master::reviveOffers,
+      &ReviveOffersMessage::framework_id);
 
-  installProtobufHandler(&Master::killTask,
-                         &KillTaskMessage::framework_id,
-                         &KillTaskMessage::task_id);
+  installProtobufHandler<KillTaskMessage>(
+      &Master::killTask,
+      &KillTaskMessage::framework_id,
+      &KillTaskMessage::task_id);
 
-  installProtobufHandler(&Master::schedulerMessage,
-                         &FrameworkToExecutorMessage::slave_id,
-                         &FrameworkToExecutorMessage::framework_id,
-                         &FrameworkToExecutorMessage::executor_id,
-                         &FrameworkToExecutorMessage::data);
+  installProtobufHandler<FrameworkToExecutorMessage>(
+      &Master::schedulerMessage,
+      &FrameworkToExecutorMessage::slave_id,
+      &FrameworkToExecutorMessage::framework_id,
+      &FrameworkToExecutorMessage::executor_id,
+      &FrameworkToExecutorMessage::data);
 
-  installProtobufHandler(&Master::statusUpdateAcknowledgement,
-                         &StatusUpdateAcknowledgementMessage::framework_id,
-                         &StatusUpdateAcknowledgementMessage::task_id,
-                         &StatusUpdateAcknowledgementMessage::slave_id,
-                         &StatusUpdateAcknowledgementMessage::sequence);
+  installProtobufHandler<StatusUpdateAcknowledgementMessage>(
+      &Master::statusUpdateAcknowledgement,
+      &StatusUpdateAcknowledgementMessage::framework_id,
+      &StatusUpdateAcknowledgementMessage::task_id,
+      &StatusUpdateAcknowledgementMessage::slave_id,
+      &StatusUpdateAcknowledgementMessage::sequence);
 
-  installProtobufHandler(&Master::registerSlave,
-                         &RegisterSlaveMessage::slave);
+  installProtobufHandler<RegisterSlaveMessage>(
+      &Master::registerSlave,
+      &RegisterSlaveMessage::slave);
 
-  installProtobufHandler(&Master::reregisterSlave,
-                         &ReregisterSlaveMessage::slave_id,
-                         &ReregisterSlaveMessage::slave,
-                         &ReregisterSlaveMessage::tasks);
+  installProtobufHandler<ReregisterSlaveMessage>(
+      &Master::reregisterSlave,
+      &ReregisterSlaveMessage::slave_id,
+      &ReregisterSlaveMessage::slave,
+      &ReregisterSlaveMessage::tasks);
 
-  installProtobufHandler(&Master::unregisterSlave,
-                         &UnregisterSlaveMessage::slave_id);
+  installProtobufHandler<UnregisterSlaveMessage>(
+      &Master::unregisterSlave,
+      &UnregisterSlaveMessage::slave_id);
 
-  installProtobufHandler(&Master::statusUpdate,
-                         &StatusUpdateMessage::update,
-                         &StatusUpdateMessage::reliable);
+  installProtobufHandler<StatusUpdateMessage>(
+      &Master::statusUpdate,
+      &StatusUpdateMessage::update,
+      &StatusUpdateMessage::reliable);
 
-  installProtobufHandler(&Master::executorMessage,
-                         &ExecutorToFrameworkMessage::slave_id,
-                         &ExecutorToFrameworkMessage::framework_id,
-                         &ExecutorToFrameworkMessage::executor_id,
-                         &ExecutorToFrameworkMessage::data);
+  installProtobufHandler<ExecutorToFrameworkMessage>(
+      &Master::executorMessage,
+      &ExecutorToFrameworkMessage::slave_id,
+      &ExecutorToFrameworkMessage::framework_id,
+      &ExecutorToFrameworkMessage::executor_id,
+      &ExecutorToFrameworkMessage::data);
 
-  installProtobufHandler(&Master::exitedExecutor,
-                         &ExitedExecutorMessage::slave_id,
-                         &ExitedExecutorMessage::framework_id,
-                         &ExitedExecutorMessage::executor_id,
-                         &ExitedExecutorMessage::status);
+  installProtobufHandler<ExitedExecutorMessage>(
+      &Master::exitedExecutor,
+      &ExitedExecutorMessage::slave_id,
+      &ExitedExecutorMessage::framework_id,
+      &ExitedExecutorMessage::executor_id,
+      &ExitedExecutorMessage::status);
 
   // Install some message handlers.
   installMessageHandler(process::EXITED, &Master::exited);
