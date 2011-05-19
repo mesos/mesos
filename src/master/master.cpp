@@ -353,36 +353,6 @@ vector<Slave*> Master::getActiveSlaves()
 }
 
 
-Framework* Master::lookupFramework(const FrameworkID& frameworkId)
-{
-  if (frameworks.count(frameworkId) > 0) {
-    return frameworks[frameworkId];
-  } else {
-    return NULL;
-  }
-}
-
-
-Slave* Master::lookupSlave(const SlaveID& slaveId)
-{
-  if (slaves.count(slaveId) > 0) {
-    return slaves[slaveId];
-  } else {
-    return NULL;
-  }
-}
-
-
-Offer* Master::lookupOffer(const OfferID& offerId)
-{
-  if (offers.count(offerId) > 0) {
-    return offers[offerId];
-  } else {
-    return NULL;
-  }
-}
-
-
 void Master::operator () ()
 {
   LOG(INFO) << "Master started at mesos://" << self();
@@ -408,9 +378,12 @@ void Master::operator () ()
 
   // Create the allocator (we do this after the constructor because it
   // leaks 'this').
-  allocator = createAllocator();
+  string type = conf.get("allocator", "simple");
+  LOG(INFO) << "Creating \"" << type << "\" allocator";
+  allocator = AllocatorFactory::instantiate(type, this);
+
   if (!allocator) {
-    LOG(FATAL) << "Unrecognized allocator type: " << allocatorType;
+    LOG(FATAL) << "Unrecognized allocator type: " << type;
   }
 
   link(spawn(new AllocatorTimer(self())));
@@ -439,8 +412,6 @@ void Master::initialize()
   nextFrameworkId = 0;
   nextSlaveId = 0;
   nextOfferId = 0;
-
-  allocatorType = conf.get("allocator", "simple");
 
   // Start all the statistics at 0.
   statistics.launched_tasks = 0;
@@ -1238,6 +1209,553 @@ void Master::exited()
 }
 
 
+OfferID Master::makeOffer(Framework* framework,
+                          const vector<SlaveResources>& resources)
+{
+  const OfferID& offerId = newOfferId();
+
+  Offer* offer = new Offer(offerId, framework->id, resources);
+
+  offers[offer->id] = offer;
+  framework->addOffer(offer);
+
+  // Update the resource information within each of the slave objects. Gross!
+  foreach (const SlaveResources& r, resources) {
+    r.slave->offers.insert(offer);
+    r.slave->resourcesOffered += r.resources;
+  }
+
+  LOG(INFO) << "Sending offer " << offer->id
+            << " to framework " << framework->id;
+
+  ResourceOfferMessage message;
+  message.mutable_offer_id()->MergeFrom(offerId);
+
+  foreach (const SlaveResources& r, resources) {
+    SlaveOffer* offer = message.add_offers();
+    offer->mutable_slave_id()->MergeFrom(r.slave->id);
+    offer->set_hostname(r.slave->info.hostname());
+    offer->mutable_resources()->MergeFrom(r.resources);
+
+    message.add_pids(r.slave->pid);
+  }
+
+  send(framework->pid, message);
+
+  return offerId;
+}
+
+
+// Process a resource offer reply (for a non-cancelled offer) by launching
+// the desired tasks (if the offer contains a valid set of tasks) and
+// reporting any unused resources to the allocator.
+void Master::processOfferReply(Offer* offer,
+                               const vector<TaskDescription>& tasks,
+                               const Params& params)
+{
+  LOG(INFO) << "Received reply for " << offer;
+
+  Framework* framework = lookupFramework(offer->frameworkId);
+  CHECK(framework != NULL);
+
+  // Count resources in the offer.
+  unordered_map<Slave*, Resources> resourcesOffered;
+  foreach (const SlaveResources& r, offer->resources) {
+    resourcesOffered[r.slave] = r.resources;
+  }
+
+  // Count used resources and check that its tasks are valid.
+  unordered_map<Slave*, Resources> resourcesUsed;
+  foreach (const TaskDescription& task, tasks) {
+    // Check whether the task is on a valid slave.
+    Slave* slave = lookupSlave(task.slave_id());
+    if (slave == NULL || resourcesOffered.count(slave) == 0) {
+      terminateFramework(framework, 0, "Invalid slave in offer reply");
+      return;
+    }
+
+    // Check whether or not the resources for the task are valid.
+    // TODO(benh): In the future maybe we can also augment the
+    // protobuf to deal with fragmentation purposes by providing some
+    // sort of minimum amount of resources required per task.
+
+    if (task.resources().size() == 0) {
+      terminateFramework(framework, 0, "Invalid resources for task");
+      return;
+    }
+
+    foreach (const Resource& resource, task.resources()) {
+      if (!Resources::isAllocatable(resource)) {
+        // TODO(benh): Also send back the invalid resources as a string?
+        terminateFramework(framework, 0, "Invalid resources for task");
+        return;
+      }
+    }
+
+    resourcesUsed[slave] += task.resources();
+  }
+
+  // Check that the total accepted on each slave isn't more than offered.
+  foreachpair (Slave* slave, const Resources& used, resourcesUsed) {
+    if (!(used <= resourcesOffered[slave])) {
+      terminateFramework(framework, 0, "Too many resources accepted");
+      return;
+    }
+  }
+
+  // Check that there are no duplicate task IDs.
+  unordered_set<TaskID> idsInResponse;
+  foreach (const TaskDescription& task, tasks) {
+    if (framework->tasks.count(task.task_id()) > 0 ||
+        idsInResponse.count(task.task_id()) > 0) {
+      terminateFramework(framework, 0, "Duplicate task ID: " +
+                         lexical_cast<string>(task.task_id()));
+      return;
+    }
+    idsInResponse.insert(task.task_id());
+  }
+
+  // Launch the tasks in the response.
+  foreach (const TaskDescription& task, tasks) {
+    launchTask(framework, task);
+  }
+
+  // Get out the timeout for left over resources (if exists), and use
+  // that to calculate the expiry timeout.
+  int timeout = DEFAULT_REFUSAL_TIMEOUT;
+
+  for (int i = 0; i < params.param_size(); i++) {
+    if (params.param(i).key() == "timeout") {
+      timeout = lexical_cast<int>(params.param(i).value());
+      break;
+    }
+  }
+
+  double expiry = (timeout == -1) ? 0 : elapsedTime() + timeout;  
+
+  // Now check for unused resources on slaves and add filters for them.
+  vector<SlaveResources> resourcesUnused;
+
+  foreachpair (Slave* slave, const Resources& offered, resourcesOffered) {
+    Resources used = resourcesUsed[slave];
+    Resources unused = offered - used;
+
+    CHECK(used == used.allocatable());
+
+    Resources allocatable = unused.allocatable();
+
+    if (allocatable.size() > 0) {
+      resourcesUnused.push_back(SlaveResources(slave, allocatable));
+    }
+
+    // Only add a filter on a slave if none of the resources are used.
+    if (timeout != 0 && used.size() == 0) {
+      LOG(INFO) << "Adding filter on " << slave << " to " << framework
+                << " for " << timeout << " seconds";
+      framework->slaveFilter[slave] = expiry;
+    }
+  }
+  
+  // Return the resources left to the allocator.
+  removeOffer(offer, ORR_FRAMEWORK_REPLIED, resourcesUnused);
+}
+
+
+void Master::launchTask(Framework* framework, const TaskDescription& task)
+{
+  // The invariant right now is that launchTask is called only for
+  // TaskDescriptions where the slave is still valid (see the code
+  // above in processOfferReply).
+  Slave* slave = lookupSlave(task.slave_id());
+  CHECK(slave != NULL);
+
+  // Determine the executor ID for this task.
+  const ExecutorID& executorId = task.has_executor()
+    ? task.executor().executor_id()
+    : framework->info.executor().executor_id();
+
+  Task* t = new Task();
+  t->mutable_framework_id()->MergeFrom(framework->id);
+  t->mutable_executor_id()->MergeFrom(executorId);
+  t->set_state(TASK_STARTING);
+  t->set_name(task.name());
+  t->mutable_task_id()->MergeFrom(task.task_id());
+  t->mutable_slave_id()->MergeFrom(task.slave_id());
+  t->mutable_resources()->MergeFrom(task.resources());
+
+  framework->addTask(t);
+  slave->addTask(t);
+
+  allocator->taskAdded(t);
+
+  LOG(INFO) << "Launching " << t << " on " << slave;
+
+  RunTaskMessage message;
+  message.mutable_framework()->MergeFrom(framework->info);
+  message.mutable_framework_id()->MergeFrom(framework->id);
+  message.set_pid(framework->pid);
+  message.mutable_task()->MergeFrom(task);
+  send(slave->pid, message);
+
+  statistics.launched_tasks++;
+}
+
+
+void Master::addFramework(Framework* framework)
+{
+  CHECK(frameworks.count(framework->id) == 0);
+
+  frameworks[framework->id] = framework;
+
+  link(framework->pid);
+
+  FrameworkRegisteredMessage message;
+  message.mutable_framework_id()->MergeFrom(framework->id);
+  send(framework->pid, message);
+
+  allocator->frameworkAdded(framework);
+}
+
+
+// Replace the scheduler for a framework with a new process ID, in the
+// event of a scheduler failover.
+void Master::failoverFramework(Framework* framework, const UPID& newPid)
+{
+  const UPID& oldPid = framework->pid;
+
+  // Remove the framework's slot offers (if they weren't removed before).
+  // TODO(benh): Consider just reoffering these to the new framework.
+  foreach (Offer* offer, utils::copy(framework->offers)) {
+    removeOffer(offer, ORR_FRAMEWORK_FAILOVER, offer->resources);
+  }
+
+  {
+    FrameworkErrorMessage message;
+    message.set_code(1);
+    message.set_message("Framework failover");
+    send(oldPid, message);
+  }
+
+  // TODO(benh): unlink(oldPid);
+
+  framework->pid = newPid;
+  link(newPid);
+
+  // Make sure we can get offers again.
+  framework->active = true;
+
+  framework->reregisteredTime = elapsedTime();
+
+  FrameworkRegisteredMessage message;
+  message.mutable_framework_id()->MergeFrom(framework->id);
+  send(newPid, message);
+}
+
+
+void Master::terminateFramework(Framework* framework,
+                                int32_t code,
+                                const string& error)
+{
+  LOG(INFO) << "Terminating " << framework << " due to error: " << error;
+
+  FrameworkErrorMessage message;
+  message.set_code(code);
+  message.set_message(error);
+  send(framework->pid, message);
+
+  removeFramework(framework);
+}
+
+
+void Master::removeFramework(Framework* framework)
+{ 
+  framework->active = false;
+  // TODO: Notify allocator that a framework removal is beginning?
+  
+  // Tell slaves to kill the framework
+  foreachvalue (Slave* slave, slaves) {
+    KillFrameworkMessage message;
+    message.mutable_framework_id()->MergeFrom(framework->id);
+    send(slave->pid, message);
+  }
+
+  // Remove pointers to the framework's tasks in slaves
+  foreachvalue (Task* task, utils::copy(framework->tasks)) {
+    Slave* slave = lookupSlave(task->slave_id());
+    CHECK(slave != NULL);
+    removeTask(task, TRR_FRAMEWORK_LOST);
+  }
+  
+  // Remove the framework's slot offers (if they weren't removed before).
+  foreach (Offer* offer, utils::copy(framework->offers)) {
+    removeOffer(offer, ORR_FRAMEWORK_LOST, offer->resources);
+  }
+
+  // TODO(benh): Similar code between removeFramework and
+  // failoverFramework needs to be shared!
+
+  // TODO(benh): unlink(framework->pid);
+
+  // Delete it.
+  frameworks.erase(framework->id);
+  allocator->frameworkRemoved(framework);
+  delete framework;
+}
+
+
+void Master::addSlave(Slave* slave, bool reregister)
+{
+  CHECK(slave != NULL);
+
+  slaves[slave->id] = slave;
+
+  link(slave->pid);
+
+  allocator->slaveAdded(slave);
+
+  if (!reregister) {
+    SlaveRegisteredMessage message;
+    message.mutable_slave_id()->MergeFrom(slave->id);
+    send(slave->pid, message);
+  } else {
+    SlaveReregisteredMessage message;
+    message.mutable_slave_id()->MergeFrom(slave->id);
+    send(slave->pid, message);
+  }
+
+  // TODO(benh):
+  //     // Ask the slaves manager to monitor this slave for us.
+  //     process::dispatch(slavesManager->self(), &SlavesManager::monitor,
+  //                       slave->pid, slave->info, slave->id);
+
+  // Set up an observer for the slave.
+  slave->observer = new SlaveObserver(slave->pid, slave->info,
+                                      slave->id, slavesManager->self());
+  process::spawn(slave->observer);
+}
+
+
+void Master::readdSlave(Slave* slave, const vector<Task>& tasks)
+{
+  CHECK(slave != NULL);
+
+  addSlave(slave, true);
+
+  for (int i = 0; i < tasks.size(); i++) {
+    Task* task = new Task(tasks[i]);
+
+    // Add the task to the slave.
+    slave->addTask(task);
+
+    // Try and add the task to the framework too, but since the
+    // framework might not yet be connected we won't be able to
+    // add them. However, when the framework connects later we
+    // will add them then. We also tell this slave the current
+    // framework pid for this task. Again, we do the same thing
+    // if a framework currently isn't registered.
+    Framework* framework = lookupFramework(task->framework_id());
+    if (framework != NULL) {
+      framework->addTask(task);
+      UpdateFrameworkMessage message;
+      message.mutable_framework_id()->MergeFrom(framework->id);
+      message.set_pid(framework->pid);
+      send(slave->pid, message);
+    } else {
+      // TODO(benh): We should really put a timeout on how long we
+      // keep tasks running on a slave that never have frameworks
+      // reregister and claim them.
+      LOG(WARNING) << "Possibly orphaned task " << task->task_id()
+                   << " of framework " << task->framework_id()
+                   << " running on slave " << slave->id;
+    }
+  }
+}
+
+
+// Lose all of a slave's tasks and delete the slave object
+void Master::removeSlave(Slave* slave)
+{ 
+  slave->active = false;
+
+  // TODO: Notify allocator that a slave removal is beginning?
+  
+  // Remove pointers to slave's tasks in frameworks, and send status updates
+  foreachvalue (Task* task, utils::copy(slave->tasks)) {
+    Framework* framework = lookupFramework(task->framework_id());
+    // A framework might not actually exist because the master failed
+    // over and the framework hasn't reconnected. This can be a tricky
+    // situation for frameworks that want to have high-availability,
+    // because if they eventually do connect they won't ever get a
+    // status update about this task.  Perhaps in the future what we
+    // want to do is create a local Framework object to represent that
+    // framework until it fails over. See the TODO above in
+    // Master::reregisterSlave.
+    if (framework != NULL) {
+      StatusUpdateMessage message;
+      StatusUpdate* update = message.mutable_update();
+      update->mutable_framework_id()->MergeFrom(task->framework_id());
+      update->mutable_executor_id()->MergeFrom(task->executor_id());
+      update->mutable_slave_id()->MergeFrom(task->slave_id());
+      TaskStatus* status = update->mutable_status();
+      status->mutable_task_id()->MergeFrom(task->task_id());
+      status->set_state(TASK_LOST);
+      update->set_timestamp(elapsedTime());
+      message.set_reliable(false);
+      send(framework->pid, message);
+    }
+    removeTask(task, TRR_SLAVE_LOST);
+  }
+
+  // Remove slot offers from the slave; this will also rescind them
+  foreach (Offer* offer, utils::copy(slave->offers)) {
+    // Only report resources on slaves other than this one to the allocator
+    vector<SlaveResources> otherSlaveResources;
+    foreach (const SlaveResources& r, offer->resources) {
+      if (r.slave != slave) {
+        otherSlaveResources.push_back(r);
+      }
+    }
+    removeOffer(offer, ORR_SLAVE_LOST, otherSlaveResources);
+  }
+  
+  // Remove slave from any filters
+  foreachvalue (Framework* framework, frameworks) {
+    framework->slaveFilter.erase(slave);
+  }
+  
+  // Send lost-slave message to all frameworks (this helps them re-run
+  // previously finished tasks whose output was on the lost slave)
+  foreachvalue (Framework* framework, frameworks) {
+    LostSlaveMessage message;
+    message.mutable_slave_id()->MergeFrom(slave->id);
+    send(framework->pid, message);
+  }
+
+  // TODO(benh):
+  //     // Tell the slaves manager to stop monitoring this slave for us.
+  //     process::dispatch(slavesManager->self(), &SlavesManager::forget,
+  //                       slave->pid, slave->info, slave->id);
+
+  // Kill the slave observer.
+  process::post(slave->observer->self(), process::TERMINATE);
+  process::wait(slave->observer->self());
+  delete slave->observer;
+
+  // TODO(benh): unlink(slave->pid);
+
+  // Delete it
+  slaves.erase(slave->id);
+  allocator->slaveRemoved(slave);
+  delete slave;
+}
+
+
+// Remove a slot offer (because it was replied or we lost a framework or slave)
+void Master::removeTask(Task* task, TaskRemovalReason reason)
+{
+  Framework* framework = lookupFramework(task->framework_id());
+  Slave* slave = lookupSlave(task->slave_id());
+  CHECK(framework != NULL);
+  CHECK(slave != NULL);
+  framework->removeTask(task->task_id());
+  slave->removeTask(task);
+  allocator->taskRemoved(task, reason);
+  delete task;
+}
+
+
+void Master::removeOffer(Offer* offer,
+                         OfferReturnReason reason,
+                         const vector<SlaveResources>& resourcesUnused)
+{
+  // Remove from slaves.
+  foreach (SlaveResources& r, offer->resources) {
+    CHECK(r.slave != NULL);
+    r.slave->resourcesOffered -= r.resources;
+    r.slave->offers.erase(offer);
+  }
+    
+  // Remove from framework
+  Framework *framework = lookupFramework(offer->frameworkId);
+  CHECK(framework != NULL);
+  framework->removeOffer(offer);
+
+  // Also send framework a rescind message unless the reason we are
+  // removing the offer is that the framework replied to it
+  if (reason != ORR_FRAMEWORK_REPLIED) {
+    RescindResourceOfferMessage message;
+    message.mutable_offer_id()->MergeFrom(offer->id);
+    send(framework->pid, message);
+  }
+  
+  // Tell the allocator about the unused resources.
+  allocator->offerReturned(offer, reason, resourcesUnused);
+  
+  // Delete it
+  offers.erase(offer->id);
+  delete offer;
+}
+
+
+Framework* Master::lookupFramework(const FrameworkID& frameworkId)
+{
+  if (frameworks.count(frameworkId) > 0) {
+    return frameworks[frameworkId];
+  } else {
+    return NULL;
+  }
+}
+
+
+Slave* Master::lookupSlave(const SlaveID& slaveId)
+{
+  if (slaves.count(slaveId) > 0) {
+    return slaves[slaveId];
+  } else {
+    return NULL;
+  }
+}
+
+
+Offer* Master::lookupOffer(const OfferID& offerId)
+{
+  if (offers.count(offerId) > 0) {
+    return offers[offerId];
+  } else {
+    return NULL;
+  }
+}
+
+
+// Create a new framework ID. We format the ID as MASTERID-FWID, where
+// MASTERID is the ID of the master (launch date plus fault tolerant ID)
+// and FWID is an increasing integer.
+FrameworkID Master::newFrameworkId()
+{
+  ostringstream oss;
+  oss << masterId << "-" << setw(4) << setfill('0') << nextFrameworkId++;
+  FrameworkID frameworkId;
+  frameworkId.set_value(oss.str());
+  return frameworkId;
+}
+
+
+OfferID Master::newOfferId()
+{
+  OfferID offerId;
+  offerId.set_value(masterId + "-" + lexical_cast<string>(nextOfferId++));
+  return offerId;
+}
+
+
+SlaveID Master::newSlaveId()
+{
+  SlaveID slaveId;
+  slaveId.set_value(masterId + "-" + lexical_cast<string>(nextSlaveId++));
+  return slaveId;
+}
+
+
 Promise<HttpResponse> Master::http_info_json(const HttpRequest& request)
 {
   LOG(INFO) << "HTTP request for '/master/info.json'";
@@ -1443,533 +1961,4 @@ Promise<HttpResponse> Master::http_vars(const HttpRequest& request)
   response.headers["Content-Length"] = lexical_cast<string>(out.str().size());
   response.body = out.str().data();
   return response;
-}
-
-
-OfferID Master::makeOffer(Framework* framework,
-                          const vector<SlaveResources>& resources)
-{
-  const OfferID& offerId = newOfferId();
-
-  Offer* offer = new Offer(offerId, framework->id, resources);
-
-  offers[offer->id] = offer;
-  framework->addOffer(offer);
-
-  // Update the resource information within each of the slave objects. Gross!
-  foreach (const SlaveResources& r, resources) {
-    r.slave->offers.insert(offer);
-    r.slave->resourcesOffered += r.resources;
-  }
-
-  LOG(INFO) << "Sending offer " << offer->id
-            << " to framework " << framework->id;
-
-  ResourceOfferMessage message;
-  message.mutable_offer_id()->MergeFrom(offerId);
-
-  foreach (const SlaveResources& r, resources) {
-    SlaveOffer* offer = message.add_offers();
-    offer->mutable_slave_id()->MergeFrom(r.slave->id);
-    offer->set_hostname(r.slave->info.hostname());
-    offer->mutable_resources()->MergeFrom(r.resources);
-
-    message.add_pids(r.slave->pid);
-  }
-
-  send(framework->pid, message);
-
-  return offerId;
-}
-
-
-// Process a resource offer reply (for a non-cancelled offer) by launching
-// the desired tasks (if the offer contains a valid set of tasks) and
-// reporting any unused resources to the allocator.
-void Master::processOfferReply(Offer* offer,
-                               const vector<TaskDescription>& tasks,
-                               const Params& params)
-{
-  LOG(INFO) << "Received reply for " << offer;
-
-  Framework* framework = lookupFramework(offer->frameworkId);
-  CHECK(framework != NULL);
-
-  // Count resources in the offer.
-  unordered_map<Slave*, Resources> resourcesOffered;
-  foreach (const SlaveResources& r, offer->resources) {
-    resourcesOffered[r.slave] = r.resources;
-  }
-
-  // Count used resources and check that its tasks are valid.
-  unordered_map<Slave*, Resources> resourcesUsed;
-  foreach (const TaskDescription& task, tasks) {
-    // Check whether the task is on a valid slave.
-    Slave* slave = lookupSlave(task.slave_id());
-    if (slave == NULL || resourcesOffered.count(slave) == 0) {
-      terminateFramework(framework, 0, "Invalid slave in offer reply");
-      return;
-    }
-
-    // Check whether or not the resources for the task are valid.
-    // TODO(benh): In the future maybe we can also augment the
-    // protobuf to deal with fragmentation purposes by providing some
-    // sort of minimum amount of resources required per task.
-
-    if (task.resources().size() == 0) {
-      terminateFramework(framework, 0, "Invalid resources for task");
-      return;
-    }
-
-    foreach (const Resource& resource, task.resources()) {
-      if (!Resources::isAllocatable(resource)) {
-        // TODO(benh): Also send back the invalid resources as a string?
-        terminateFramework(framework, 0, "Invalid resources for task");
-        return;
-      }
-    }
-
-    resourcesUsed[slave] += task.resources();
-  }
-
-  // Check that the total accepted on each slave isn't more than offered.
-  foreachpair (Slave* slave, const Resources& used, resourcesUsed) {
-    if (!(used <= resourcesOffered[slave])) {
-      terminateFramework(framework, 0, "Too many resources accepted");
-      return;
-    }
-  }
-
-  // Check that there are no duplicate task IDs.
-  unordered_set<TaskID> idsInResponse;
-  foreach (const TaskDescription& task, tasks) {
-    if (framework->tasks.count(task.task_id()) > 0 ||
-        idsInResponse.count(task.task_id()) > 0) {
-      terminateFramework(framework, 0, "Duplicate task ID: " +
-                         lexical_cast<string>(task.task_id()));
-      return;
-    }
-    idsInResponse.insert(task.task_id());
-  }
-
-  // Launch the tasks in the response.
-  foreach (const TaskDescription& task, tasks) {
-    launchTask(framework, task);
-  }
-
-  // Get out the timeout for left over resources (if exists), and use
-  // that to calculate the expiry timeout.
-  int timeout = DEFAULT_REFUSAL_TIMEOUT;
-
-  for (int i = 0; i < params.param_size(); i++) {
-    if (params.param(i).key() == "timeout") {
-      timeout = lexical_cast<int>(params.param(i).value());
-      break;
-    }
-  }
-
-  double expiry = (timeout == -1) ? 0 : elapsedTime() + timeout;  
-
-  // Now check for unused resources on slaves and add filters for them.
-  vector<SlaveResources> resourcesUnused;
-
-  foreachpair (Slave* slave, const Resources& offered, resourcesOffered) {
-    Resources used = resourcesUsed[slave];
-    Resources unused = offered - used;
-
-    CHECK(used == used.allocatable());
-
-    Resources allocatable = unused.allocatable();
-
-    if (allocatable.size() > 0) {
-      resourcesUnused.push_back(SlaveResources(slave, allocatable));
-    }
-
-    // Only add a filter on a slave if none of the resources are used.
-    if (timeout != 0 && used.size() == 0) {
-      LOG(INFO) << "Adding filter on " << slave << " to " << framework
-                << " for " << timeout << " seconds";
-      framework->slaveFilter[slave] = expiry;
-    }
-  }
-  
-  // Return the resources left to the allocator.
-  removeOffer(offer, ORR_FRAMEWORK_REPLIED, resourcesUnused);
-}
-
-
-void Master::launchTask(Framework* framework, const TaskDescription& task)
-{
-  // The invariant right now is that launchTask is called only for
-  // TaskDescriptions where the slave is still valid (see the code
-  // above in processOfferReply).
-  Slave* slave = lookupSlave(task.slave_id());
-  CHECK(slave != NULL);
-
-  // Determine the executor ID for this task.
-  const ExecutorID& executorId = task.has_executor()
-    ? task.executor().executor_id()
-    : framework->info.executor().executor_id();
-
-  Task* t = new Task();
-  t->mutable_framework_id()->MergeFrom(framework->id);
-  t->mutable_executor_id()->MergeFrom(executorId);
-  t->set_state(TASK_STARTING);
-  t->set_name(task.name());
-  t->mutable_task_id()->MergeFrom(task.task_id());
-  t->mutable_slave_id()->MergeFrom(task.slave_id());
-  t->mutable_resources()->MergeFrom(task.resources());
-
-  framework->addTask(t);
-  slave->addTask(t);
-
-  allocator->taskAdded(t);
-
-  LOG(INFO) << "Launching " << t << " on " << slave;
-
-  RunTaskMessage message;
-  message.mutable_framework()->MergeFrom(framework->info);
-  message.mutable_framework_id()->MergeFrom(framework->id);
-  message.set_pid(framework->pid);
-  message.mutable_task()->MergeFrom(task);
-  send(slave->pid, message);
-
-  statistics.launched_tasks++;
-}
-
-
-// Terminate a framework, sending it a particular error message
-// TODO: Make the error codes and messages programmer-friendly
-void Master::terminateFramework(Framework* framework,
-                                int32_t code,
-                                const string& error)
-{
-  LOG(INFO) << "Terminating " << framework << " due to error: " << error;
-
-  FrameworkErrorMessage message;
-  message.set_code(code);
-  message.set_message(error);
-  send(framework->pid, message);
-
-  removeFramework(framework);
-}
-
-
-// Remove a slot offer (because it was replied or we lost a framework or slave)
-void Master::removeOffer(Offer* offer,
-                         OfferReturnReason reason,
-                         const vector<SlaveResources>& resourcesUnused)
-{
-  // Remove from slaves.
-  foreach (SlaveResources& r, offer->resources) {
-    CHECK(r.slave != NULL);
-    r.slave->resourcesOffered -= r.resources;
-    r.slave->offers.erase(offer);
-  }
-    
-  // Remove from framework
-  Framework *framework = lookupFramework(offer->frameworkId);
-  CHECK(framework != NULL);
-  framework->removeOffer(offer);
-
-  // Also send framework a rescind message unless the reason we are
-  // removing the offer is that the framework replied to it
-  if (reason != ORR_FRAMEWORK_REPLIED) {
-    RescindResourceOfferMessage message;
-    message.mutable_offer_id()->MergeFrom(offer->id);
-    send(framework->pid, message);
-  }
-  
-  // Tell the allocator about the unused resources.
-  allocator->offerReturned(offer, reason, resourcesUnused);
-  
-  // Delete it
-  offers.erase(offer->id);
-  delete offer;
-}
-
-
-void Master::addFramework(Framework* framework)
-{
-  CHECK(frameworks.count(framework->id) == 0);
-
-  frameworks[framework->id] = framework;
-
-  link(framework->pid);
-
-  FrameworkRegisteredMessage message;
-  message.mutable_framework_id()->MergeFrom(framework->id);
-  send(framework->pid, message);
-
-  allocator->frameworkAdded(framework);
-}
-
-
-// Replace the scheduler for a framework with a new process ID, in the
-// event of a scheduler failover.
-void Master::failoverFramework(Framework* framework, const UPID& newPid)
-{
-  const UPID& oldPid = framework->pid;
-
-  // Remove the framework's slot offers (if they weren't removed before).
-  // TODO(benh): Consider just reoffering these to the new framework.
-  foreach (Offer* offer, utils::copy(framework->offers)) {
-    removeOffer(offer, ORR_FRAMEWORK_FAILOVER, offer->resources);
-  }
-
-  {
-    FrameworkErrorMessage message;
-    message.set_code(1);
-    message.set_message("Framework failover");
-    send(oldPid, message);
-  }
-
-  // TODO(benh): unlink(oldPid);
-
-  framework->pid = newPid;
-  link(newPid);
-
-  // Make sure we can get offers again.
-  framework->active = true;
-
-  framework->reregisteredTime = elapsedTime();
-
-  FrameworkRegisteredMessage message;
-  message.mutable_framework_id()->MergeFrom(framework->id);
-  send(newPid, message);
-}
-
-
-// Kill all of a framework's tasks, delete the framework object, and
-// reschedule slot offers for slots that were assigned to this framework
-void Master::removeFramework(Framework* framework)
-{ 
-  framework->active = false;
-  // TODO: Notify allocator that a framework removal is beginning?
-  
-  // Tell slaves to kill the framework
-  foreachvalue (Slave* slave, slaves) {
-    KillFrameworkMessage message;
-    message.mutable_framework_id()->MergeFrom(framework->id);
-    send(slave->pid, message);
-  }
-
-  // Remove pointers to the framework's tasks in slaves
-  foreachvalue (Task* task, utils::copy(framework->tasks)) {
-    Slave* slave = lookupSlave(task->slave_id());
-    CHECK(slave != NULL);
-    removeTask(task, TRR_FRAMEWORK_LOST);
-  }
-  
-  // Remove the framework's slot offers (if they weren't removed before).
-  foreach (Offer* offer, utils::copy(framework->offers)) {
-    removeOffer(offer, ORR_FRAMEWORK_LOST, offer->resources);
-  }
-
-  // TODO(benh): Similar code between removeFramework and
-  // failoverFramework needs to be shared!
-
-  // TODO(benh): unlink(framework->pid);
-
-  // Delete it.
-  frameworks.erase(framework->id);
-  allocator->frameworkRemoved(framework);
-  delete framework;
-}
-
-
-void Master::addSlave(Slave* slave, bool reregister)
-{
-  CHECK(slave != NULL);
-
-  slaves[slave->id] = slave;
-
-  link(slave->pid);
-
-  allocator->slaveAdded(slave);
-
-  if (!reregister) {
-    SlaveRegisteredMessage message;
-    message.mutable_slave_id()->MergeFrom(slave->id);
-    send(slave->pid, message);
-  } else {
-    SlaveReregisteredMessage message;
-    message.mutable_slave_id()->MergeFrom(slave->id);
-    send(slave->pid, message);
-  }
-
-  // TODO(benh):
-  //     // Ask the slaves manager to monitor this slave for us.
-  //     process::dispatch(slavesManager->self(), &SlavesManager::monitor,
-  //                       slave->pid, slave->info, slave->id);
-
-  // Set up an observer for the slave.
-  slave->observer = new SlaveObserver(slave->pid, slave->info,
-                                      slave->id, slavesManager->self());
-  process::spawn(slave->observer);
-}
-
-
-void Master::readdSlave(Slave* slave, const vector<Task>& tasks)
-{
-  CHECK(slave != NULL);
-
-  addSlave(slave, true);
-
-  for (int i = 0; i < tasks.size(); i++) {
-    Task* task = new Task(tasks[i]);
-
-    // Add the task to the slave.
-    slave->addTask(task);
-
-    // Try and add the task to the framework too, but since the
-    // framework might not yet be connected we won't be able to
-    // add them. However, when the framework connects later we
-    // will add them then. We also tell this slave the current
-    // framework pid for this task. Again, we do the same thing
-    // if a framework currently isn't registered.
-    Framework* framework = lookupFramework(task->framework_id());
-    if (framework != NULL) {
-      framework->addTask(task);
-      UpdateFrameworkMessage message;
-      message.mutable_framework_id()->MergeFrom(framework->id);
-      message.set_pid(framework->pid);
-      send(slave->pid, message);
-    } else {
-      // TODO(benh): We should really put a timeout on how long we
-      // keep tasks running on a slave that never have frameworks
-      // reregister and claim them.
-      LOG(WARNING) << "Possibly orphaned task " << task->task_id()
-                   << " of framework " << task->framework_id()
-                   << " running on slave " << slave->id;
-    }
-  }
-}
-
-
-// Lose all of a slave's tasks and delete the slave object
-void Master::removeSlave(Slave* slave)
-{ 
-  slave->active = false;
-
-  // TODO: Notify allocator that a slave removal is beginning?
-  
-  // Remove pointers to slave's tasks in frameworks, and send status updates
-  foreachvalue (Task* task, utils::copy(slave->tasks)) {
-    Framework* framework = lookupFramework(task->framework_id());
-    // A framework might not actually exist because the master failed
-    // over and the framework hasn't reconnected. This can be a tricky
-    // situation for frameworks that want to have high-availability,
-    // because if they eventually do connect they won't ever get a
-    // status update about this task.  Perhaps in the future what we
-    // want to do is create a local Framework object to represent that
-    // framework until it fails over. See the TODO above in
-    // Master::reregisterSlave.
-    if (framework != NULL) {
-      StatusUpdateMessage message;
-      StatusUpdate* update = message.mutable_update();
-      update->mutable_framework_id()->MergeFrom(task->framework_id());
-      update->mutable_executor_id()->MergeFrom(task->executor_id());
-      update->mutable_slave_id()->MergeFrom(task->slave_id());
-      TaskStatus* status = update->mutable_status();
-      status->mutable_task_id()->MergeFrom(task->task_id());
-      status->set_state(TASK_LOST);
-      update->set_timestamp(elapsedTime());
-      message.set_reliable(false);
-      send(framework->pid, message);
-    }
-    removeTask(task, TRR_SLAVE_LOST);
-  }
-
-  // Remove slot offers from the slave; this will also rescind them
-  foreach (Offer* offer, utils::copy(slave->offers)) {
-    // Only report resources on slaves other than this one to the allocator
-    vector<SlaveResources> otherSlaveResources;
-    foreach (const SlaveResources& r, offer->resources) {
-      if (r.slave != slave) {
-        otherSlaveResources.push_back(r);
-      }
-    }
-    removeOffer(offer, ORR_SLAVE_LOST, otherSlaveResources);
-  }
-  
-  // Remove slave from any filters
-  foreachvalue (Framework* framework, frameworks) {
-    framework->slaveFilter.erase(slave);
-  }
-  
-  // Send lost-slave message to all frameworks (this helps them re-run
-  // previously finished tasks whose output was on the lost slave)
-  foreachvalue (Framework* framework, frameworks) {
-    LostSlaveMessage message;
-    message.mutable_slave_id()->MergeFrom(slave->id);
-    send(framework->pid, message);
-  }
-
-  // TODO(benh):
-  //     // Tell the slaves manager to stop monitoring this slave for us.
-  //     process::dispatch(slavesManager->self(), &SlavesManager::forget,
-  //                       slave->pid, slave->info, slave->id);
-
-  // Kill the slave observer.
-  process::post(slave->observer->self(), process::TERMINATE);
-  process::wait(slave->observer->self());
-  delete slave->observer;
-
-  // TODO(benh): unlink(slave->pid);
-
-  // Delete it
-  slaves.erase(slave->id);
-  allocator->slaveRemoved(slave);
-  delete slave;
-}
-
-
-// Remove a slot offer (because it was replied or we lost a framework or slave)
-void Master::removeTask(Task* task, TaskRemovalReason reason)
-{
-  Framework* framework = lookupFramework(task->framework_id());
-  Slave* slave = lookupSlave(task->slave_id());
-  CHECK(framework != NULL);
-  CHECK(slave != NULL);
-  framework->removeTask(task->task_id());
-  slave->removeTask(task);
-  allocator->taskRemoved(task, reason);
-  delete task;
-}
-
-
-Allocator* Master::createAllocator()
-{
-  LOG(INFO) << "Creating \"" << allocatorType << "\" allocator";
-  return AllocatorFactory::instantiate(allocatorType, this);
-}
-
-
-// Create a new framework ID. We format the ID as MASTERID-FWID, where
-// MASTERID is the ID of the master (launch date plus fault tolerant ID)
-// and FWID is an increasing integer.
-FrameworkID Master::newFrameworkId()
-{
-  ostringstream oss;
-  oss << masterId << "-" << setw(4) << setfill('0') << nextFrameworkId++;
-  FrameworkID frameworkId;
-  frameworkId.set_value(oss.str());
-  return frameworkId;
-}
-
-
-OfferID Master::newOfferId()
-{
-  OfferID offerId;
-  offerId.set_value(masterId + "-" + lexical_cast<string>(nextOfferId++));
-  return offerId;
-}
-
-
-SlaveID Master::newSlaveId()
-{
-  SlaveID slaveId;
-  slaveId.set_value(masterId + "-" + lexical_cast<string>(nextSlaveId++));
-  return slaveId;
 }

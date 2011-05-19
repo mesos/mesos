@@ -95,15 +95,6 @@ public:
   static void registerOptions(Configurator* configurator);
 
   process::Promise<state::MasterState*> getState();
-  
-  OfferID makeOffer(Framework* framework,
-		    const std::vector<SlaveResources>& resources);
-
-  // Return connected frameworks that are not in the process of being removed
-  std::vector<Framework*> getActiveFrameworks();
-  
-  // Return connected slaves that are not in the process of being removed
-  std::vector<Slave*> getActiveSlaves();
 
   void newMasterDetected(const std::string& pid);
   void noMasterDetected();
@@ -148,44 +139,41 @@ public:
                                 double reregisteredTime);
   void exited();
 
-  Framework* lookupFramework(const FrameworkID& frameworkId);
-  Slave* lookupSlave(const SlaveID& slaveId);
-  Offer* lookupOffer(const OfferID& offerId);
+  // Return connected frameworks that are not in the process of being removed
+  std::vector<Framework*> getActiveFrameworks();
+  
+  // Return connected slaves that are not in the process of being removed
+  std::vector<Slave*> getActiveSlaves();
+
+  OfferID makeOffer(Framework* framework,
+		    const std::vector<SlaveResources>& resources);
   
 protected:
   virtual void operator () ();
   
   void initialize();
 
-  // Process a resource offer reply (for a non-cancelled offer) by launching
-  // the desired tasks (if the offer contains a valid set of tasks) and
-  // reporting any unused resources to the allocator
+  // Process a resource offer reply (for a non-cancelled offer) by
+  // launching the desired tasks (if the offer contains a valid set of
+  // tasks) and reporting any unused resources to the allocator
   void processOfferReply(Offer* offer,
                          const std::vector<TaskDescription>& tasks,
                          const Params& params);
 
-  // Launch a task described in a slot offer response
+  // Launch a task described in an offer response.
   void launchTask(Framework* framework, const TaskDescription& task);
   
+  void addFramework(Framework* framework);
+
+  // Replace the scheduler for a framework with a new process ID, in
+  // the event of a scheduler failover.
+  void failoverFramework(Framework* framework, const process::UPID& newPid);
+
   // Terminate a framework, sending it a particular error message
   // TODO: Make the error codes and messages programmer-friendly
   void terminateFramework(Framework* framework,
                           int32_t code,
                           const std::string& error);
-  
-  // Remove a slot offer (because it was replied to, or we want to rescind it,
-  // or we lost a framework or a slave)
-  void removeOffer(Offer* offer,
-                   OfferReturnReason reason,
-                   const std::vector<SlaveResources>& resourcesLeft);
-
-  void removeTask(Task* task, TaskRemovalReason reason);
-
-  void addFramework(Framework* framework);
-
-  // Replace the scheduler for a framework with a new process ID, in the
-  // event of a scheduler failover.
-  void failoverFramework(Framework* framework, const process::UPID& newPid);
 
   // Kill all of a framework's tasks, delete the framework object, and
   // reschedule slot offers for slots that were assigned to this framework
@@ -199,13 +187,26 @@ protected:
   // Lose all of a slave's tasks and delete the slave object
   void removeSlave(Slave* slave);
 
-  virtual Allocator* createAllocator();
+  void removeTask(Task* task, TaskRemovalReason reason);
+
+  // Remove a slot offer (because it was replied to, or we want to rescind it,
+  // or we lost a framework or a slave)
+  void removeOffer(Offer* offer,
+                   OfferReturnReason reason,
+                   const std::vector<SlaveResources>& resourcesLeft);
+
+  Framework* lookupFramework(const FrameworkID& frameworkId);
+  Slave* lookupSlave(const SlaveID& slaveId);
+  Offer* lookupOffer(const OfferID& offerId);
 
   FrameworkID newFrameworkId();
   OfferID newOfferId();
   SlaveID newSlaveId();
 
 private:
+  // TODO(benh): Remove this once the simple allocator gets updated.
+  friend class SimpleAllocator;
+
   // TODO(benh): Better naming and name scope for these http handlers.
   process::Promise<process::HttpResponse> http_info_json(const process::HttpRequest& request);
   process::Promise<process::HttpResponse> http_frameworks_json(const process::HttpRequest& request);
@@ -215,6 +216,8 @@ private:
   process::Promise<process::HttpResponse> http_vars(const process::HttpRequest& request);
 
   const Configuration conf;
+
+  bool active;
 
   SlavesManager* slavesManager;
 
@@ -228,10 +231,7 @@ private:
   int64_t nextOfferId;     // Used to give each slot offer a unique ID.
   int64_t nextSlaveId;     // Used to give each slave a unique ID.
 
-  std::string allocatorType;
   Allocator* allocator;
-
-  bool active;
 
   // Contains the date the master was launched and
   // some ephemeral token (e.g. returned from
