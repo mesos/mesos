@@ -52,7 +52,7 @@ const double SLAVE_PONG_TIMEOUT = 15.0;
 const int MAX_SLAVE_TIMEOUTS = 5;
 
 // Time to wait for a framework to failover (TODO(benh): Make configurable)).
-const time_t FRAMEWORK_FAILOVER_TIMEOUT = 60 * 60 * 24;
+const double FRAMEWORK_FAILOVER_TIMEOUT = 60 * 60 * 24;
 
 
 // Reasons why offers might be returned to the Allocator.
@@ -83,7 +83,7 @@ struct Framework;
 struct Slave;
 struct SlaveResources;
 class SlaveObserver;
-struct SlotOffer;
+struct Offer;
 
 
 class Master : public ProtobufProcess<Master>
@@ -146,12 +146,13 @@ public:
   void activatedSlaveHostnamePort(const std::string& hostname, uint16_t port);
   void deactivatedSlaveHostnamePort(const std::string& hostname, uint16_t port);
   void timerTick();
-  void frameworkExpired(const FrameworkID& frameworkId);
+  void frameworkFailoverTimeout(const FrameworkID& frameworkId,
+                                double reregisteredTime);
   void exited();
 
   Framework* lookupFramework(const FrameworkID& frameworkId);
   Slave* lookupSlave(const SlaveID& slaveId);
-  SlotOffer* lookupSlotOffer(const OfferID& offerId);
+  Offer* lookupOffer(const OfferID& offerId);
   
 protected:
   virtual void operator () ();
@@ -161,7 +162,7 @@ protected:
   // Process a resource offer reply (for a non-cancelled offer) by launching
   // the desired tasks (if the offer contains a valid set of tasks) and
   // reporting any unused resources to the allocator
-  void processOfferReply(SlotOffer* offer,
+  void processOfferReply(Offer* offer,
                          const std::vector<TaskDescription>& tasks,
                          const Params& params);
 
@@ -176,9 +177,9 @@ protected:
   
   // Remove a slot offer (because it was replied to, or we want to rescind it,
   // or we lost a framework or a slave)
-  void removeSlotOffer(SlotOffer* offer,
-                       OfferReturnReason reason,
-                       const std::vector<SlaveResources>& resourcesLeft);
+  void removeOffer(Offer* offer,
+                   OfferReturnReason reason,
+                   const std::vector<SlaveResources>& resourcesLeft);
 
   void removeTask(Task* task, TaskRemovalReason reason);
 
@@ -225,7 +226,7 @@ private:
 
   boost::unordered_map<FrameworkID, Framework*> frameworks;
   boost::unordered_map<SlaveID, Slave*> slaves;
-  boost::unordered_map<OfferID, SlotOffer*> slotOffers;
+  boost::unordered_map<OfferID, Offer*> offers;
 
   boost::unordered_map<process::UPID, FrameworkID> pidToFrameworkId;
   boost::unordered_map<process::UPID, SlaveID> pidToSlaveId;
@@ -264,15 +265,15 @@ private:
 
 
 // A resource offer.
-struct SlotOffer
+struct Offer
 {
   OfferID offerId;
   FrameworkID frameworkId;
   std::vector<SlaveResources> resources;
 
-  SlotOffer(const OfferID& _offerId,
-            const FrameworkID& _frameworkId,
-            const std::vector<SlaveResources>& _resources)
+  Offer(const OfferID& _offerId,
+        const FrameworkID& _frameworkId,
+        const std::vector<SlaveResources>& _resources)
     : offerId(_offerId), frameworkId(_frameworkId), resources(_resources) {}
 };
 
@@ -285,21 +286,21 @@ struct Slave
   process::UPID pid;
 
   bool active; // Turns false when slave is being removed
-  double connectTime;
+  double registeredTime;
   double lastHeartbeat;
   
   Resources resourcesOffered; // Resources currently in offers
   Resources resourcesInUse;   // Resources currently used by tasks
 
   boost::unordered_map<std::pair<FrameworkID, TaskID>, Task*> tasks;
-  boost::unordered_set<SlotOffer*> slotOffers; // Active offers on this slave.
+  boost::unordered_set<Offer*> offers; // Active offers on this slave.
 
   SlaveObserver* observer;
   
   Slave(const SlaveInfo& _info, const SlaveID& _slaveId,
         const process::UPID& _pid, double time)
     : info(_info), slaveId(_slaveId), pid(_pid), active(true),
-      connectTime(time), lastHeartbeat(time) {}
+      registeredTime(time), lastHeartbeat(time) {}
 
   ~Slave() {}
 
@@ -358,34 +359,6 @@ struct SlaveResources
 };
 
 
-class FrameworkFailoverTimer : public process::Process<FrameworkFailoverTimer>
-{
-public:
-  FrameworkFailoverTimer(const process::PID<Master>& _master,
-                         const FrameworkID& _frameworkId)
-    : master(_master), frameworkId(_frameworkId) {}
-
-protected:
-  virtual void operator () ()
-  {
-    link(master);
-    while (true) {
-      receive(FRAMEWORK_FAILOVER_TIMEOUT);
-      if (name() == process::TIMEOUT) {
-        process::dispatch(master, &Master::frameworkExpired, frameworkId);
-        return;
-      } else if (name() == process::EXITED || name() == process::TERMINATE) {
-        return;
-      }
-    }
-  }
-
-private:
-  const process::PID<Master> master;
-  const FrameworkID frameworkId;
-};
-
-
 // An connected framework.
 struct Framework
 {
@@ -394,10 +367,11 @@ struct Framework
   process::UPID pid;
 
   bool active; // Turns false when framework is being removed
-  double connectTime;
+  double registeredTime;
+  double reregisteredTime;
 
   boost::unordered_map<TaskID, Task*> tasks;
-  boost::unordered_set<SlotOffer*> slotOffers; // Active offers for framework.
+  boost::unordered_set<Offer*> offers; // Active offers for framework.
 
   Resources resources; // Total resources owned by framework (tasks + offers)
   
@@ -405,22 +379,12 @@ struct Framework
   // or 0 for slaves that we want to keep filtered forever
   boost::unordered_map<Slave*, double> slaveFilter;
 
-  // A failover timer if the connection to this framework is lost.
-  FrameworkFailoverTimer* failoverTimer;
-
   Framework(const FrameworkInfo& _info, const FrameworkID& _frameworkId,
             const process::UPID& _pid, double time)
     : info(_info), frameworkId(_frameworkId), pid(_pid), active(true),
-      connectTime(time), failoverTimer(NULL) {}
+      registeredTime(time), reregisteredTime(time) {}
 
-  ~Framework()
-  {
-    if (failoverTimer != NULL) {
-      process::post(failoverTimer->self(), process::TERMINATE);
-      process::wait(failoverTimer->self());
-      delete failoverTimer;
-    }
-  }
+  virtual ~Framework() {}
   
   Task* lookupTask(const TaskID& taskId)
   {
@@ -450,19 +414,19 @@ struct Framework
     tasks.erase(taskId);
   }
   
-  void addOffer(SlotOffer* offer)
+  void addOffer(Offer* offer)
   {
-    CHECK(slotOffers.count(offer) == 0);
-    slotOffers.insert(offer);
+    CHECK(offers.count(offer) == 0);
+    offers.insert(offer);
     foreach (const SlaveResources& sr, offer->resources) {
       resources += sr.resources;
     }
   }
 
-  void removeOffer(SlotOffer* offer)
+  void removeOffer(Offer* offer)
   {
-    CHECK(slotOffers.find(offer) != slotOffers.end());
-    slotOffers.erase(offer);
+    CHECK(offers.find(offer) != offers.end());
+    offers.erase(offer);
     foreach (const SlaveResources& sr, offer->resources) {
       resources -= sr.resources;
     }
@@ -485,9 +449,9 @@ struct Framework
 };
 
 
-// Pretty-printing of SlotOffers, Tasks, Frameworks, Slaves, etc.
+// Pretty-printing of Offers, Tasks, Frameworks, Slaves, etc.
 
-inline std::ostream& operator << (std::ostream& stream, const SlotOffer *o)
+inline std::ostream& operator << (std::ostream& stream, const Offer *o)
 {
   stream << "offer " << o->offerId;
   return stream;

@@ -5,6 +5,7 @@
 #include <glog/logging.h>
 
 #include <process/run.hpp>
+#include <process/timer.hpp>
 
 #include "config/config.hpp"
 
@@ -221,7 +222,7 @@ Master::~Master()
 
   delete allocator;
 
-  CHECK(slotOffers.size() == 0);
+  CHECK(offers.size() == 0);
 
   process::post(slavesManager->self(), process::TERMINATE);
   process::wait(slavesManager->self());
@@ -259,7 +260,7 @@ Promise<state::MasterState*> Master::getState()
     state::Slave* slave =
       new state::Slave(s->slaveId.value(), s->info.hostname(),
                        s->info.public_hostname(), cpus.value(),
-                       mem.value(), s->connectTime);
+                       mem.value(), s->registeredTime);
 
     state->slaves.push_back(slave);
   }
@@ -276,7 +277,7 @@ Promise<state::MasterState*> Master::getState()
     state::Framework* framework =
       new state::Framework(f->frameworkId.value(), f->info.user(),
                            f->info.name(), f->info.executor().uri(),
-                           cpus.value(), mem.value(), f->connectTime);
+                           cpus.value(), mem.value(), f->registeredTime);
 
     state->frameworks.push_back(framework);
 
@@ -298,9 +299,9 @@ Promise<state::MasterState*> Master::getState()
       framework->tasks.push_back(task);
     }
 
-    foreach (SlotOffer* o, f->slotOffers) {
-      state::SlotOffer* offer =
-        new state::SlotOffer(o->offerId.value(), o->frameworkId.value());
+    foreach (Offer* o, f->offers) {
+      state::Offer* offer =
+        new state::Offer(o->offerId.value(), o->frameworkId.value());
 
       foreach (const SlaveResources& r, o->resources) {
         Resources resources(r.resources);
@@ -372,10 +373,10 @@ Slave* Master::lookupSlave(const SlaveID& slaveId)
 }
 
 
-SlotOffer* Master::lookupSlotOffer(const OfferID& offerId)
+Offer* Master::lookupOffer(const OfferID& offerId)
 {
-  if (slotOffers.count(offerId) > 0) {
-    return slotOffers[offerId];
+  if (offers.count(offerId) > 0) {
+    return offers[offerId];
   } else {
     return NULL;
   }
@@ -630,10 +631,10 @@ void Master::reregisterFramework(const FrameworkID& frameworkId,
       // (if necessary) by the master and the master will always
       // know which scheduler is the correct one.
       if (generation == 0) {
-        LOG(INFO) << "Framework " << frameworkId << " failed over";
-        failoverFramework(frameworks[frameworkId], from());
         // TODO: Should we check whether the new scheduler has given
         // us a different framework name, user name or executor info?
+        LOG(INFO) << "Framework " << frameworkId << " failed over";
+        failoverFramework(frameworks[frameworkId], from());
       } else {
         LOG(INFO) << "Framework " << frameworkId
                   << " re-registering with an already used id "
@@ -704,7 +705,7 @@ void Master::resourceOfferReply(const FrameworkID& frameworkId,
 {
   Framework* framework = lookupFramework(frameworkId);
   if (framework != NULL) {
-    SlotOffer* offer = lookupSlotOffer(offerId);
+    Offer* offer = lookupOffer(offerId);
     if (offer != NULL) {
       processOfferReply(offer, tasks, params);
     } else {
@@ -1189,12 +1190,14 @@ void Master::timerTick()
 }
 
 
-void Master::frameworkExpired(const FrameworkID& frameworkId)
+void Master::frameworkFailoverTimeout(const FrameworkID& frameworkId,
+                                      double reregisteredTime)
 {
   Framework* framework = lookupFramework(frameworkId);
-  if (framework != NULL) {
-    LOG(INFO) << "Framework failover timer expired, removing "
-              << framework;
+  if (framework != NULL && !framework->active &&
+      framework->reregisteredTime == reregisteredTime) {
+    LOG(INFO) << "Framework failover timeout, removing framework "
+              << framework->frameworkId;
     removeFramework(framework);
   }
 }
@@ -1202,7 +1205,6 @@ void Master::frameworkExpired(const FrameworkID& frameworkId)
 
 void Master::exited()
 {
-  // TODO(benh): Could we get PROCESS_EXIT from a network partition?
   LOG(INFO) << "Process exited: " << from();
   if (pidToFrameworkId.count(from()) > 0) {
     const FrameworkID& frameworkId = pidToFrameworkId[from()];
@@ -1210,18 +1212,20 @@ void Master::exited()
     if (framework != NULL) {
       LOG(INFO) << "Framework " << frameworkId << " disconnected";
 
+//       removeFramework(framework);
+
       // Stop sending offers here for now.
       framework->active = false;
 
-      // Remove the framework's slot offers.
-      foreach (SlotOffer* offer, utils::copy(framework->slotOffers)) {
-        removeSlotOffer(offer, ORR_FRAMEWORK_FAILOVER, offer->resources);
-      }
+      // Delay dispatching a message to ourselves for the timeout.
+      process::delay(FRAMEWORK_FAILOVER_TIMEOUT,
+                     self(), &Master::frameworkFailoverTimeout,
+                     framework->frameworkId, framework->reregisteredTime);
 
-//       framework->failoverTimer =
-//         new FrameworkFailoverTimer(self(), frameworkId);
-//       link(spawn(framework->failoverTimer));
-      removeFramework(framework);
+      // Remove the framework's slot offers.
+      foreach (Offer* offer, utils::copy(framework->offers)) {
+        removeOffer(offer, ORR_FRAMEWORK_FAILOVER, offer->resources);
+      }
     }
   } else if (pidToSlaveId.count(from()) > 0) {
     const SlaveID& slaveId = pidToSlaveId[from()];
@@ -1229,16 +1233,6 @@ void Master::exited()
     if (slave != NULL) {
       LOG(INFO) << slave << " disconnected";
       removeSlave(slave);
-    }
-  } else {
-    foreachvalue (Framework* framework, frameworks) {
-      if (framework->failoverTimer != NULL &&
-          framework->failoverTimer->self() == from()) {
-        LOG(ERROR) << "Bad framework failover timer, removing "
-                   << framework;
-        removeFramework(framework);
-        break;
-      }
     }
   }
 }
@@ -1457,14 +1451,14 @@ OfferID Master::makeOffer(Framework* framework,
 {
   const OfferID& offerId = newOfferId();
 
-  SlotOffer* offer = new SlotOffer(offerId, framework->frameworkId, resources);
+  Offer* offer = new Offer(offerId, framework->frameworkId, resources);
 
-  slotOffers[offer->offerId] = offer;
+  offers[offer->offerId] = offer;
   framework->addOffer(offer);
 
   // Update the resource information within each of the slave objects. Gross!
   foreach (const SlaveResources& r, resources) {
-    r.slave->slotOffers.insert(offer);
+    r.slave->offers.insert(offer);
     r.slave->resourcesOffered += r.resources;
   }
 
@@ -1492,7 +1486,7 @@ OfferID Master::makeOffer(Framework* framework,
 // Process a resource offer reply (for a non-cancelled offer) by launching
 // the desired tasks (if the offer contains a valid set of tasks) and
 // reporting any unused resources to the allocator.
-void Master::processOfferReply(SlotOffer* offer,
+void Master::processOfferReply(Offer* offer,
                                const vector<TaskDescription>& tasks,
                                const Params& params)
 {
@@ -1600,7 +1594,7 @@ void Master::processOfferReply(SlotOffer* offer,
   }
   
   // Return the resources left to the allocator.
-  removeSlotOffer(offer, ORR_FRAMEWORK_REPLIED, resourcesUnused);
+  removeOffer(offer, ORR_FRAMEWORK_REPLIED, resourcesUnused);
 }
 
 
@@ -1662,15 +1656,15 @@ void Master::terminateFramework(Framework* framework,
 
 
 // Remove a slot offer (because it was replied or we lost a framework or slave)
-void Master::removeSlotOffer(SlotOffer* offer,
-                             OfferReturnReason reason,
-                             const vector<SlaveResources>& resourcesUnused)
+void Master::removeOffer(Offer* offer,
+                         OfferReturnReason reason,
+                         const vector<SlaveResources>& resourcesUnused)
 {
   // Remove from slaves.
   foreach (SlaveResources& r, offer->resources) {
     CHECK(r.slave != NULL);
     r.slave->resourcesOffered -= r.resources;
-    r.slave->slotOffers.erase(offer);
+    r.slave->offers.erase(offer);
   }
     
   // Remove from framework
@@ -1690,7 +1684,7 @@ void Master::removeSlotOffer(SlotOffer* offer,
   allocator->offerReturned(offer, reason, resourcesUnused);
   
   // Delete it
-  slotOffers.erase(offer->offerId);
+  offers.erase(offer->offerId);
   delete offer;
 }
 
@@ -1717,10 +1711,10 @@ void Master::failoverFramework(Framework* framework, const UPID& newPid)
 {
   const UPID& oldPid = framework->pid;
 
-  // Remove the framework's slot offers (if they weren't removed before)..
+  // Remove the framework's slot offers (if they weren't removed before).
   // TODO(benh): Consider just reoffering these to the new framework.
-  foreach (SlotOffer* offer, utils::copy(framework->slotOffers)) {
-    removeSlotOffer(offer, ORR_FRAMEWORK_FAILOVER, offer->resources);
+  foreach (Offer* offer, utils::copy(framework->offers)) {
+    removeOffer(offer, ORR_FRAMEWORK_FAILOVER, offer->resources);
   }
 
   {
@@ -1737,16 +1731,10 @@ void Master::failoverFramework(Framework* framework, const UPID& newPid)
   framework->pid = newPid;
   link(newPid);
 
-  // Kill the failover timer.
-  if (framework->failoverTimer != NULL) {
-    process::post(framework->failoverTimer->self(), process::TERMINATE);
-    process::wait(framework->failoverTimer->self());
-    delete framework->failoverTimer;
-    framework->failoverTimer = NULL;
-  }
-
   // Make sure we can get offers again.
   framework->active = true;
+
+  framework->reregisteredTime = elapsedTime();
 
   FrameworkRegisteredMessage message;
   message.mutable_framework_id()->MergeFrom(framework->frameworkId);
@@ -1776,8 +1764,8 @@ void Master::removeFramework(Framework* framework)
   }
   
   // Remove the framework's slot offers (if they weren't removed before).
-  foreach (SlotOffer* offer, utils::copy(framework->slotOffers)) {
-    removeSlotOffer(offer, ORR_FRAMEWORK_LOST, offer->resources);
+  foreach (Offer* offer, utils::copy(framework->offers)) {
+    removeOffer(offer, ORR_FRAMEWORK_LOST, offer->resources);
   }
 
   // TODO(benh): Similar code between removeFramework and
@@ -1897,7 +1885,7 @@ void Master::removeSlave(Slave* slave)
   }
 
   // Remove slot offers from the slave; this will also rescind them
-  foreach (SlotOffer* offer, utils::copy(slave->slotOffers)) {
+  foreach (Offer* offer, utils::copy(slave->offers)) {
     // Only report resources on slaves other than this one to the allocator
     vector<SlaveResources> otherSlaveResources;
     foreach (const SlaveResources& r, offer->resources) {
@@ -1905,7 +1893,7 @@ void Master::removeSlave(Slave* slave)
         otherSlaveResources.push_back(r);
       }
     }
-    removeSlotOffer(offer, ORR_SLAVE_LOST, otherSlaveResources);
+    removeOffer(offer, ORR_SLAVE_LOST, otherSlaveResources);
   }
   
   // Remove slave from any filters
