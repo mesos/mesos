@@ -141,7 +141,7 @@ private:
     uint64_t invalidStatusUpdates;
     uint64_t validFrameworkMessages;
     uint64_t invalidFrameworkMessages;
-  } statistics;
+  } stats;
 
   double startTime;
 
@@ -153,4 +153,4 @@ private:
 
 }}}
 
-#endif /* __SLAVE_HPP__ */
+#endif // __SLAVE_HPP__

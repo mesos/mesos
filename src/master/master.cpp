@@ -220,14 +220,14 @@ Master::~Master()
     removeSlave(slave);
   }
 
-  delete allocator;
-
   CHECK(offers.size() == 0);
 
   process::post(slavesManager->self(), process::TERMINATE);
   process::wait(slavesManager->self());
 
   delete slavesManager;
+
+  delete allocator;
 }
 
 
@@ -414,15 +414,18 @@ void Master::initialize()
   nextOfferId = 0;
 
   // Start all the statistics at 0.
-  statistics.launched_tasks = 0;
-  statistics.finished_tasks = 0;
-  statistics.killed_tasks = 0;
-  statistics.failed_tasks = 0;
-  statistics.lost_tasks = 0;
-  statistics.valid_status_updates = 0;
-  statistics.invalid_status_updates = 0;
-  statistics.valid_framework_messages = 0;
-  statistics.invalid_framework_messages = 0;
+  CHECK(TASK_STARTING == TaskState_MIN);
+  CHECK(TASK_LOST == TaskState_MAX);
+  stats.tasks[TASK_STARTING] = 0;
+  stats.tasks[TASK_RUNNING] = 0;
+  stats.tasks[TASK_FINISHED] = 0;
+  stats.tasks[TASK_FAILED] = 0;
+  stats.tasks[TASK_KILLED] = 0;
+  stats.tasks[TASK_LOST] = 0;
+  stats.validStatusUpdates = 0;
+  stats.invalidStatusUpdates = 0;
+  stats.validFrameworkMessages = 0;
+  stats.invalidFrameworkMessages = 0;
 
   startTime = elapsedTime();
 
@@ -769,21 +772,26 @@ void Master::schedulerMessage(const SlaveID& slaveId,
     if (slave != NULL) {
       LOG(INFO) << "Sending framework message for framework "
                 << frameworkId << " to slave " << slaveId;
+
       FrameworkToExecutorMessage message;
       message.mutable_slave_id()->MergeFrom(slaveId);
       message.mutable_framework_id()->MergeFrom(frameworkId);
       message.mutable_executor_id()->MergeFrom(executorId);
       message.set_data(data);
       send(slave->pid, message);
+
+      stats.validFrameworkMessages++;
     } else {
       LOG(WARNING) << "Cannot send framework message for framework "
                    << frameworkId << " to slave " << slaveId
                    << " because slave does not exist";
+      stats.invalidFrameworkMessages++;
     }
   } else {
     LOG(WARNING) << "Cannot send framework message for framework "
                  << frameworkId << " to slave " << slaveId
                  << " because framework does not exist";
+    stats.invalidFrameworkMessages++;
   }
 }
 
@@ -982,44 +990,34 @@ void Master::statusUpdate(const StatusUpdate& update, bool reliable)
       if (task != NULL) {
         task->set_state(status.state());
 
-        // Remove the task if necessary, and update statistics.
-	switch (status.state()) {
-	  case TASK_FINISHED:
-	    statistics.finished_tasks++;
-	    removeTask(task, TRR_TASK_ENDED);
-	    break;
-	  case TASK_FAILED:
-	    statistics.failed_tasks++;
-	    removeTask(task, TRR_TASK_ENDED);
-	    break;
-	  case TASK_KILLED:
-	    statistics.killed_tasks++;
-	    removeTask(task, TRR_TASK_ENDED);
-	    break;
-	  case TASK_LOST:
-	    statistics.lost_tasks++;
-	    removeTask(task, TRR_TASK_ENDED);
-	    break;
-	}
+        // Handle the task appropriately if it's terminated.
+        if (status.state() == TASK_FINISHED ||
+            status.state() == TASK_FAILED ||
+            status.state() == TASK_KILLED ||
+            status.state() == TASK_LOST) {
+          removeTask(task, TRR_TASK_ENDED);
+        }
 
-	statistics.valid_status_updates++;
+        stats.tasks[status.state()]++;
+
+        stats.validStatusUpdates++;
       } else {
         LOG(WARNING) << "Status update from " << from()
                      << ": error, couldn't lookup "
                      << "task " << status.task_id();
-	statistics.invalid_status_updates++;
+	stats.invalidStatusUpdates++;
       }
     } else {
       LOG(WARNING) << "Status update from " << from()
                    << ": error, couldn't lookup "
                    << "framework " << update.framework_id();
-      statistics.invalid_status_updates++;
+      stats.invalidStatusUpdates++;
     }
   } else {
     LOG(WARNING) << "Status update from " << from()
                  << ": error, couldn't lookup slave "
                  << update.slave_id();
-    statistics.invalid_status_updates++;
+    stats.invalidStatusUpdates++;
   }
 }
 
@@ -1042,18 +1040,18 @@ void Master::executorMessage(const SlaveID& slaveId,
       message.set_data(data);
       send(framework->pid, message);
 
-      statistics.valid_framework_messages++;
+      stats.validFrameworkMessages++;
     } else {
       LOG(WARNING) << "Cannot send framework message from slave "
                    << slaveId << " to framework " << frameworkId
                    << " because framework does not exist";
-      statistics.invalid_framework_messages++;
+      stats.invalidFrameworkMessages++;
     }
   } else {
     LOG(WARNING) << "Cannot send framework message from slave "
                  << slaveId << " to framework " << frameworkId
                  << " because slave does not exist";
-    statistics.invalid_framework_messages++;
+    stats.invalidFrameworkMessages++;
   }
 }
 
@@ -1397,7 +1395,7 @@ void Master::launchTask(Framework* framework, const TaskDescription& task)
   message.mutable_task()->MergeFrom(task);
   send(slave->pid, message);
 
-  statistics.launched_tasks++;
+  stats.tasks[TASK_STARTING]++;
 }
 
 
@@ -1905,15 +1903,15 @@ Promise<HttpResponse> Master::http_stats_json(const HttpRequest& request)
     "\"active_schedulers\":" << getActiveFrameworks().size() << "," <<
     "\"activated_slaves\":" << slaveHostnamePorts.size() << "," <<
     "\"connected_slaves\":" << slaves.size() << "," <<
-    "\"launched_tasks\":" << statistics.launched_tasks << "," <<
-    "\"finished_tasks\":" << statistics.finished_tasks << "," <<
-    "\"killed_tasks\":" << statistics.killed_tasks << "," <<
-    "\"failed_tasks\":" << statistics.failed_tasks << "," <<
-    "\"lost_tasks\":" << statistics.lost_tasks << "," <<
-    "\"valid_status_updates\":" << statistics.valid_status_updates << "," <<
-    "\"invalid_status_updates\":" << statistics.invalid_status_updates << "," <<
-    "\"valid_framework_messages\":" << statistics.valid_framework_messages << "," <<
-    "\"invalid_framework_messages\":" << statistics.invalid_framework_messages <<
+    "\"started_tasks\":" << stats.tasks[TASK_STARTING] << "," <<
+    "\"finished_tasks\":" << stats.tasks[TASK_FINISHED] << "," <<
+    "\"killed_tasks\":" << stats.tasks[TASK_KILLED] << "," <<
+    "\"failed_tasks\":" << stats.tasks[TASK_FAILED] << "," <<
+    "\"lost_tasks\":" << stats.tasks[TASK_LOST] << "," <<
+    "\"valid_status_updates\":" << stats.validStatusUpdates << "," <<
+    "\"invalid_status_updates\":" << stats.invalidStatusUpdates << "," <<
+    "\"valid_framework_messages\":" << stats.validFrameworkMessages << "," <<
+    "\"invalid_framework_messages\":" << stats.invalidFrameworkMessages <<
     "}";
 
   HttpOKResponse response;
@@ -1946,15 +1944,15 @@ Promise<HttpResponse> Master::http_vars(const HttpRequest& request)
     "active_schedulers " << getActiveFrameworks().size() << "\n" <<
     "activated_slaves " << slaveHostnamePorts.size() << "\n" <<
     "connected_slaves " << slaves.size() << "\n" <<
-    "launched_tasks " << statistics.launched_tasks << "\n" <<
-    "finished_tasks " << statistics.finished_tasks << "\n" <<
-    "killed_tasks " << statistics.killed_tasks << "\n" <<
-    "failed_tasks " << statistics.failed_tasks << "\n" <<
-    "lost_tasks " << statistics.lost_tasks << "\n" <<
-    "valid_status_updates " << statistics.valid_status_updates << "\n" <<
-    "invalid_status_updates " << statistics.invalid_status_updates << "\n" <<
-    "valid_framework_messages " << statistics.valid_framework_messages << "\n" <<
-    "invalid_framework_messages " << statistics.invalid_framework_messages << "\n";
+    "started_tasks " << stats.tasks[TASK_STARTING] << "\n" <<
+    "finished_tasks " << stats.tasks[TASK_FINISHED] << "\n" <<
+    "killed_tasks " << stats.tasks[TASK_KILLED] << "\n" <<
+    "failed_tasks " << stats.tasks[TASK_FAILED] << "\n" <<
+    "lost_tasks " << stats.tasks[TASK_LOST] << "\n" <<
+    "valid_status_updates " << stats.validStatusUpdates << "\n" <<
+    "invalid_status_updates " << stats.invalidStatusUpdates << "\n" <<
+    "valid_framework_messages " << stats.validFrameworkMessages << "\n" <<
+    "invalid_framework_messages " << stats.invalidFrameworkMessages << "\n";
 
   HttpOKResponse response;
   response.headers["Content-Type"] = "text/plain";
