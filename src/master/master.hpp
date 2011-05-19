@@ -187,7 +187,10 @@ protected:
   // Lose all of a slave's tasks and delete the slave object
   void removeSlave(Slave* slave);
 
-  void removeTask(Task* task, TaskRemovalReason reason);
+  void removeTask(Framework* framework,
+                  Slave* slave,
+                  Task* task,
+                  TaskRemovalReason reason);
 
   // Remove a slot offer (because it was replied to, or we want to rescind it,
   // or we lost a framework or a slave)
@@ -195,9 +198,9 @@ protected:
                    OfferReturnReason reason,
                    const std::vector<SlaveResources>& resourcesLeft);
 
-  Framework* lookupFramework(const FrameworkID& frameworkId);
-  Slave* lookupSlave(const SlaveID& slaveId);
-  Offer* lookupOffer(const OfferID& offerId);
+  Framework* getFramework(const FrameworkID& frameworkId);
+  Slave* getSlave(const SlaveID& slaveId);
+  Offer* getOffer(const OfferID& offerId);
 
   FrameworkID newFrameworkId();
   OfferID newOfferId();
@@ -206,7 +209,7 @@ protected:
 private:
   friend struct SlaveRegistrar;
   friend struct SlaveReregistrar;
-  // TODO(benh): Remove once SimpleAllocator doesn't use Master::lookup*.
+  // TODO(benh): Remove once SimpleAllocator doesn't use Master::get*.
   friend class SimpleAllocator; 
 
   // TODO(benh): Better naming and name scope for these http handlers.
@@ -279,7 +282,7 @@ struct Slave
 
   ~Slave() {}
 
-  Task* lookupTask(const FrameworkID& frameworkId, const TaskID& taskId)
+  Task* getTask(const FrameworkID& frameworkId, const TaskID& taskId)
   {
     foreachvalue (Task* task, tasks) {
       if (task->framework_id() == frameworkId && task->task_id() == taskId) {
@@ -361,7 +364,7 @@ struct Framework
 
   ~Framework() {}
   
-  Task* lookupTask(const TaskID& taskId)
+  Task* getTask(const TaskID& taskId)
   {
     if (tasks.count(taskId) > 0) {
       return tasks[taskId];

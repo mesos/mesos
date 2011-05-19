@@ -56,7 +56,7 @@ void SimpleAllocator::taskRemoved(Task* task, TaskRemovalReason reason)
 {
   LOG(INFO) << "Removed " << task;
   // Remove all refusers from this slave since it has more resources free
-  Slave* slave = master->lookupSlave(task->slave_id());
+  Slave* slave = master->getSlave(task->slave_id());
   CHECK(slave != 0);
   refusers[slave].clear();
   // Re-offer the resources, unless this task was removed due to a lost
@@ -74,7 +74,7 @@ void SimpleAllocator::offerReturned(Offer* offer,
 
   // If this offer returned due to the framework replying, add it to refusers.
   if (reason == ORR_FRAMEWORK_REPLIED) {
-    Framework* framework = master->lookupFramework(offer->frameworkId);
+    Framework* framework = master->getFramework(offer->frameworkId);
     CHECK(framework != 0);
     foreach (const SlaveResources& r, resLeft) {
       VLOG(1) << "Framework reply leaves " << r.resources.allocatable()
