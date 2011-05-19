@@ -226,9 +226,6 @@ private:
   boost::unordered_map<SlaveID, Slave*> slaves;
   boost::unordered_map<OfferID, Offer*> offers;
 
-  boost::unordered_map<process::UPID, FrameworkID> pidToFrameworkId;
-  boost::unordered_map<process::UPID, SlaveID> pidToSlaveId;
-
   int64_t nextFrameworkId; // Used to give each framework a unique ID.
   int64_t nextOfferId;     // Used to give each slot offer a unique ID.
   int64_t nextSlaveId;     // Used to give each slave a unique ID.

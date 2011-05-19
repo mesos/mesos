@@ -1156,7 +1156,8 @@ void Master::activatedSlaveHostnamePort(const string& hostname, uint16_t port)
 }
 
 
-void Master::deactivatedSlaveHostnamePort(const string& hostname, uint16_t port)
+void Master::deactivatedSlaveHostnamePort(const string& hostname,
+                                          uint16_t port)
 {
   if (slaveHostnamePorts.count(hostname, port) > 0) {
     // Look for a connected slave and remove it.
@@ -1207,7 +1208,7 @@ void Master::exited()
 {
   foreachvalue (Framework* framework, frameworks) {
     if (framework->pid == from()) {
-      LOG(INFO) << "Framework " << frameworkId << " disconnected";
+      LOG(INFO) << "Framework " << framework->id << " disconnected";
 
 //       removeFramework(framework);
 
@@ -1229,7 +1230,7 @@ void Master::exited()
 
   foreachvalue (Slave* slave, slaves) {
     if (slave->pid == from()) {
-      LOG(INFO) << slave << " disconnected";
+      LOG(INFO) << "Slave " << slave->id << " disconnected";
       removeSlave(slave);
       return;
     }
@@ -1693,7 +1694,7 @@ void Master::addFramework(Framework* framework)
   CHECK(frameworks.count(framework->id) == 0);
 
   frameworks[framework->id] = framework;
-  pidToFrameworkId[framework->pid] = framework->id;
+
   link(framework->pid);
 
   FrameworkRegisteredMessage message;
@@ -1724,8 +1725,6 @@ void Master::failoverFramework(Framework* framework, const UPID& newPid)
   }
 
   // TODO(benh): unlink(oldPid);
-  pidToFrameworkId.erase(oldPid);
-  pidToFrameworkId[newPid] = framework->id;
 
   framework->pid = newPid;
   link(newPid);
@@ -1771,7 +1770,6 @@ void Master::removeFramework(Framework* framework)
   // failoverFramework needs to be shared!
 
   // TODO(benh): unlink(framework->pid);
-  pidToFrameworkId.erase(framework->pid);
 
   // Delete it.
   frameworks.erase(framework->id);
@@ -1785,7 +1783,7 @@ void Master::addSlave(Slave* slave, bool reregister)
   CHECK(slave != NULL);
 
   slaves[slave->id] = slave;
-  pidToSlaveId[slave->pid] = slave->id;
+
   link(slave->pid);
 
   allocator->slaveAdded(slave);
@@ -1919,7 +1917,6 @@ void Master::removeSlave(Slave* slave)
   delete slave->observer;
 
   // TODO(benh): unlink(slave->pid);
-  pidToSlaveId.erase(slave->pid);
 
   // Delete it
   slaves.erase(slave->id);
