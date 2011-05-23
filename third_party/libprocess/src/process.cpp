@@ -39,6 +39,7 @@
 #include <stdexcept>
 #include <vector>
 
+#include <process/dispatch.hpp>
 #include <process/gc.hpp>
 #include <process/process.hpp>
 
@@ -1273,7 +1274,7 @@ HttpProxy::~HttpProxy()
 
 void HttpProxy::handle(const Future<HttpResponse>& future, bool persist)
 {
-  dispatch(waiter->self(), &HttpResponseWaiter::await, future, persist);
+  dispatch(waiter, &HttpResponseWaiter::await, future, persist);
 }
 
 
@@ -1736,17 +1737,17 @@ bool ProcessManager::deliver(int c, HttpRequest *request, ProcessBase *sender)
     // Get the HttpProxy pid for this socket.
     PID<HttpProxy> proxy = socket_manager->proxy(c);
     
-    // Create the future to associate with whatever gets returned.
-    Future<HttpResponse>* future = new Future<HttpResponse>();
+    // Create the promise to link with whatever gets returned.
+    Promise<HttpResponse>* promise = new Promise<HttpResponse>();
 
     // Let the HttpProxy know about this request.
-    dispatch(proxy, &HttpProxy::handle, *future, request->keepAlive);
+    dispatch(proxy, &HttpProxy::handle, promise->future(), request->keepAlive);
 
     VLOG(2) << "Delivering HTTP request for '" << request->path
             << "' to " << to;
 
-    // Enqueue request and future for receiver.
-    receiver->enqueue(new pair<HttpRequest*, Future<HttpResponse>*>(request, future));
+    // Enqueue request and promise for receiver.
+    receiver->enqueue(new pair<HttpRequest*, Promise<HttpResponse>*>(request, promise));
   } else {
     // This has no receiver, send error response.
     VLOG(1) << "Returning '404 Not Found' for HTTP request for '"
@@ -2374,7 +2375,7 @@ void ProcessManager::cleanup(ProcessBase *process)
 
       // Free any pending requests.
       while (!process->requests.empty()) {
-        pair<HttpRequest*, Future<HttpResponse>*>* request = process->requests.front();
+        pair<HttpRequest*, Promise<HttpResponse>*>* request = process->requests.front();
         process->requests.pop_front();
         delete request;
       }
@@ -2690,7 +2691,7 @@ void ProcessBase::enqueue(Message* message, bool inject)
 }
 
 
-void ProcessBase::enqueue(pair<HttpRequest*, Future<HttpResponse>*>* request)
+void ProcessBase::enqueue(pair<HttpRequest*, Promise<HttpResponse>*>* request)
 {
   CHECK(request != NULL);
 
@@ -2778,9 +2779,9 @@ Message * ProcessBase::dequeue()
 
 
 template <>
-pair<HttpRequest*, Future<HttpResponse>*>* ProcessBase::dequeue()
+pair<HttpRequest*, Promise<HttpResponse>*>* ProcessBase::dequeue()
 {
-  pair<HttpRequest*, Future<HttpResponse>*>* request = NULL;
+  pair<HttpRequest*, Promise<HttpResponse>*>* request = NULL;
 
   lock();
   {
@@ -2890,19 +2891,20 @@ string ProcessBase::serve(double secs, bool once)
 
     // Check if there is a message, an HTTP request, or a dispatch.
   check:
-    pair<HttpRequest*, Future<HttpResponse>*>* request =
-      dequeue<pair<HttpRequest*, Future<HttpResponse>*> >();
+    pair<HttpRequest*, Promise<HttpResponse>*>* request =
+      dequeue<pair<HttpRequest*, Promise<HttpResponse>*> >();
 
     if (request != NULL) {
       size_t index = request->first->path.find('/', 1);
       index = index != string::npos ? index + 1 : request->first->path.size();
       const string& name = request->first->path.substr(index);
       if (httpHandlers.count(name) > 0) {
-        httpHandlers[name](*request->first).associate(*request->second);
+        Promise<HttpResponse> promise = httpHandlers[name](*request->first);
+        internal::associate(promise, *request->second);
       } else {
         VLOG(1) << "Returning '404 Not Found' for HTTP request for '"
                 << request->first->path << "'";
-        Promise<HttpResponse>(HttpNotFoundResponse()).associate(*request->second);
+        request->second->set(HttpNotFoundResponse());
       }
       delete request->first;
       delete request->second;
@@ -2926,7 +2928,7 @@ string ProcessBase::serve(double secs, bool once)
     // single queue holding something like a boost var type that we
     // can switch on to determine how to handle the next message.
 
-//     struct Element
+//     struct Event
 //     {
 //       enum {
 //         HTTP,
