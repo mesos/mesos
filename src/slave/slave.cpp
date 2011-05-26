@@ -446,7 +446,8 @@ void Slave::operator () ()
 
   // Spawn and initialize the isolation module.
   spawn(isolationModule);
-  dispatch(isolationModule->self(), &IsolationModule::initialize,
+  dispatch(isolationModule,
+           &IsolationModule::initialize,
            conf, local, self());
 
   while (true) {
@@ -559,7 +560,8 @@ void Slave::runTask(const FrameworkInfo& frameworkInfo,
       send(executor->pid, message);
 
       // Now update the resources.
-      dispatch(isolationModule->self(), &IsolationModule::resourcesChanged,
+      dispatch(isolationModule,
+               &IsolationModule::resourcesChanged,
                framework->id, executor->id, executor->resources);
     }
   } else {
@@ -584,7 +586,8 @@ void Slave::runTask(const FrameworkInfo& frameworkInfo,
     // Tell the isolation module to launch the executor. (TODO(benh):
     // Make the isolation module a process so that it can block while
     // trying to launch the executor.)
-    dispatch(isolationModule->self(), &IsolationModule::launchExecutor,
+    dispatch(isolationModule,
+             &IsolationModule::launchExecutor,
              framework->id, framework->info, executor->info, directory);
 
   }
@@ -643,7 +646,8 @@ void Slave::killTask(const FrameworkID& frameworkId,
     executor->removeTask(taskId);
 
     // Tell the isolation module to update the resources.
-    dispatch(isolationModule->self(), &IsolationModule::resourcesChanged,
+    dispatch(isolationModule,
+             &IsolationModule::resourcesChanged,
              framework->id, executor->id, executor->resources);
 
     StatusUpdateMessage message;
@@ -853,7 +857,8 @@ void Slave::registerExecutor(const FrameworkID& frameworkId,
     executor->pid = from();
 
     // Now that the executor is up, set its resource limits.
-    dispatch(isolationModule->self(), &IsolationModule::resourcesChanged,
+    dispatch(isolationModule,
+             &IsolationModule::resourcesChanged,
              framework->id, executor->id, executor->resources);
 
     // Tell executor it's registered and give it any queued tasks.
@@ -1028,7 +1033,8 @@ void Slave::statusUpdate(const StatusUpdate& update)
           status.state() == TASK_LOST) {
         executor->removeTask(status.task_id());
 
-        dispatch(isolationModule->self(), &IsolationModule::resourcesChanged,
+        dispatch(isolationModule,
+                 &IsolationModule::resourcesChanged,
                  framework->id, executor->id, executor->resources);
       }
 
@@ -1570,7 +1576,7 @@ void Slave::removeExecutor(Framework* framework,
     LOG(INFO) << "Shutting down executor '" << executor->id
               << "' of framework " << framework->id;
 
-    send(from(), ShutdownMessage());
+    send(executor->pid, ShutdownMessage());
 
     // TODO(benh): There really isn't ANY time between when an
     // executor gets a shutdown message and the isolation module goes
@@ -1580,7 +1586,8 @@ void Slave::removeExecutor(Framework* framework,
     LOG(INFO) << "Killing executor '" << executor->id
               << "' of framework " << framework->id;
 
-    dispatch(isolationModule->self(), &IsolationModule::killExecutor,
+    dispatch(isolationModule,
+             &IsolationModule::killExecutor,
              framework->id, executor->id);
   }
 

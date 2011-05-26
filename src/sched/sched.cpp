@@ -17,15 +17,14 @@
 
 #include <mesos/scheduler.hpp>
 
-#include <boost/unordered_map.hpp>
-#include <boost/unordered_set.hpp>
-
+#include <process/dispatch.hpp>
 #include <process/process.hpp>
 #include <process/protobuf.hpp>
 
 #include "configurator/configuration.hpp"
 
 #include "common/fatal.hpp"
+#include "common/hashmap.hpp"
 #include "common/lock.hpp"
 #include "common/logging.hpp"
 #include "common/type_utils.hpp"
@@ -39,14 +38,9 @@
 using namespace mesos;
 using namespace mesos::internal;
 
+using namespace process;
+
 using boost::cref;
-using boost::unordered_map;
-using boost::unordered_set;
-
-using google::protobuf::RepeatedPtrField;
-
-using process::PID;
-using process::UPID;
 
 using std::map;
 using std::string;
@@ -66,44 +60,58 @@ namespace mesos { namespace internal {
 class SchedulerProcess : public ProtobufProcess<SchedulerProcess>
 {
 public:
-  SchedulerProcess(MesosSchedulerDriver* _driver, Scheduler* _sched,
+  SchedulerProcess(MesosSchedulerDriver* _driver,
+                   Scheduler* _sched,
 		   const FrameworkID& _frameworkId,
                    const FrameworkInfo& _framework)
-    : driver(_driver), sched(_sched), frameworkId(_frameworkId),
-      framework(_framework), generation(0), master(UPID())
+    : driver(_driver),
+      sched(_sched),
+      frameworkId(_frameworkId),
+      framework(_framework),
+      generation(0),
+      master(UPID())
   {
-    installProtobufHandler(&SchedulerProcess::newMasterDetected,
-                           &NewMasterDetectedMessage::pid);
+    installProtobufHandler<NewMasterDetectedMessage>(
+        &SchedulerProcess::newMasterDetected,
+        &NewMasterDetectedMessage::pid);
 
-    installProtobufHandler<NoMasterDetectedMessage>(&SchedulerProcess::noMasterDetected);
+    installProtobufHandler<NoMasterDetectedMessage>(
+        &SchedulerProcess::noMasterDetected);
 
-    installProtobufHandler(&SchedulerProcess::registered,
-                           &FrameworkRegisteredMessage::framework_id);
+    installProtobufHandler<FrameworkRegisteredMessage>(
+        &SchedulerProcess::registered,
+        &FrameworkRegisteredMessage::framework_id);
 
-    installProtobufHandler(&SchedulerProcess::resourceOffer,
-                           &ResourceOfferMessage::offer_id,
-                           &ResourceOfferMessage::offers,
-                           &ResourceOfferMessage::pids);
+    installProtobufHandler<ResourceOfferMessage>(
+        &SchedulerProcess::resourceOffer,
+        &ResourceOfferMessage::offer_id,
+        &ResourceOfferMessage::offers,
+        &ResourceOfferMessage::pids);
 
-    installProtobufHandler(&SchedulerProcess::rescindOffer,
-                           &RescindResourceOfferMessage::offer_id);
+    installProtobufHandler<RescindResourceOfferMessage>(
+        &SchedulerProcess::rescindOffer,
+        &RescindResourceOfferMessage::offer_id);
 
-    installProtobufHandler(&SchedulerProcess::statusUpdate,
-                           &StatusUpdateMessage::update,
-                           &StatusUpdateMessage::reliable);
+    installProtobufHandler<StatusUpdateMessage>(
+        &SchedulerProcess::statusUpdate,
+        &StatusUpdateMessage::update,
+        &StatusUpdateMessage::reliable);
 
-    installProtobufHandler(&SchedulerProcess::lostSlave,
-                           &LostSlaveMessage::slave_id);
+    installProtobufHandler<LostSlaveMessage>(
+        &SchedulerProcess::lostSlave,
+        &LostSlaveMessage::slave_id);
 
-    installProtobufHandler(&SchedulerProcess::frameworkMessage,
-                           &ExecutorToFrameworkMessage::slave_id,
-                           &ExecutorToFrameworkMessage::framework_id,
-                           &ExecutorToFrameworkMessage::executor_id,
-                           &ExecutorToFrameworkMessage::data);
+    installProtobufHandler<ExecutorToFrameworkMessage>(
+        &SchedulerProcess::frameworkMessage,
+        &ExecutorToFrameworkMessage::slave_id,
+        &ExecutorToFrameworkMessage::framework_id,
+        &ExecutorToFrameworkMessage::executor_id,
+        &ExecutorToFrameworkMessage::data);
 
-    installProtobufHandler(&SchedulerProcess::error,
-                           &FrameworkErrorMessage::code,
-                           &FrameworkErrorMessage::message);
+    installProtobufHandler<FrameworkErrorMessage>(
+        &SchedulerProcess::error,
+        &FrameworkErrorMessage::code,
+        &FrameworkErrorMessage::message);
 
     installMessageHandler(process::EXITED, &SchedulerProcess::exited);
   }
@@ -147,8 +155,7 @@ protected:
   {
     VLOG(1) << "Framework registered with " << frameworkId;
     this->frameworkId = frameworkId;
-    process::invoke(bind(&Scheduler::registered, sched, driver,
-                         cref(frameworkId)));
+    invoke(bind(&Scheduler::registered, sched, driver, cref(frameworkId)));
   }
 
   void resourceOffer(const OfferID& offerId,
@@ -172,16 +179,15 @@ protected:
       }
     }
 
-    process::invoke(bind(&Scheduler::resourceOffer, sched, driver,
-                         cref(offerId), cref(offers)));
+    invoke(bind(&Scheduler::resourceOffer, sched, driver, cref(offerId),
+                cref(offers)));
   }
 
   void rescindOffer(const OfferID& offerId)
   {
     VLOG(1) << "Rescinded offer " << offerId;
     savedOffers.erase(offerId);
-    process::invoke(bind(&Scheduler::offerRescinded, sched, driver, 
-                         cref(offerId)));
+    invoke(bind(&Scheduler::offerRescinded, sched, driver, cref(offerId)));
   }
 
   void statusUpdate(const StatusUpdate& update, bool reliable)
@@ -203,8 +209,7 @@ protected:
     // multiple times (of course, if a scheduler re-uses a TaskID,
     // that could be bad.
 
-    process::invoke(bind(&Scheduler::statusUpdate, sched, driver,
-                         cref(status)));
+    invoke(bind(&Scheduler::statusUpdate, sched, driver, cref(status)));
 
     if (reliable) {
       // Acknowledge the message (we do this last, after we
@@ -224,7 +229,7 @@ protected:
   {
     VLOG(1) << "Lost slave " << slaveId;
     savedSlavePids.erase(slaveId);
-    process::invoke(bind(&Scheduler::slaveLost, sched, driver, cref(slaveId)));
+    invoke(bind(&Scheduler::slaveLost, sched, driver, cref(slaveId)));
   }
 
   void frameworkMessage(const SlaveID& slaveId,
@@ -233,15 +238,14 @@ protected:
 			const string& data)
   {
     VLOG(1) << "Received framework message";
-    process::invoke(bind(&Scheduler::frameworkMessage, sched, driver,
-                         cref(slaveId), cref(executorId), cref(data)));
+    invoke(bind(&Scheduler::frameworkMessage, sched, driver, cref(slaveId),
+                cref(executorId), cref(data)));
   }
 
   void error(int32_t code, const string& message)
   {
     VLOG(1) << "Got error '" << message << "' (code: " << code << ")";
-    process::invoke(bind(&Scheduler::error, sched, driver, code,
-                         cref(message)));
+    invoke(bind(&Scheduler::error, sched, driver, code, cref(message)));
   }
 
   void exited()
@@ -256,7 +260,7 @@ protected:
   {
     // Whether or not we send an unregister message, we want to
     // terminate this process ...
-    process::terminate(self());
+    terminate(self());
 
     if (!active)
       return;
@@ -369,8 +373,8 @@ private:
 
   volatile bool active;
 
-  unordered_map<OfferID, unordered_map<SlaveID, UPID> > savedOffers;
-  unordered_map<SlaveID, UPID> savedSlavePids;
+  hashmap<OfferID, hashmap<SlaveID, UPID> > savedOffers;
+  hashmap<SlaveID, UPID> savedSlavePids;
 };
 
 }} // namespace mesos { namespace internal {
@@ -505,7 +509,7 @@ MesosSchedulerDriver::~MesosSchedulerDriver()
   // to the user somehow. Note that we will also wait forever if
   // MesosSchedulerDriver::stop was never called.
   if (process != NULL) {
-    process::wait(process->self());
+    wait(process);
     delete process;
   }
 
@@ -563,7 +567,7 @@ int MesosSchedulerDriver::start()
 
   process = new SchedulerProcess(this, sched, frameworkId, framework);
 
-  UPID pid = process::spawn(process);
+  UPID pid = spawn(process);
 
   // Check and see if we need to launch a local cluster.
   if (url == "local") {
@@ -595,7 +599,7 @@ int MesosSchedulerDriver::stop()
   // getExecutorInfo which threw exceptions, or explicitely called
   // stop. See above in start).
   if (process != NULL) {
-    process::dispatch(process->self(), &SchedulerProcess::stop);
+    dispatch(process, &SchedulerProcess::stop);
   }
 
   running = false;
@@ -638,8 +642,7 @@ int MesosSchedulerDriver::killTask(const TaskID& taskId)
     return -1;
   }
 
-  process::dispatch(process->self(), &SchedulerProcess::killTask,
-                    taskId);
+  dispatch(process, &SchedulerProcess::killTask, taskId);
 
   return 0;
 }
@@ -655,8 +658,7 @@ int MesosSchedulerDriver::replyToOffer(const OfferID& offerId,
     return -1;
   }
 
-  process::dispatch(process->self(), &SchedulerProcess::replyToOffer,
-                    offerId, tasks, params);
+  dispatch(process, &SchedulerProcess::replyToOffer, offerId, tasks, params);
 
   return 0;
 }
@@ -670,7 +672,7 @@ int MesosSchedulerDriver::reviveOffers()
     return -1;
   }
 
-  process::dispatch(process->self(), &SchedulerProcess::reviveOffers);
+  dispatch(process, &SchedulerProcess::reviveOffers);
 
   return 0;
 }
@@ -686,8 +688,8 @@ int MesosSchedulerDriver::sendFrameworkMessage(const SlaveID& slaveId,
     return -1;
   }
 
-  process::dispatch(process->self(), &SchedulerProcess::sendFrameworkMessage,
-                    slaveId, executorId, data);
+  dispatch(process, &SchedulerProcess::sendFrameworkMessage,
+           slaveId, executorId, data);
 
   return 0;
 }

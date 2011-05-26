@@ -4,15 +4,14 @@
 #include <string>
 #include <vector>
 
-#include <boost/unordered_map.hpp>
-#include <boost/unordered_set.hpp>
-
 #include <process/process.hpp>
 #include <process/protobuf.hpp>
 
 #include "state.hpp"
 
 #include "common/foreach.hpp"
+#include "common/hashmap.hpp"
+#include "common/hashset.hpp"
 #include "common/multimap.hpp"
 #include "common/resources.hpp"
 #include "common/type_utils.hpp"
@@ -24,6 +23,18 @@
 
 
 namespace mesos { namespace internal { namespace master {
+
+using namespace process;
+
+// Some forward declarations.
+class Allocator;
+class SlavesManager;
+struct Framework;
+struct Slave;
+struct SlaveResources;
+class SlaveObserver;
+struct Offer;
+
 
 // Maximum number of slot offers to have outstanding for each framework.
 const int MAX_OFFERS_PER_FRAMEWORK = 50;
@@ -74,16 +85,6 @@ enum TaskRemovalReason
 };
 
 
-// Some forward declarations.
-class Allocator;
-class SlavesManager;
-struct Framework;
-struct Slave;
-struct SlaveResources;
-class SlaveObserver;
-struct Offer;
-
-
 class Master : public ProtobufProcess<Master>
 {
 public:
@@ -94,7 +95,7 @@ public:
 
   static void registerOptions(Configurator* configurator);
 
-  process::Promise<state::MasterState*> getState();
+  Promise<state::MasterState*> getState();
 
   void newMasterDetected(const std::string& pid);
   void noMasterDetected();
@@ -167,7 +168,7 @@ protected:
 
   // Replace the scheduler for a framework with a new process ID, in
   // the event of a scheduler failover.
-  void failoverFramework(Framework* framework, const process::UPID& newPid);
+  void failoverFramework(Framework* framework, const UPID& newPid);
 
   // Terminate a framework, sending it a particular error message
   // TODO: Make the error codes and messages programmer-friendly
@@ -213,36 +214,35 @@ private:
   friend class SimpleAllocator; 
 
   // TODO(benh): Better naming and name scope for these http handlers.
-  process::Promise<process::HttpResponse> http_info_json(const process::HttpRequest& request);
-  process::Promise<process::HttpResponse> http_frameworks_json(const process::HttpRequest& request);
-  process::Promise<process::HttpResponse> http_slaves_json(const process::HttpRequest& request);
-  process::Promise<process::HttpResponse> http_tasks_json(const process::HttpRequest& request);
-  process::Promise<process::HttpResponse> http_stats_json(const process::HttpRequest& request);
-  process::Promise<process::HttpResponse> http_vars(const process::HttpRequest& request);
+  Promise<HttpResponse> http_info_json(const HttpRequest& request);
+  Promise<HttpResponse> http_frameworks_json(const HttpRequest& request);
+  Promise<HttpResponse> http_slaves_json(const HttpRequest& request);
+  Promise<HttpResponse> http_tasks_json(const HttpRequest& request);
+  Promise<HttpResponse> http_stats_json(const HttpRequest& request);
+  Promise<HttpResponse> http_vars(const HttpRequest& request);
 
   const Configuration conf;
 
   bool active;
 
-  SlavesManager* slavesManager;
-
-  multimap<std::string, uint16_t> slaveHostnamePorts;
-
-  boost::unordered_map<FrameworkID, Framework*> frameworks;
-  boost::unordered_map<SlaveID, Slave*> slaves;
-  boost::unordered_map<OfferID, Offer*> offers;
-
-  int64_t nextFrameworkId; // Used to give each framework a unique ID.
-  int64_t nextOfferId;     // Used to give each slot offer a unique ID.
-  int64_t nextSlaveId;     // Used to give each slave a unique ID.
-
   Allocator* allocator;
+  SlavesManager* slavesManager;
 
   // Contains the date the master was launched and
   // some ephemeral token (e.g. returned from
   // ZooKeeper). Used in framework and slave IDs
   // created by this master.
   std::string masterId;
+
+  multimap<std::string, uint16_t> slaveHostnamePorts;
+
+  hashmap<FrameworkID, Framework*> frameworks;
+  hashmap<SlaveID, Slave*> slaves;
+  hashmap<OfferID, Offer*> offers;
+
+  int64_t nextFrameworkId; // Used to give each framework a unique ID.
+  int64_t nextOfferId;     // Used to give each slot offer a unique ID.
+  int64_t nextSlaveId;     // Used to give each slave a unique ID.
 
   // Statistics (initialized in Master::initialize).
   struct {
@@ -275,17 +275,24 @@ struct Offer
 // A connected slave.
 struct Slave
 {
-  Slave(const SlaveInfo& _info, const SlaveID& _id,
-        const process::UPID& _pid, double time)
-    : info(_info), id(_id), pid(_pid), active(true),
-      registeredTime(time), lastHeartbeat(time) {}
+  Slave(const SlaveInfo& _info,
+        const SlaveID& _id,
+        const UPID& _pid,
+        double time)
+    : info(_info),
+      id(_id),
+      pid(_pid),
+      active(true),
+      registeredTime(time),
+      lastHeartbeat(time) {}
 
   ~Slave() {}
 
   Task* getTask(const FrameworkID& frameworkId, const TaskID& taskId)
   {
     foreachvalue (Task* task, tasks) {
-      if (task->framework_id() == frameworkId && task->task_id() == taskId) {
+      if (task->framework_id() == frameworkId &&
+          task->task_id() == taskId) {
         return task;
       }
     }
@@ -327,7 +334,7 @@ struct Slave
   const SlaveID id;
   const SlaveInfo info;
 
-  process::UPID pid;
+  UPID pid;
 
   bool active; // Turns false when slave is being removed
   double registeredTime;
@@ -336,8 +343,8 @@ struct Slave
   Resources resourcesOffered; // Resources currently in offers
   Resources resourcesInUse;   // Resources currently used by tasks
 
-  boost::unordered_map<std::pair<FrameworkID, TaskID>, Task*> tasks;
-  boost::unordered_set<Offer*> offers; // Active offers on this slave.
+  hashmap<std::pair<FrameworkID, TaskID>, Task*> tasks;
+  hashset<Offer*> offers; // Active offers on this slave.
 
   SlaveObserver* observer;
 };
@@ -358,7 +365,7 @@ struct SlaveResources
 struct Framework
 {
   Framework(const FrameworkInfo& _info, const FrameworkID& _id,
-            const process::UPID& _pid, double time)
+            const UPID& _pid, double time)
     : info(_info), id(_id), pid(_pid), active(true),
       registeredTime(time), reregisteredTime(time) {}
 
@@ -428,20 +435,20 @@ struct Framework
   const FrameworkID id;
   const FrameworkInfo info;
 
-  process::UPID pid;
+  UPID pid;
 
   bool active; // Turns false when framework is being removed
   double registeredTime;
   double reregisteredTime;
 
-  boost::unordered_map<TaskID, Task*> tasks;
-  boost::unordered_set<Offer*> offers; // Active offers for framework.
+  hashmap<TaskID, Task*> tasks;
+  hashset<Offer*> offers; // Active offers for framework.
 
   Resources resources; // Total resources owned by framework (tasks + offers)
 
   // Contains a time of unfiltering for each slave we've filtered,
   // or 0 for slaves that we want to keep filtered forever
-  boost::unordered_map<Slave*, double> slaveFilter;
+  hashmap<Slave*, double> slaveFilter;
 };
 
 

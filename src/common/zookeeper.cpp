@@ -5,6 +5,7 @@
 
 #include <boost/tuple/tuple.hpp>
 
+#include <process/dispatch.hpp>
 #include <process/process.hpp>
 
 #include "zookeeper.hpp"
@@ -530,7 +531,7 @@ int ZooKeeper::create(const string& path, const string& data,
                        cref(path), cref(data), cref(acl), flags, result);
 #else
   Promise<int> promise = impl->create(path, data, acl, flags, result);
-  return Future<int>(&promise).get();
+  return promise.future().get();
 #endif // USE_THREADED_ZOOKEEPER
 }
 
@@ -542,7 +543,7 @@ int ZooKeeper::remove(const string& path, int version)
                        cref(path), version);
 #else
   Promise<int> promise = impl->remove(path, version);
-  return Future<int>(&promise).get();
+  return promise.future().get();
 #endif // USE_THREADED_ZOOKEEPER
 }
 
@@ -554,7 +555,7 @@ int ZooKeeper::exists(const string& path, bool watch, Stat* stat)
                        cref(path), watch, stat);
 #else
   Promise<int> promise = impl->exists(path, watch, stat);
-  return Future<int>(&promise).get();
+  return promise.future().get();
 #endif // USE_THREADED_ZOOKEEPER
 }
 
@@ -566,7 +567,7 @@ int ZooKeeper::get(const string& path, bool watch, string* result, Stat* stat)
                        cref(path), watch, result, stat);
 #else
   Promise<int> promise = impl->get(path, watch, result, stat);
-  return Future<int>(&promise).get();
+  return promise.future().get();
 #endif // USE_THREADED_ZOOKEEPER
 }
 
@@ -579,7 +580,7 @@ int ZooKeeper::getChildren(const string& path, bool watch,
                        cref(path), watch, results);
 #else
   Promise<int> promise = impl->getChildren(path, watch, results);
-  return Future<int>(&promise).get();
+  return promise.future().get();
 #endif // USE_THREADED_ZOOKEEPER
 }
 
@@ -591,7 +592,7 @@ int ZooKeeper::set(const string& path, const string& data, int version)
                        cref(path), cref(data), version);
 #else
   Promise<int> promise = impl->set(path, data, version);
-  return Future<int>(&promise).get();
+  return promise.future().get();
 #endif // USE_THREADED_ZOOKEEPER
 }
 
