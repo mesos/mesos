@@ -935,7 +935,9 @@ void vdispatcher(ProcessBase* process,
                  std::tr1::function<void(T*)> thunk)
 {
   assert(process != NULL);
-  thunk(static_cast<T*>(process));
+  T* t = dynamic_cast<T*>(process);
+  assert(t != NULL);
+  thunk(t);
 }
 
 
@@ -945,7 +947,9 @@ void pdispatcher(ProcessBase* process,
                  Promise<R> promise)
 {
   assert(process != NULL);
-  associate(thunk(static_cast<T*>(process)), promise);
+  T* t = dynamic_cast<T*>(process);
+  assert(t != NULL);
+  associate(thunk(t), promise);
 }
 
 
@@ -955,7 +959,9 @@ void dispatcher(ProcessBase* process,
                 Promise<R> promise)
 {
   assert(process != NULL);
-  promise.set(thunk(static_cast<T*>(process)));
+  T* t = dynamic_cast<T*>(process);
+  assert(t != NULL);
+  promise.set(thunk(t));
 }
 
 
