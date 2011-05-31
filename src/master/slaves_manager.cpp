@@ -1,9 +1,11 @@
+#include <glog/logging.h>
+
 #include <map>
 #include <sstream>
 
 #include <boost/lexical_cast.hpp>
 
-#include <glog/logging.h>
+#include <process/dispatch.hpp>
 
 #include "config/config.hpp"
 

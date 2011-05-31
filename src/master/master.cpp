@@ -19,17 +19,6 @@
 #include "slaves_manager.hpp"
 #include "webui.hpp"
 
-using boost::unordered_map;
-using boost::unordered_set;
-
-using process::HttpOKResponse;
-using process::HttpResponse;
-using process::HttpRequest;
-using process::PID;
-using process::Process;
-using process::Promise;
-using process::UPID;
-
 using std::string;
 using std::vector;
 
@@ -43,8 +32,12 @@ public:
                 const SlaveInfo& _slaveInfo,
                 const SlaveID& _slaveId,
                 const PID<SlavesManager>& _slavesManager)
-    : slave(_slave), slaveInfo(_slaveInfo), slaveId(_slaveId),
-      slavesManager(_slavesManager), timeouts(0), pinged(false) {}
+    : slave(_slave),
+      slaveInfo(_slaveInfo),
+      slaveId(_slaveId),
+      slavesManager(_slavesManager),
+      timeouts(0),
+      pinged(false) {}
 
   virtual ~SlaveObserver() {}
 
@@ -63,7 +56,7 @@ protected:
       if (name() == "PONG") {
         timeouts = 0;
         pinged = false;
-      } else if (name() == process::TIMEOUT) {
+      } else if (name() == TIMEOUT) {
         if (pinged) {
           timeouts++;
           pinged = false;
@@ -71,15 +64,15 @@ protected:
 
         send(slave, "PING");
         pinged = true;
-      } else if (name() == process::TERMINATE) {
+      } else if (name() == TERMINATE) {
         return;
       } 
     } while (timeouts < MAX_SLAVE_TIMEOUTS);
 
     // Tell the slave manager to deactivate the slave, this will take
     // care of updating the master too.
-    while (!process::call(slavesManager, &SlavesManager::deactivate,
-                          slaveInfo.hostname(), slave.port)) {
+    while (!call(slavesManager, &SlavesManager::deactivate,
+                 slaveInfo.hostname(), slave.port)) {
       LOG(WARNING) << "Slave \"failed\" but can't be deactivated, retrying";
       pause(5);
     }
@@ -105,15 +98,15 @@ struct SlaveRegistrar
   {
     // TODO(benh): Do a reverse lookup to ensure IP maps to
     // hostname, or check credentials of this slave.
-    process::dispatch(master, &Master::addSlave, slave, false);
+    dispatch(master, &Master::addSlave, slave, false);
   }
 
   static bool run(Slave* slave,
                   const PID<Master>& master,
                   const PID<SlavesManager>& slavesManager)
   {
-    if (!process::call(slavesManager, &SlavesManager::add,
-                       slave->info.hostname(), slave->pid.port)) {
+    if (!call(slavesManager, &SlavesManager::add,
+              slave->info.hostname(), slave->pid.port)) {
       LOG(WARNING) << "Could not register slave because failed"
                    << " to add it to the slaves maanger";
       delete slave;
@@ -134,7 +127,7 @@ struct SlaveReregistrar
   {
     // TODO(benh): Do a reverse lookup to ensure IP maps to
     // hostname, or check credentials of this slave.
-    process::dispatch(master, &Master::readdSlave, slave, tasks);
+    dispatch(master, &Master::readdSlave, slave, tasks);
   }
 
   static bool run(Slave* slave,
@@ -142,8 +135,8 @@ struct SlaveReregistrar
                   const PID<Master>& master,
                   const PID<SlavesManager>& slavesManager)
   {
-    if (!process::call(slavesManager, &SlavesManager::add,
-                       slave->info.hostname(), slave->pid.port)) {
+    if (!call(slavesManager, &SlavesManager::add,
+              slave->info.hostname(), slave->pid.port)) {
       LOG(WARNING) << "Could not register slave because failed"
                    << " to add it to the slaves maanger";
       delete slave;
@@ -184,8 +177,8 @@ Master::~Master()
 
   CHECK(offers.size() == 0);
 
-  process::post(slavesManager->self(), process::TERMINATE);
-  process::wait(slavesManager->self());
+  terminate(slavesManager);
+  wait(slavesManager);
 
   delete slavesManager;
 
@@ -341,7 +334,7 @@ void Master::operator () ()
 
   // Setup slave manager.
   slavesManager = new SlavesManager(conf, self());
-  process::spawn(slavesManager);
+  spawn(slavesManager);
 
   // Create the allocator (we do this after the constructor because it
   // leaks 'this').
@@ -354,14 +347,14 @@ void Master::operator () ()
   }
 
   // Start our timer ticks.
-  process::delay(1.0, self(), &Master::timerTick);
+  delay(1.0, self(), &Master::timerTick);
 
   while (true) {
     serve();
-    if (name() == process::TERMINATE) {
+    if (name() == TERMINATE) {
       LOG(INFO) << "Asked to terminate by " << from();
       foreachvalue (Slave* slave, slaves) {
-        send(slave->pid, process::TERMINATE);
+        send(slave->pid, TERMINATE);
       }
       break;
     } else {
@@ -482,7 +475,7 @@ void Master::initialize()
       &ExitedExecutorMessage::status);
 
   // Install some message handlers.
-  installMessageHandler(process::EXITED, &Master::exited);
+  installMessageHandler(EXITED, &Master::exited);
 
   // Install HTTP request handlers.
   installHttpHandler("info.json", &Master::http_info_json);
@@ -821,14 +814,14 @@ void Master::registerSlave(const SlaveInfo& slaveInfo)
 
   // Checks if this slave, or if all slaves, can be accepted.
   if (slaveHostnamePorts.count(slaveInfo.hostname(), from().port) > 0) {
-    process::run(&SlaveRegistrar::run, slave, self());
+    run(&SlaveRegistrar::run, slave, self());
   } else if (conf.get<string>("slaves", "*") == "*") {
-    process::run(&SlaveRegistrar::run, slave, self(), slavesManager->self());
+    run(&SlaveRegistrar::run, slave, self(), slavesManager->self());
   } else {
     LOG(WARNING) << "Cannot register slave at "
                  << slaveInfo.hostname() << ":" << from().port
                  << " because not in allocated set of slaves!";
-    send(from(), process::TERMINATE);
+    send(from(), TERMINATE);
   }
 }
 
@@ -839,7 +832,7 @@ void Master::reregisterSlave(const SlaveID& slaveId,
 {
   if (slaveId == "") {
     LOG(ERROR) << "Slave re-registered without an id!";
-    send(from(), process::TERMINATE);
+    send(from(), TERMINATE);
   } else {
     Slave* slave = getSlave(slaveId);
     if (slave != NULL) {
@@ -859,7 +852,7 @@ void Master::reregisterSlave(const SlaveID& slaveId,
       LOG(ERROR) << "Slave at " << from()
 		 << " attempted to re-register with an already in use id ("
 		 << slaveId << ")";
-      send(from(), process::TERMINATE);
+      send(from(), TERMINATE);
     } else {
       Slave* slave = new Slave(slaveInfo, slaveId, from(), elapsedTime());
 
@@ -868,15 +861,15 @@ void Master::reregisterSlave(const SlaveID& slaveId,
 
       // Checks if this slave, or if all slaves, can be accepted.
       if (slaveHostnamePorts.count(slaveInfo.hostname(), from().port) > 0) {
-        process::run(&SlaveReregistrar::run, slave, tasks, self());
+        run(&SlaveReregistrar::run, slave, tasks, self());
       } else if (conf.get<string>("slaves", "*") == "*") {
-        process::run(&SlaveReregistrar::run,
-                     slave, tasks, self(), slavesManager->self());
+        run(&SlaveReregistrar::run,
+            slave, tasks, self(), slavesManager->self());
       } else {
         LOG(WARNING) << "Cannot re-register slave at "
                      << slaveInfo.hostname() << ":" << from().port
                      << " because not in allocated set of slaves!";
-        send(from(), process::TERMINATE);
+        send(from(), TERMINATE);
       }
     }
   }
@@ -1065,7 +1058,7 @@ void Master::deactivatedSlaveHostnamePort(const string& hostname,
         LOG(WARNING) << "Removing slave " << slave->id << " at "
 		     << hostname << ":" << port
                      << " because it has been deactivated";
-	send(slave->pid, process::TERMINATE);
+	send(slave->pid, TERMINATE);
         removeSlave(slave);
         break;
       }
@@ -1089,7 +1082,7 @@ void Master::timerTick()
   allocator->timerTick();
 
   // Scheduler another timer tick!
-  process::delay(1.0, self(), &Master::timerTick);
+  delay(1.0, self(), &Master::timerTick);
 }
 
 
@@ -1118,9 +1111,9 @@ void Master::exited()
       framework->active = false;
 
       // Delay dispatching a message to ourselves for the timeout.
-      process::delay(FRAMEWORK_FAILOVER_TIMEOUT,
-                     self(), &Master::frameworkFailoverTimeout,
-                     framework->id, framework->reregisteredTime);
+      delay(FRAMEWORK_FAILOVER_TIMEOUT, self(),
+            &Master::frameworkFailoverTimeout,
+            framework->id, framework->reregisteredTime);
 
       // Remove the framework's slot offers.
       foreach (Offer* offer, utils::copy(framework->offers)) {
@@ -1190,13 +1183,13 @@ void Master::processOfferReply(Offer* offer,
   CHECK(framework != NULL);
 
   // Count resources in the offer.
-  unordered_map<Slave*, Resources> resourcesOffered;
+  hashmap<Slave*, Resources> resourcesOffered;
   foreach (const SlaveResources& r, offer->resources) {
     resourcesOffered[r.slave] = r.resources;
   }
 
   // Count used resources and check that its tasks are valid.
-  unordered_map<Slave*, Resources> resourcesUsed;
+  hashmap<Slave*, Resources> resourcesUsed;
   foreach (const TaskDescription& task, tasks) {
     // Check whether the task is on a valid slave.
     Slave* slave = getSlave(task.slave_id());
@@ -1235,7 +1228,7 @@ void Master::processOfferReply(Offer* offer,
   }
 
   // Check that there are no duplicate task IDs.
-  unordered_set<TaskID> idsInResponse;
+  hashset<TaskID> idsInResponse;
   foreach (const TaskDescription& task, tasks) {
     if (framework->tasks.count(task.task_id()) > 0 ||
         idsInResponse.count(task.task_id()) > 0) {
@@ -1463,13 +1456,13 @@ void Master::addSlave(Slave* slave, bool reregister)
 
   // TODO(benh):
   //     // Ask the slaves manager to monitor this slave for us.
-  //     process::dispatch(slavesManager->self(), &SlavesManager::monitor,
-  //                       slave->pid, slave->info, slave->id);
+  //     dispatch(slavesManager->self(), &SlavesManager::monitor,
+  //              slave->pid, slave->info, slave->id);
 
   // Set up an observer for the slave.
   slave->observer = new SlaveObserver(slave->pid, slave->info,
                                       slave->id, slavesManager->self());
-  process::spawn(slave->observer);
+  spawn(slave->observer);
 }
 
 
@@ -1571,12 +1564,13 @@ void Master::removeSlave(Slave* slave)
 
   // TODO(benh):
   //     // Tell the slaves manager to stop monitoring this slave for us.
-  //     process::dispatch(slavesManager->self(), &SlavesManager::forget,
-  //                       slave->pid, slave->info, slave->id);
+  //     dispatch(slavesManager->self(), &SlavesManager::forget,
+  //              slave->pid, slave->info, slave->id);
 
   // Kill the slave observer.
-  process::post(slave->observer->self(), process::TERMINATE);
-  process::wait(slave->observer->self());
+  terminate(slave->observer);
+  wait(slave->observer);
+
   delete slave->observer;
 
   // TODO(benh): unlink(slave->pid);

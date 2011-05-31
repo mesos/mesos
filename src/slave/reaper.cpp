@@ -1,3 +1,5 @@
+#include <process/dispatch.hpp>
+
 #include "reaper.hpp"
 
 #include "common/foreach.hpp"
@@ -8,6 +10,8 @@ using namespace process;
 namespace mesos { namespace internal { namespace slave {
 
 Reaper::Reaper() {}
+
+
 Reaper::~Reaper() {}
 
 
@@ -22,7 +26,7 @@ void Reaper::operator () ()
 {
   while (true) {
     serve(1);
-    if (name() == process::TIMEOUT) {
+    if (name() == TIMEOUT) {
       // Check whether any child process has exited.
       pid_t pid;
       int status;
@@ -32,7 +36,7 @@ void Reaper::operator () ()
                    pid, status);
         }
       }
-    } else if (name() == process::TERMINATE) {
+    } else if (name() == TERMINATE) {
       return;
     }
   }

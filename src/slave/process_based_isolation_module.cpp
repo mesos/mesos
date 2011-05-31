@@ -2,6 +2,8 @@
 
 #include <map>
 
+#include <process/dispatch.hpp>
+
 #include "process_based_isolation_module.hpp"
 
 #include "common/type_utils.hpp"
@@ -22,15 +24,15 @@ ProcessBasedIsolationModule::ProcessBasedIsolationModule()
 {
   reaper = new Reaper();
   spawn(reaper);
-  dispatch(reaper->self(), &Reaper::addProcessExitedListener, this);
+  dispatch(reaper, &Reaper::addProcessExitedListener, this);
 }
 
 
 ProcessBasedIsolationModule::~ProcessBasedIsolationModule()
 {
   CHECK(reaper != NULL);
-  terminate(reaper->self());
-  wait(reaper->self());
+  terminate(reaper);
+  wait(reaper);
   delete reaper;
 }
 
