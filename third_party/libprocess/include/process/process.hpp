@@ -65,7 +65,11 @@ public:
 
 protected:
   // Function run when process spawned.
-  virtual void operator () () = 0;
+//   virtual void operator () () = 0;
+  virtual void operator () ()
+  {
+    do { if (serve() == TERMINATE) break; } while (true);
+  }
 
   // Returns the sender's PID of the last dequeued (current) message.
   UPID from() const;
@@ -134,7 +138,7 @@ protected:
       const std::string& name,
       void (T::*method)())
   {
-    MessageHandler handler = std::tr1::bind(method, static_cast<T*>(this));
+    MessageHandler handler = std::tr1::bind(method, dynamic_cast<T*>(this));
     installMessageHandler(name, handler);
   }
 
@@ -155,7 +159,7 @@ protected:
       Promise<HttpResponse> (T::*method)(const HttpRequest&))
   {
     HttpRequestHandler handler =
-      std::tr1::bind(method, static_cast<T*>(this),
+      std::tr1::bind(method, dynamic_cast<T*>(this),
                      std::tr1::placeholders::_1);
     installHttpHandler(name, handler);
   }
@@ -229,18 +233,12 @@ private:
 
 
 template <typename T>
-class Process : public ProcessBase {
+class Process : public virtual ProcessBase {
 public:
   Process(const std::string& id = "") : ProcessBase(id) {}
 
   // Returns pid of process; valid even before calling spawn.
-  PID<T> self() const { return PID<T>(static_cast<const T&>(*this)); }
-
-protected:
-  virtual void operator () ()
-  {
-    do { if (serve() == TERMINATE) break; } while (true);
-  }
+  PID<T> self() const { return PID<T>(dynamic_cast<const T*>(this)); }
 };
 
 
@@ -268,6 +266,12 @@ PID<T> spawn(T* t, bool manage = false)
   }
 
   return PID<T>(t);
+}
+
+template <typename T>
+PID<T> spawn(T& t, bool manage = false)
+{
+  return spawn(&t, manage);
 }
 
 

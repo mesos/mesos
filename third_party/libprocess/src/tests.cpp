@@ -406,6 +406,53 @@ TEST(libprocess, pid)
 }
 
 
+class Listener1 : public Process<Listener1>
+{
+public:
+  virtual void event1() = 0;
+};
+
+
+class Listener2 : public Process<Listener2>
+{
+public:
+  virtual void event2() = 0;
+};
+
+
+class MultipleListenerProcess
+  : public Process<MultipleListenerProcess>,
+    public Listener1,
+    public Listener2
+{
+public:
+  MOCK_METHOD0(event1, void());
+  MOCK_METHOD0(event2, void());
+};
+
+
+TEST(libprocess, listener)
+{
+  ASSERT_TRUE(GTEST_IS_THREADSAFE);
+
+  MultipleListenerProcess process;
+
+  EXPECT_CALL(process, event1())
+    .Times(1);
+
+  EXPECT_CALL(process, event2())
+    .Times(1);
+
+  spawn(process);
+
+  dispatch(PID<Listener1>(process), &Listener1::event1);
+  dispatch(PID<Listener2>(process), &Listener2::event2);
+  
+  terminate(process, false);
+  wait(process);
+}
+
+
 int main(int argc, char** argv)
 {
   // Initialize Google Mock/Test.
