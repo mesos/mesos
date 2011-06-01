@@ -55,9 +55,9 @@ protected:
       const std::string& directory);
 
 private:
-  // No copying.
+  // No copying, no assigning.
   ProcessBasedIsolationModule(const ProcessBasedIsolationModule&);
-  void operator = (const ProcessBasedIsolationModule&);
+  ProcessBasedIsolationModule& operator = (const ProcessBasedIsolationModule&);
 
   // TODO(benh): Make variables const by passing them via constructor.
   Configuration conf;
