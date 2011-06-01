@@ -243,9 +243,24 @@ message GotMasterTokenMessage {
 // Replicated log messages.
 
 
+message PromiseRequest {
+  required uint64 id = 1;
+  optional uint64 position = 2;
+}
+
+
+message PromiseResponse {
+  required bool okay = 1;
+  optional uint64 id = 2;
+  optional uint64 position = 3;
+  optional bytes bytes = 4;
+}
+
+
 message AppendRequest {
-  required uint64 position = 1;
-  required bytes bytes = 2;
+  required uint64 id = 1;
+  required uint64 position = 2;
+  required bytes bytes = 3;
 }
 
 
@@ -254,9 +269,40 @@ message AppendResponse {
 }
 
 
-message PositionRequest {}
+message LearnMessage {
+  required uint64 id = 1;
+  required uint64 position = 2;
+  required bytes bytes = 3;
+}
 
 
-message PositionResponse {
-  required uint64 position = 1;
+message LogRecord
+{
+  enum Type {
+    PROMISE = 1;
+    APPEND = 2;
+    LEARN = 3;
+  }
+
+  message Promise {
+    required uint64 id = 1;
+    optional uint64 position = 2;
+  }
+
+  message Append {
+    required uint64 id = 1;
+    required uint64 position = 2;
+    required bytes bytes = 3;
+  }
+
+  message Learn {
+    required uint64 id = 1;
+    required uint64 position = 2;
+    required bytes bytes = 3;
+  }
+
+  required Type type = 1;
+  optional Promise promise = 2;
+  optional Append append = 3;
+  optional Learn learn = 4;
 }

@@ -4,6 +4,7 @@
 
 #include <boost/lexical_cast.hpp>
 
+#include <process/dispatch.hpp>
 #include <process/process.hpp>
 #include <process/protobuf.hpp>
 
@@ -22,61 +23,102 @@
 
 #include "messages/messages.hpp"
 
+using namespace process;
+
 using std::set;
 using std::string;
 using std::vector;
 
-using process::PID;
-using process::UPID;
-using process::Future;
+
+namespace mesos { namespace internal { namespace log {
+
+// A single-writer replicated log implementation.  There are two
+// components that make up the log, a coordinator and a replica.  The
+// coordinator is used for performing distributed appends (and reads),
+// while the replica manages the actual log data and can perform
+// asynchronous catchup.  ZooKeeper is used to elect a "master"
+// coordinator.
 
 
-namespace mesos { namespace internal {
+// Possible errors from invoking the log.
+const string TIMEDOUT = "Request timed out while attempting consensus";
+const string DEMOTED = "Coordinator was demoted while attempting consensus";
 
-// A single-writer replicated log implementation.  Each instance of a
-// ReplicatedLog acts as a replica.  ZooKeeper is used to elect a
-// master/coordinator replica.  A master/coordinator replica only
-// commits locally after at least a quorum of other replicas have
-// committed.  When a replica is elected master/coordinator (e.g.,
-// after a master fails) it guarantess consistency by reaching
-// consensus on the latest log position written before proceeding.  A
-// replica can catchup from other running replicas via a "pull" based
-// request.  In addition, a replica that negatively acknowledges an
-// append request can receive "push" catchup messages from the
-// master/coordinator.
 
-class ReplicatedLog
+class Log
 {
 public:
-  ReplicatedLog(
-      const string& file,
+  Log(const string& file,
       const string& servers,
       const string& znode,
-      int replicas);
+      int quorum);
 
-  virtual ~ReplicatedLog();
+//   ~Log();
+
+private:
 };
 
 
-class ReplicatedLogProcess : public ProtobufProcess<ReplicatedLogProcess>
+
+
+
+class CoordinatorProcess : public ProtobufProcess<CoordinatorProcess>
 {
 public:
-  ReplicatedLogProcess(
-      const string& file,
-      const string& servers,
-      const string& znode,
-      int replicas);
+  CoordinatorProcess(const string& file,
+                     const string& servers,
+                     const string& znode);
 
-  virtual ~ReplicatedLogProcess();
+  virtual ~CoordinatorProcess();
 
-  // Appends the specified bytes to the end of the log.
-  void appendRequest(uint64_t position, const string& bytes);
+  // A request from a client to append the specified bytes to the end
+  // of the log.
+  uint64_t append(const string& bytes);
 
-  // Sends back the current log position.
-  void positionRequest();
+  // A request from a client to read
 
-  // Truncates the log from the specified position forward.
-  void truncationRequest(uint64_t position);
+  // ZooKeeper events.
+  void connected();
+  void reconnecting();
+  void reconnected();
+  void expired();
+  void updated(const string& path);
+
+private:
+  // Current log position.
+  uint64_t position;
+
+  // ZooKeeper bits.
+  const string servers;
+  const string znode;
+  ZooKeeper* zk;
+  Watcher* watcher;
+  uint64_t sequence;
+
+  // Current set of replicas.
+  set<UPID> pids;
+};
+
+
+class ReplicaProcess : public ProtobufProcess<ReplicaProcess>
+{
+public:
+  ReplicaProcess(const string& file,
+                 const string& servers,
+                 const string& znode);
+
+  virtual ~ReplicaProcess();
+
+  // A request from a coordinator to promise not to accept appends
+  // from any coordinator with a lower id.
+  void promise(uint64_t id, uint64_t position);
+
+  // A request from a coordinator to append the specified bytes to the
+  // end of the log.
+  void append(uint64_t id, uint64_t position, const string& bytes);
+
+  // A message that signals that a value has been learned.
+  void learn(uint64_t id, uint64_t position, const string& bytes);
 
   // ZooKeeper events.
   void connected();
@@ -87,38 +129,32 @@ public:
 
 private:
   // File info for the log.
-  string file;
+  const string file;
   int fd;
 
-  // Local position in the log.
+  // Last promised coordinator.
+  uint64_t id;
+
+  // Last position written in the log.
   uint64_t position;
 
-  // ZooKeeper bits and pieces.
-  string servers;
-  string znode;
+  // ZooKeeper bits.
+  const string servers;
+  const string znode;
   ZooKeeper* zk;
   Watcher* watcher;
-
-  // Our ephemeral sequence number (via ZooKeeper).
   uint64_t sequence;
-
-  // Replica information.
-  bool master;
-  int replicas;
-
-  // Set of log replicas.
-  set<UPID> pids;
 };
 
 
 // A watcher that just sends events to the replicated log.
-class ReplicatedLogProcessWatcher : public Watcher
+class ReplicaProcessWatcher : public Watcher
 {
 public:
-  ReplicatedLogProcessWatcher(const PID<ReplicatedLogProcess>& _pid)
+  ReplicaProcessWatcher(const PID<ReplicaProcess>& _pid)
     : pid(_pid), reconnect(false) {}
 
-  virtual ~ReplicatedLogProcessWatcher() {}
+  virtual ~ReplicaProcessWatcher() {}
 
   virtual void process(ZooKeeper* zk, int type, int state, const string& path)
   {
@@ -126,10 +162,10 @@ public:
       // Check if this is a reconnect.
       if (!reconnect) {
         // Initial connect.
-        process::dispatch(pid, &ReplicatedLogProcess::connected);
+        dispatch(pid, &ReplicaProcess::connected);
       } else {
         // Reconnected.
-        process::dispatch(pid, &ReplicatedLogProcess::reconnected);
+        dispatch(pid, &ReplicaProcess::reconnected);
       }
     } else if ((state == ZOO_CONNECTING_STATE) &&
                (type == ZOO_SESSION_EVENT)) {
@@ -137,19 +173,19 @@ public:
       // account failed servers in the connection string,
       // appropriately handling the "herd effect", etc.
       reconnect = true;
-      process::dispatch(pid, &ReplicatedLogProcess::reconnecting);
+      dispatch(pid, &ReplicaProcess::reconnecting);
     } else if ((state == ZOO_EXPIRED_SESSION_STATE) &&
                (type == ZOO_SESSION_EVENT)) {
-      process::dispatch(pid, &ReplicatedLogProcess::expired);
+      dispatch(pid, &ReplicaProcess::expired);
 
       // If this watcher is reused, the next connect won't be a reconnect.
       reconnect = false;
     } else if ((state == ZOO_CONNECTED_STATE) &&
                (type == ZOO_CHILD_EVENT)) {
-      process::dispatch(pid, &ReplicatedLogProcess::updated, path);
+      dispatch(pid, &ReplicaProcess::updated, path);
     } else if ((state == ZOO_CONNECTED_STATE) &&
                (type == ZOO_CHANGED_EVENT)) {
-      process::dispatch(pid, &ReplicatedLogProcess::updated, path);
+      dispatch(pid, &ReplicaProcess::updated, path);
     } else {
       LOG(FATAL) << "Unimplemented ZooKeeper event: (state is "
                  << state << " and type is " << type << ")";
@@ -157,118 +193,124 @@ public:
   }
 
 private:
-  const PID<ReplicatedLogProcess> pid;
+  const PID<ReplicaProcess> pid;
   bool reconnect;
 };
 
 
 
-// Attempts to reach consensus across a set of replicas for the last
-// position to be appended in the log.
-class PositionConsensusProcess
-  : public ProtobufProcess<PositionConsensusProcess>
-{
-public:
-  PositionConsensusProcess(
-      const set<UPID>& _pids,
-      int _quorum,
-      double _timeout,
-      Result<uint64_t>* _result)
-    : pids(_pids),
-      quorum(_quorum),
-      timeout(_timeout),
-      result(_result) {}
+// // Attempts to reach consensus across a set of replicas for the last
+// // position to be appended in the log.
+// class PositionConsensusProcess
+//   : public ProtobufProcess<PositionConsensusProcess>
+// {
+// public:
+//   PositionConsensusProcess(
+//       const set<UPID>& _pids,
+//       int _quorum,
+//       double _timeout,
+//       Result<uint64_t>* _result)
+//     : pids(_pids),
+//       quorum(_quorum),
+//       timeout(_timeout),
+//       result(_result) {}
 
-protected:
-  virtual void operator () ()
-  {
-    foreach (const UPID& pid, pids) {
-      send(pid, PositionRequest());
-    }
+// protected:
+//   virtual void operator () ()
+//   {
+//     foreach (const UPID& pid, pids) {
+//       send(pid, PositionRequest());
+//     }
 
-    // Counts of log positions.
-    hashmap<uint64_t, int> counts;
+//     // Counts of log positions.
+//     hashmap<uint64_t, int> counts;
 
-    double startTime = elapsedTime();
+//     double startTime = elapsedTime();
 
-    while (receive(timeout) != process::TIMEOUT) {
-      CHECK(name() == PositionResponse().GetTypeName());
-      CHECK(pids.count(from()) > 0);
+//     while (receive(timeout) != TIMEOUT) {
+//       CHECK(name() == PositionResponse().GetTypeName());
+//       CHECK(pids.count(from()) > 0);
 
-      PositionResponse response;
-      response.ParseFromString(body());
+//       PositionResponse response;
+//       response.ParseFromString(body());
 
-      uint64_t position = response.position();
+//       uint64_t position = response.position();
 
-      counts[position]++;
+//       counts[position]++;
 
-      if (counts[position] >= quorum - 1) {
-        *result = Result<uint64_t>::some(position);
-        return;
-      }
+//       if (counts[position] >= quorum - 1) {
+//         *result = Result<uint64_t>::some(position);
+//         return;
+//       }
 
-      timeout = timeout - (elapsedTime() - startTime);
-    }
-  }
+//       timeout = timeout - (elapsedTime() - startTime);
+//     }
+//   }
 
-private:
-  set<UPID> pids;
-  int quorum;
-  double timeout;
-  Result<uint64_t>* result;
-};
-
-
-Result<uint64_t> getPositionConsensus(
-    const set<UPID>& pids,
-    int quorum,
-    double timeout)
-{
-  Result<uint64_t> result = Result<uint64_t>::none();
-  PositionConsensusProcess process(pids, quorum, timeout, &result);
-  process::wait(process::spawn(&process));
-  return result;
-}
+// private:
+//   set<UPID> pids;
+//   int quorum;
+//   double timeout;
+//   Result<uint64_t>* result;
+// };
 
 
-ReplicatedLog::ReplicatedLog(
-    const string& file,
-    const string& servers,
-    const string& znode,
-    int replicas) {}
+// Result<uint64_t> getPositionConsensus(
+//     const set<UPID>& pids,
+//     int quorum,
+//     double timeout)
+// {
+//   Result<uint64_t> result = Result<uint64_t>::none();
+//   PositionConsensusProcess process(pids, quorum, timeout, &result);
+//   wait(spawn(process));
+//   return result;
+// }
 
 
-ReplicatedLog::~ReplicatedLog() {}
+Log::Log(const string& file,
+         const string& servers,
+         const string& znode,
+         int quorum) {}
 
 
-ReplicatedLogProcess::ReplicatedLogProcess(
+Log::~Log() throw () {}
+
+
+ReplicaProcess::ReplicaProcess(
     const string& _file,
     const string& _servers,
-    const string& _znode,
-    int _replicas)
+    const string& _znode)
   : file(_file),
     servers(_servers),
-    znode(_znode),
-    replicas(_replicas)
+    znode(_znode)
 {
+  id = 0;
   position = 0;
-  master = false;
 
-  watcher = new ReplicatedLogProcessWatcher(self());
+  watcher = new ReplicaProcessWatcher(self());
   zk = new ZooKeeper(servers, 10000, watcher);
 
   // Install protobuf handlers.
+  installProtobufHandler<PromiseRequest>(
+      &ReplicaProcess::promise,
+      &PromiseRequest::id,
+      &PromiseRequest::position);
+
   installProtobufHandler<AppendRequest>(
-      &ReplicatedLogProcess::appendRequest,
+      &ReplicaProcess::append,
+      &AppendRequest::id,
       &AppendRequest::position,
       &AppendRequest::bytes);
 
-  installProtobufHandler<PositionRequest>(
-      &ReplicatedLogProcess::positionRequest);
+  installProtobufHandler<LearnMessage>(
+      &ReplicaProcess::learn,
+      &LearnMessage::id,
+      &LearnMessage::position,
+      &LearnMessage::bytes);
 }
 
 
-ReplicatedLogProcess::~ReplicatedLogProcess()
+ReplicaProcess::~ReplicaProcess()
 {
   CHECK(zk != NULL);
   delete zk;
@@ -278,7 +320,14 @@ ReplicatedLogProcess::~ReplicatedLogProcess()
 }
 
 
-void ReplicatedLogProcess::appendRequest(
+void ReplicaProcess::promise(uint64_t id, uint64_t position)
+{
+  LOG(FATAL) << "unimplemented";
+}
+
+
+void ReplicaProcess::append(
+    uint64_t id,
     uint64_t position,
     const string& bytes)
 {
@@ -286,24 +335,18 @@ void ReplicatedLogProcess::appendRequest(
 }
 
 
-void ReplicatedLogProcess::positionRequest()
-{
-  LOG(INFO) << "Log position requested";
-  PositionResponse response;
-  response.set_position(position);
-  send(from(), response);
-}
-
-
-void ReplicatedLogProcess::truncationRequest(uint64_t position)
+void ReplicaProcess::learn(
+    uint64_t id,
+    uint64_t position,
+    const string& bytes)
 {
   LOG(FATAL) << "unimplemented";
 }
 
 
-void ReplicatedLogProcess::connected()
+void ReplicaProcess::connected()
 {
-  LOG(INFO) << "Log connected to ZooKeeper";
+  LOG(INFO) << "Log replica connected to ZooKeeper";
 
   int ret;
   string result;
@@ -319,7 +362,8 @@ void ReplicatedLogProcess::connected()
     index = znode.find("/", index + 1);
     string prefix = znode.substr(0, index);
 
-    LOG(INFO) << "Log trying to create znode '" << prefix << "' in ZooKeeper";
+    LOG(INFO) << "Log replica trying to create znode '"
+              << prefix << "' in ZooKeeper";
 
     // Create the node (even if it already exists).
     ret = zk->create(prefix, "", ZOO_OPEN_ACL_UNSAFE,
@@ -330,14 +374,6 @@ void ReplicatedLogProcess::connected()
       LOG(FATAL) << "Failed to create '" << prefix
                  << "' in ZooKeeper: " << zk->error(ret);
     }
-  }
-
-  // Set a watch on the children of the directory.
-  ret = zk->getChildren(znode, true, NULL);
-
-  if (ret != ZOK) {
-    LOG(FATAL) << "Failed to set a watch on '" << znode
-               << "' in ZooKeeper: " << zk->error(ret);
   }
 
   // Create a new ephemeral znode for ourselves and populate it with
@@ -353,9 +389,7 @@ void ReplicatedLogProcess::connected()
 
   // Save the sequence id but only grab the basename, e.g.,
   // "/path/to/znode/000000131" => "000000131".
-  if ((index = result.find_last_of('/')) != string::npos) {
-    result = result.erase(0, index + 1);
-  }
+  result = utils::os::basename(result);
 
   try {
     sequence = boost::lexical_cast<uint64_t>(result);
@@ -365,122 +399,52 @@ void ReplicatedLogProcess::connected()
 }
 
 
-void ReplicatedLogProcess::reconnecting()
+void ReplicaProcess::reconnecting()
 {
-  LOG(INFO) << "Log reconnecting to ZooKeeper";
+  LOG(INFO) << "Log replica reconnecting to ZooKeeper";
 }
 
 
-void ReplicatedLogProcess::reconnected()
+void ReplicaProcess::reconnected()
 {
-  LOG(INFO) << "Log reconnected to ZooKeeper";
+  LOG(INFO) << "Log replica reconnected to ZooKeeper";
 }
 
 
-void ReplicatedLogProcess::expired()
+void ReplicaProcess::expired()
 {
-  LOG(FATAL) << "Log ZooKeeper session expired!";
+  LOG(FATAL) << "Log replica ZooKeeper session expired!";
 }
 
 
-void ReplicatedLogProcess::updated(const string& path)
+void ReplicaProcess::updated(const string& path)
 {
-  LOG(INFO) << "Log notified of updates at '" << path << "' in ZooKeeper";
-
-  CHECK(path == znode);
-
-  // Determine which replica is the master/coordinator.
-  vector<string> results;
-
-  int ret = zk->getChildren(znode, true, &results);
-
-  if (ret != ZOK) {
-    LOG(FATAL) << "Failed to get children of '" << znode
-               << "' in ZooKeeper: " << zk->error(ret);
-  }
-
-  // Determine the "minimum" ephemeral znode, that replica acts as the
-  // master/coordinator.
-  uint64_t min = LONG_MAX;
-  foreach (const string& result, results) {
-    try {
-      min = std::min(min, boost::lexical_cast<uint64_t>(result));
-    } catch (boost::bad_lexical_cast&) {
-      LOG(FATAL) << "Failed to convert '" << result << "' into an integer";
-    }
-  }
-
-  LOG(INFO) << "Log elected replica " << min << " master/coordinator";
-
-  // Check our master status.
-  if (master && min != sequence) {
-    // TODO(benh): Handle this differently?
-    LOG(FATAL) << "Log no longer master/coordinator!";
-  } else if (!master && min == sequence) {
-    LOG(INFO) << "Log elected master/coordinator!";
-
-    master = true;
-
-    // Save all the pids of the replicas (except ourself).
-    pids.clear();
-
-    foreach (const string& result, results) {
-      string temp;
-      ret = zk->get(znode + "/" + result, false, &temp, NULL);
-
-      if (ret == ZNONODE) {
-        // Replica must have since been lost.
-        continue;
-      } else if (ret != ZOK) {
-        LOG(FATAL) << "Failed to get data at '" << znode << "/" << result
-                   << "' in ZooKeeper: " << zk->error(ret);
-      }
-
-      if (self() != temp) {
-        pids.insert(UPID(temp));
-      }
-    }
-
-    // TODO(benh): Need to wait until there are enough replicas
-    // available to make a quorum ... code needs to be refactored to
-    // support this.
-
-    // Get a "consensus" (quorum - 1) on the last appended position.
-    Result<uint64_t> result = Result<uint64_t>::none();
-
-    do {
-      // TODO(benh): Eventually fail?
-      result = getPositionConsensus(pids, replicas / 2, 1.0);
-    } while (result.isNone());
-
-    // TODO(benh): Make sure that our local log is up to date.
-    CHECK(position == result.get());
-
-    LOG(INFO) << "Log resuming at position " << position;
-  }
+  LOG(FATAL) << "Log replica not expecting updates at '"
+             << path << "' in ZooKeeper";
 }
 
-}} // namespace mesos { namespace internal {
+}}} // namespace mesos { namespace internal { namespace log {
 
 
 using namespace mesos;
 using namespace mesos::internal;
+using namespace mesos::internal::log;
 
 
 int main(int argc, char** argv)
 {
   if (argc != 5) {
-    fatal("usage: %s <file> <servers> <znode> <replicas>", argv[0]);
+    fatal("usage: %s <file> <servers> <znode> <quorum>", argv[0]);
   }
 
   string file = argv[1];
   string servers = argv[2];
   string znode = argv[3];
-  int replicas = atoi(argv[4]);
+  int quorum = atoi(argv[4]);
 
-  ReplicatedLogProcess replica(file, servers, znode, replicas);
+  ReplicaProcess replica(file, servers, znode);
 
-  process::wait(process::spawn(&replica));
+  wait(spawn(replica));
 
   return 0;
 }
