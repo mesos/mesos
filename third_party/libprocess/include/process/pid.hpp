@@ -34,7 +34,12 @@ struct UPID
 
   UPID(const ProcessBase& process);
 
-  operator std::string() const;
+  operator std::string () const;
+
+  operator bool () const
+  {
+    return id != "" && ip != 0 && port != 0;
+  }
 
   bool operator ! () const
   {
