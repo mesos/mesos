@@ -17,7 +17,8 @@
 // Process that allows you to install protocol buffer handlers in
 // addition to normal message and HTTP handlers. Then you can simply
 // send around protocol buffer objects which will get passed to the
-// appropriate handlers.
+// appropriate handlers. Note that this header file assumes you will
+// be linking against BOTH libprotobuf and libglog.
 
 
 namespace google { namespace protobuf {
