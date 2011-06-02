@@ -9,6 +9,7 @@
 
 #include "common/resources.hpp"
 #include "common/hashmap.hpp"
+#include "common/uuid.hpp"
 
 #include "configurator/configurator.hpp"
 
@@ -62,7 +63,8 @@ public:
                        const std::string& pid);
   void statusUpdateAcknowledgement(const SlaveID& slaveId,
                                    const FrameworkID& frameworkId,
-                                   const TaskID& taskId);
+                                   const TaskID& taskId,
+                                   const std::string& uuid);
   void registerExecutor(const FrameworkID& frameworkId,
                         const ExecutorID& executorId);
   void statusUpdate(const StatusUpdate& update);
@@ -73,7 +75,7 @@ public:
   void ping();
   void exited();
 
-  void statusUpdateTimeout(const StatusUpdate& update);
+  void statusUpdateTimeout(const FrameworkID& frameworkId, const UUID& uuid);
 
   void executorStarted(const FrameworkID& frameworkId,
                        const ExecutorID& executorId,

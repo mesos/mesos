@@ -220,7 +220,7 @@ protected:
       message.mutable_framework_id()->MergeFrom(frameworkId);
       message.mutable_slave_id()->MergeFrom(update.slave_id());
       message.mutable_task_id()->MergeFrom(status.task_id());
-      message.set_sequence(update.sequence());
+      message.set_uuid(update.uuid());
       send(master, message);
     }
   }

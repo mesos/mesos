@@ -439,7 +439,7 @@ void Master::initialize()
       &StatusUpdateAcknowledgementMessage::framework_id,
       &StatusUpdateAcknowledgementMessage::task_id,
       &StatusUpdateAcknowledgementMessage::slave_id,
-      &StatusUpdateAcknowledgementMessage::sequence);
+      &StatusUpdateAcknowledgementMessage::uuid);
 
   installProtobufHandler<RegisterSlaveMessage>(
       &Master::registerSlave,
@@ -775,7 +775,7 @@ void Master::schedulerMessage(const SlaveID& slaveId,
 void Master::statusUpdateAcknowledgement(const FrameworkID& frameworkId,
                                          const TaskID& taskId,
                                          const SlaveID& slaveId,
-                                         int32_t sequence)
+                                         const string& uuid)
 {
   Framework* framework = getFramework(frameworkId);
   if (framework != NULL) {
@@ -788,7 +788,7 @@ void Master::statusUpdateAcknowledgement(const FrameworkID& frameworkId,
       message.mutable_framework_id()->MergeFrom(frameworkId);
       message.mutable_slave_id()->MergeFrom(slaveId);
       message.mutable_task_id()->MergeFrom(taskId);
-      message.set_sequence(sequence);
+      message.set_uuid(uuid);
       send(slave->pid, message);
     } else {
       LOG(WARNING) << "Cannot tell slave " << slaveId

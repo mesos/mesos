@@ -118,7 +118,7 @@ public:
   void statusUpdateAcknowledgement(const FrameworkID& frameworkId,
                                    const TaskID& taskId,
                                    const SlaveID& slaveId,
-                                   int32_t sequence);
+                                   const std::string& uuid);
   void registerSlave(const SlaveInfo& slaveInfo);
   void reregisterSlave(const SlaveID& slaveId,
                        const SlaveInfo& slaveInfo,

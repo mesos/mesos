@@ -7,7 +7,6 @@
 #include <sstream>
 
 #include <boost/bind.hpp>
-#include <boost/unordered_map.hpp>
 
 #include <mesos/executor.hpp>
 
@@ -18,6 +17,7 @@
 #include "common/lock.hpp"
 #include "common/logging.hpp"
 #include "common/type_utils.hpp"
+#include "common/uuid.hpp"
 
 #include "messages/messages.hpp"
 
@@ -26,7 +26,6 @@ using namespace mesos::internal;
 
 using boost::bind;
 using boost::cref;
-using boost::unordered_map;
 
 using process::UPID;
 
@@ -38,11 +37,17 @@ namespace mesos { namespace internal {
 class ExecutorProcess : public ProtobufProcess<ExecutorProcess>
 {
 public:
-  ExecutorProcess(const UPID& _slave, MesosExecutorDriver* _driver,
-                  Executor* _executor, const FrameworkID& _frameworkId,
-                  const ExecutorID& _executorId, bool _local)
-    : slave(_slave), driver(_driver), executor(_executor),
-      frameworkId(_frameworkId), executorId(_executorId),
+  ExecutorProcess(const UPID& _slave,
+                  MesosExecutorDriver* _driver,
+                  Executor* _executor,
+                  const FrameworkID& _frameworkId,
+                  const ExecutorID& _executorId,
+                  bool _local)
+    : slave(_slave),
+      driver(_driver),
+      executor(_executor),
+      frameworkId(_frameworkId),
+      executorId(_executorId),
       local(_local)
   {
     installProtobufHandler<ExecutorRegisteredMessage>(
@@ -330,7 +335,7 @@ int MesosExecutorDriver::sendStatusUpdate(const TaskStatus& status)
   update->mutable_slave_id()->MergeFrom(process->slaveId);
   update->mutable_status()->MergeFrom(status);
   update->set_timestamp(process->elapsedTime());
-  update->set_sequence(-1);
+  update->set_uuid(UUID::random().toBytes());
   message.set_reliable(false);
   process->send(process->slave, message);
 

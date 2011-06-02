@@ -149,8 +149,11 @@ struct Framework
 
   UPID pid;
 
+  // Current running executors.
   hashmap<ExecutorID, Executor*> executors;
-  hashmap<TaskID, StatusUpdate> updates;
+
+  // Status updates keyed by uuid.
+  hashmap<UUID, StatusUpdate> updates;
 };
 
 
@@ -384,7 +387,8 @@ void Slave::initialize()
       &Slave::statusUpdateAcknowledgement,
       &StatusUpdateAcknowledgementMessage::slave_id,
       &StatusUpdateAcknowledgementMessage::framework_id,
-      &StatusUpdateAcknowledgementMessage::task_id);
+      &StatusUpdateAcknowledgementMessage::task_id,
+      &StatusUpdateAcknowledgementMessage::uuid);
 
   installProtobufHandler<RegisterExecutorMessage>(
       &Slave::registerExecutor,
@@ -614,7 +618,7 @@ void Slave::killTask(const FrameworkID& frameworkId,
     status->mutable_task_id()->MergeFrom(taskId);
     status->set_state(TASK_LOST);
     update->set_timestamp(elapsedTime());
-    update->set_sequence(-1);
+    update->set_uuid(UUID::random().toBytes());
     message.set_reliable(false);
     send(master, message);
 
@@ -638,7 +642,7 @@ void Slave::killTask(const FrameworkID& frameworkId,
     status->mutable_task_id()->MergeFrom(taskId);
     status->set_state(TASK_LOST);
     update->set_timestamp(elapsedTime());
-    update->set_sequence(-1);
+    update->set_uuid(UUID::random().toBytes());
     message.set_reliable(false);
     send(master, message);
   } else if (!executor->pid) {
@@ -659,7 +663,7 @@ void Slave::killTask(const FrameworkID& frameworkId,
     status->mutable_task_id()->MergeFrom(taskId);
     status->set_state(TASK_KILLED);
     update->set_timestamp(elapsedTime());
-    update->set_sequence(0);
+    update->set_uuid(UUID::random().toBytes());
     message.set_reliable(false);
     send(master, message);
   } else {
@@ -738,16 +742,16 @@ void Slave::updateFramework(const FrameworkID& frameworkId,
 
 void Slave::statusUpdateAcknowledgement(const SlaveID& slaveId,
                                         const FrameworkID& frameworkId,
-                                        const TaskID& taskId)
+                                        const TaskID& taskId,
+                                        const string& uuid)
 {
   Framework* framework = getFramework(frameworkId);
   if (framework != NULL) {
-    if (framework->updates.contains(taskId)) {
-      // TODO(benh): Check sequence!
+    if (framework->updates.contains(UUID::fromBytes(uuid))) {
       LOG(INFO) << "Got acknowledgement of status update"
                 << " for task " << taskId
-                << " of framework " << framework->id;
-      framework->updates.erase(taskId);
+                << " of framework " << frameworkId;
+      framework->updates.erase(UUID::fromBytes(uuid));
     }
   }
 }
@@ -1044,11 +1048,14 @@ void Slave::statusUpdate(const StatusUpdate& update)
       message.set_reliable(true);
       send(master, message);
 
+      UUID uuid = UUID::fromBytes(update.uuid());
+
       // Send us a message to try and resend after some delay.
       delay(STATUS_UPDATE_RETRY_INTERVAL,
-            self(), &Slave::statusUpdateTimeout, update);
+            self(), &Slave::statusUpdateTimeout,
+            framework->id, uuid);
 
-      framework->updates[status.task_id()] = update;
+      framework->updates[uuid] = update;
 
       stats.tasks[status.state()]++;
 
@@ -1100,13 +1107,16 @@ void Slave::ping()
 }
 
 
-void Slave::statusUpdateTimeout(const StatusUpdate& update)
+void Slave::statusUpdateTimeout(
+    const FrameworkID& frameworkId,
+    const UUID& uuid)
 {
   // Check and see if we still need to send this update.
-  Framework* framework = getFramework(update.framework_id());
+  Framework* framework = getFramework(frameworkId);
   if (framework != NULL) {
-    if (framework->updates.contains(update.status().task_id())) {
-      // TODO(benh): This is not sufficient, need to check sequence!
+    if (framework->updates.contains(uuid)) {
+      const StatusUpdate& update = framework->updates[uuid];
+
       LOG(INFO) << "Resending status update"
                 << " for task " << update.status().task_id()
                 << " of framework " << update.framework_id();
@@ -1528,7 +1538,7 @@ void Slave::executorExited(const FrameworkID& frameworkId,
 
   Executor* executor = framework->getExecutor(executorId);
   if (executor == NULL) {
-    LOG(WARNING) << "UNKNOWN executor '" << executorId
+    LOG(WARNING) << "WARNING! UNKNOWN executor '" << executorId
                  << "' of framework " << frameworkId
                  << " has exited with status " << status;
     return;

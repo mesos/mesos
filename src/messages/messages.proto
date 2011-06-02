@@ -26,7 +26,7 @@ message StatusUpdate {
   optional SlaveID slave_id = 3;
   required TaskStatus status = 4;
   required double timestamp = 5;
-  required int32 sequence = 6;
+  required bytes uuid = 6;
 }
 
 
@@ -124,7 +124,7 @@ message StatusUpdateAcknowledgementMessage {
   required SlaveID slave_id = 1;
   required FrameworkID framework_id = 2;
   required TaskID task_id = 3;
-  required uint32 sequence = 4;
+  required bytes uuid = 4;
 }
 
 
