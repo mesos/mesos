@@ -38,7 +38,7 @@ T copy(const T& t) { return t; }
 
 
 template <typename T>
-inline std::string stringify(T t)
+std::string stringify(T t)
 {
   try {
     return boost::lexical_cast<std::string>(t);
@@ -46,7 +46,6 @@ inline std::string stringify(T t)
     LOG(FATAL) << "Failed to stringify!";
   }
 }
-
 
 namespace protobuf { 
 
