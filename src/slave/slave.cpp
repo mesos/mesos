@@ -471,7 +471,7 @@ void Slave::operator () ()
 }
 
 
-void Slave::newMasterDetected(const string& pid)
+void Slave::newMasterDetected(const UPID& pid)
 {
   LOG(INFO) << "New master detected at " << pid;
 
@@ -619,7 +619,6 @@ void Slave::killTask(const FrameworkID& frameworkId,
     status->set_state(TASK_LOST);
     update->set_timestamp(elapsedTime());
     update->set_uuid(UUID::random().toBytes());
-    message.set_reliable(false);
     send(master, message);
 
     return;
@@ -643,7 +642,6 @@ void Slave::killTask(const FrameworkID& frameworkId,
     status->set_state(TASK_LOST);
     update->set_timestamp(elapsedTime());
     update->set_uuid(UUID::random().toBytes());
-    message.set_reliable(false);
     send(master, message);
   } else if (!executor->pid) {
     // Remove the task.
@@ -664,7 +662,6 @@ void Slave::killTask(const FrameworkID& frameworkId,
     status->set_state(TASK_KILLED);
     update->set_timestamp(elapsedTime());
     update->set_uuid(UUID::random().toBytes());
-    message.set_reliable(false);
     send(master, message);
   } else {
     // Otherwise, send a message to the executor and wait for
@@ -851,7 +848,7 @@ void Slave::registerExecutor(const FrameworkID& frameworkId,
     LOG(WARNING) << "WARNING! Unexpected executor '" << executorId
                  << "' registering for framework " << frameworkId;
     send(from(), ShutdownMessage());
-  } else if (executor->pid != UPID()) {
+  } else if (executor->pid) {
     LOG(WARNING) << "WARNING! executor '" << executorId
                  << "' of framework " << frameworkId
                  << " is already running";
@@ -1045,7 +1042,7 @@ void Slave::statusUpdate(const StatusUpdate& update)
       // Send message and record the status for possible resending.
       StatusUpdateMessage message;
       message.mutable_update()->MergeFrom(update);
-      message.set_reliable(true);
+      message.set_pid(self());
       send(master, message);
 
       UUID uuid = UUID::fromBytes(update.uuid());
@@ -1123,7 +1120,7 @@ void Slave::statusUpdateTimeout(
 
       StatusUpdateMessage message;
       message.mutable_update()->MergeFrom(update);
-      message.set_reliable(true);
+      message.set_pid(self());
       send(master, message);
     }
   }

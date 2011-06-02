@@ -95,7 +95,7 @@ public:
     installProtobufHandler<StatusUpdateMessage>(
         &SchedulerProcess::statusUpdate,
         &StatusUpdateMessage::update,
-        &StatusUpdateMessage::reliable);
+        &StatusUpdateMessage::pid);
 
     installProtobufHandler<LostSlaveMessage>(
         &SchedulerProcess::lostSlave,
@@ -119,7 +119,7 @@ public:
   virtual ~SchedulerProcess() {}
 
 protected:
-  void newMasterDetected(const string& pid)
+  void newMasterDetected(const UPID& pid)
   {
     VLOG(1) << "New master at " << pid;
 
@@ -190,7 +190,7 @@ protected:
     invoke(bind(&Scheduler::offerRescinded, sched, driver, cref(offerId)));
   }
 
-  void statusUpdate(const StatusUpdate& update, bool reliable)
+  void statusUpdate(const StatusUpdate& update, const UPID& pid)
   {
     const TaskStatus& status = update.status();
 
@@ -211,17 +211,17 @@ protected:
 
     invoke(bind(&Scheduler::statusUpdate, sched, driver, cref(status)));
 
-    if (reliable) {
-      // Acknowledge the message (we do this last, after we
-      // process::invoked the scheduler, if we did at all, in case it
-      // causes a crash, since this way the message might get
-      // resent/routed after the scheduler comes back online).
+    if (pid) {
+      // Acknowledge the message (we do this last, after we invoked
+      // the scheduler, if we did at all, in case it causes a crash,
+      // since this way the message might get resent/routed after the
+      // scheduler comes back online).
       StatusUpdateAcknowledgementMessage message;
       message.mutable_framework_id()->MergeFrom(frameworkId);
       message.mutable_slave_id()->MergeFrom(update.slave_id());
       message.mutable_task_id()->MergeFrom(status.task_id());
       message.set_uuid(update.uuid());
-      send(master, message);
+      send(pid, message);
     }
   }
 

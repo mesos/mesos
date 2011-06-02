@@ -115,8 +115,7 @@ message KillTaskMessage {
 
 message StatusUpdateMessage {
   required StatusUpdate update = 1;
-  // TODO(benh): Provide PID to allow scheds to send acks directly.
-  required bool reliable = 3;
+  optional string pid = 2;
 }
 
 

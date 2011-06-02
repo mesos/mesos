@@ -18,9 +18,10 @@
 
 namespace mesos { namespace internal { namespace slave {
 
+using namespace process;
+
 struct Framework;
 struct Executor;
-
 
 const double STATUS_UPDATE_RETRY_INTERVAL = 10;
 
@@ -41,9 +42,9 @@ public:
 
   static void registerOptions(Configurator* configurator);
 
-  process::Promise<state::SlaveState*> getState();
+  Promise<state::SlaveState*> getState();
 
-  void newMasterDetected(const std::string& pid);
+  void newMasterDetected(const UPID& pid);
   void noMasterDetected();
   void masterDetectionFailure();
   void registered(const SlaveID& slaveId);
@@ -115,11 +116,11 @@ protected:
 
 private:
   // TODO(benh): Better naming and name scope for these http handlers.
-  process::Promise<process::HttpResponse> http_info_json(const process::HttpRequest& request);
-  process::Promise<process::HttpResponse> http_frameworks_json(const process::HttpRequest& request);
-  process::Promise<process::HttpResponse> http_tasks_json(const process::HttpRequest& request);
-  process::Promise<process::HttpResponse> http_stats_json(const process::HttpRequest& request);
-  process::Promise<process::HttpResponse> http_vars(const process::HttpRequest& request);
+  Promise<HttpResponse> http_info_json(const HttpRequest& request);
+  Promise<HttpResponse> http_frameworks_json(const HttpRequest& request);
+  Promise<HttpResponse> http_tasks_json(const HttpRequest& request);
+  Promise<HttpResponse> http_stats_json(const HttpRequest& request);
+  Promise<HttpResponse> http_vars(const HttpRequest& request);
 
   const Configuration conf;
 
@@ -128,7 +129,7 @@ private:
   SlaveID id;
   SlaveInfo info;
 
-  process::UPID master;
+  UPID master;
 
   Resources resources;
 

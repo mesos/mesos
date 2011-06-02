@@ -164,7 +164,6 @@ protected:
     update->mutable_status()->MergeFrom(status);
     update->set_timestamp(elapsedTime());
     update->set_uuid(UUID::random().toBytes());
-    message.set_reliable(false);
     send(slave, message);
   }
 

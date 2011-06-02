@@ -97,7 +97,7 @@ public:
 
   Promise<state::MasterState*> getState();
 
-  void newMasterDetected(const std::string& pid);
+  void newMasterDetected(const UPID& pid);
   void noMasterDetected();
   void masterDetectionFailure();
   void registerFramework(const FrameworkInfo& frameworkInfo);
@@ -115,16 +115,12 @@ public:
 			const FrameworkID& frameworkId,
 			const ExecutorID& executorId,
 			const std::string& data);
-  void statusUpdateAcknowledgement(const FrameworkID& frameworkId,
-                                   const TaskID& taskId,
-                                   const SlaveID& slaveId,
-                                   const std::string& uuid);
   void registerSlave(const SlaveInfo& slaveInfo);
   void reregisterSlave(const SlaveID& slaveId,
                        const SlaveInfo& slaveInfo,
                        const std::vector<Task>& tasks);
   void unregisterSlave(const SlaveID& slaveId);
-  void statusUpdate(const StatusUpdate& update, bool reliable);
+  void statusUpdate(const StatusUpdate& update, const UPID& pid);
   void executorMessage(const SlaveID& slaveId,
 		       const FrameworkID& frameworkId,
 		       const ExecutorID& executorId,
