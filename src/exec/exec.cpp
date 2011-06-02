@@ -10,6 +10,7 @@
 
 #include <mesos/executor.hpp>
 
+#include <process/dispatch.hpp>
 #include <process/process.hpp>
 #include <process/protobuf.hpp>
 
@@ -24,10 +25,10 @@
 using namespace mesos;
 using namespace mesos::internal;
 
+using namespace process;
+
 using boost::bind;
 using boost::cref;
-
-using process::UPID;
 
 using std::string;
 
@@ -72,7 +73,7 @@ public:
     installProtobufHandler<ShutdownMessage>(
         &ExecutorProcess::shutdown);
 
-    installMessageHandler(process::EXITED, &ExecutorProcess::exited);
+    installMessageHandler(EXITED, &ExecutorProcess::exited);
   }
 
   virtual ~ExecutorProcess() {}
@@ -90,29 +91,27 @@ protected:
     message.mutable_executor_id()->MergeFrom(executorId);
     send(slave, message);
 
-    do { if (serve() == process::TERMINATE) break; } while (true);
+    do { if (serve() == TERMINATE) break; } while (true);
   }
 
   void registered(const ExecutorArgs& args)
   {
     VLOG(1) << "Executor registered on slave " << args.slave_id();
     slaveId = args.slave_id();
-    process::invoke(bind(&Executor::init, executor, driver, cref(args)));
+    invoke(bind(&Executor::init, executor, driver, cref(args)));
   }
 
   void runTask(const TaskDescription& task)
   {
     VLOG(1) << "Executor asked to run task '" << task.task_id() << "'";
 
-    process::invoke(bind(&Executor::launchTask, executor, driver,
-                         cref(task)));
+    invoke(bind(&Executor::launchTask, executor, driver, cref(task)));
   }
 
   void killTask(const TaskID& taskId)
   {
     VLOG(1) << "Executor asked to kill task '" << taskId << "'";
-    process::invoke(bind(&Executor::killTask, executor, driver,
-                         cref(taskId)));
+    invoke(bind(&Executor::killTask, executor, driver, cref(taskId)));
   }
 
   void frameworkMessage(const SlaveID& slaveId,
@@ -121,19 +120,18 @@ protected:
 			const string& data)
   {
     VLOG(1) << "Executor received framework message";
-    process::invoke(bind(&Executor::frameworkMessage, executor, driver,
-                         cref(data)));
+    invoke(bind(&Executor::frameworkMessage, executor, driver, cref(data)));
   }
 
   void shutdown()
   {
     VLOG(1) << "Executor asked to shutdown";
     // TODO(benh): Any need to invoke driver.stop?
-    process::invoke(bind(&Executor::shutdown, executor, driver));
+    invoke(bind(&Executor::shutdown, executor, driver));
     if (!local) {
       exit(0);
     } else {
-      process::terminate(self());
+      terminate(this);
     }
   }
 
@@ -142,7 +140,7 @@ protected:
     VLOG(1) << "Slave exited, trying to shutdown";
 
     // TODO: Pass an argument to shutdown to tell it this is abnormal?
-    process::invoke(bind(&Executor::shutdown, executor, driver));
+    invoke(bind(&Executor::shutdown, executor, driver));
 
     // This is a pretty bad state ... no slave is left. Rather
     // than exit lets kill our process group (which includes
@@ -152,8 +150,32 @@ protected:
     if (!local) {
       killpg(0, SIGKILL);
     } else {
-      process::terminate(self());
+      terminate(this);
     }
+  }
+
+  void sendStatusUpdate(const TaskStatus& status)
+  {
+    StatusUpdateMessage message;
+    StatusUpdate* update = message.mutable_update();
+    update->mutable_framework_id()->MergeFrom(frameworkId);
+    update->mutable_executor_id()->MergeFrom(executorId);
+    update->mutable_slave_id()->MergeFrom(slaveId);
+    update->mutable_status()->MergeFrom(status);
+    update->set_timestamp(elapsedTime());
+    update->set_uuid(UUID::random().toBytes());
+    message.set_reliable(false);
+    send(slave, message);
+  }
+
+  void sendFrameworkMessage(const string& data)
+  {
+    ExecutorToFrameworkMessage message;
+    message.mutable_slave_id()->MergeFrom(slaveId);
+    message.mutable_framework_id()->MergeFrom(frameworkId);
+    message.mutable_executor_id()->MergeFrom(executorId);
+    message.set_data(data);
+    send(slave, message);
   }
 
 private:
@@ -196,7 +218,7 @@ MesosExecutorDriver::~MesosExecutorDriver()
 {
   // Just as in SchedulerProcess, we might wait here indefinitely if
   // MesosExecutorDriver::stop has not been invoked.
-  process::wait(process->self());
+  wait(process);
   delete process;
 
   pthread_mutex_destroy(&mutex);
@@ -269,7 +291,7 @@ int MesosExecutorDriver::start()
   process =
     new ExecutorProcess(slave, this, executor, frameworkId, executorId, local);
 
-  process::spawn(process);
+  spawn(process);
 
   running = true;
 
@@ -286,11 +308,8 @@ int MesosExecutorDriver::stop()
   }
 
   CHECK(process != NULL);
-
-  process::terminate(process->self());
-
+  terminate(process);
   running = false;
-
   pthread_cond_signal(&cond);
 
   return 0;
@@ -326,18 +345,7 @@ int MesosExecutorDriver::sendStatusUpdate(const TaskStatus& status)
   }
 
   CHECK(process != NULL);
-
-  // TODO(benh): Do a dispatch to Executor first?
-  StatusUpdateMessage message;
-  StatusUpdate* update = message.mutable_update();
-  update->mutable_framework_id()->MergeFrom(process->frameworkId);
-  update->mutable_executor_id()->MergeFrom(process->executorId);
-  update->mutable_slave_id()->MergeFrom(process->slaveId);
-  update->mutable_status()->MergeFrom(status);
-  update->set_timestamp(process->elapsedTime());
-  update->set_uuid(UUID::random().toBytes());
-  message.set_reliable(false);
-  process->send(process->slave, message);
+  dispatch(process, &ExecutorProcess::sendStatusUpdate, status);
 
   return 0;
 }
@@ -353,14 +361,7 @@ int MesosExecutorDriver::sendFrameworkMessage(const string& data)
   }
 
   CHECK(process != NULL);
-
-  // TODO(benh): Do a dispatch to Executor first?
-  ExecutorToFrameworkMessage message;
-  message.mutable_slave_id()->MergeFrom(process->slaveId);
-  message.mutable_framework_id()->MergeFrom(process->frameworkId);
-  message.mutable_executor_id()->MergeFrom(process->executorId);
-  message.set_data(data);
-  process->send(process->slave, message);
+  dispatch(process, &ExecutorProcess::sendFrameworkMessage, data);
 
   return 0;
 }
