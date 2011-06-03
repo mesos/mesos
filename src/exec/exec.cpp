@@ -70,7 +70,7 @@ public:
         &FrameworkToExecutorMessage::executor_id,
         &FrameworkToExecutorMessage::data);
 
-    installProtobufHandler<ShutdownMessage>(
+    installProtobufHandler<ShutdownExecutorMessage>(
         &ExecutorProcess::shutdown);
 
     installMessageHandler(EXITED, &ExecutorProcess::exited);

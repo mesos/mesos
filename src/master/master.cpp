@@ -1356,13 +1356,13 @@ void Master::terminateFramework(Framework* framework,
 
 
 void Master::removeFramework(Framework* framework)
-{ 
+{
   framework->active = false;
   // TODO: Notify allocator that a framework removal is beginning?
   
-  // Tell slaves to kill the framework
+  // Tell slaves to shutdown the framework.
   foreachvalue (Slave* slave, slaves) {
-    KillFrameworkMessage message;
+    ShutdownFrameworkMessage message;
     message.mutable_framework_id()->MergeFrom(framework->id);
     send(slave->pid, message);
   }

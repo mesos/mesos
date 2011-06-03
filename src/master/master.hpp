@@ -35,6 +35,8 @@ struct SlaveResources;
 class SlaveObserver;
 struct Offer;
 
+// TODO(benh): Add units after constants.
+// TODO(benh): Also make configuration options be constants.
 
 // Maximum number of slot offers to have outstanding for each framework.
 const int MAX_OFFERS_PER_FRAMEWORK = 50;

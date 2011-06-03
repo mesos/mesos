@@ -22,7 +22,7 @@ using mesos::internal::master::Master;
 
 using mesos::internal::slave::ProcessBasedIsolationModule;
 using mesos::internal::slave::Slave;
-using mesos::internal::slave::STATUS_UPDATE_RETRY_INTERVAL;
+using mesos::internal::slave::STATUS_UPDATE_RETRY_INTERVAL_SECONDS;
 
 using process::PID;
 
@@ -364,7 +364,7 @@ TEST(MasterTest, SchedulerFailoverStatusUpdate)
 
   WAIT_UNTIL(registeredCall);
 
-  process::Clock::advance(STATUS_UPDATE_RETRY_INTERVAL*2);
+  process::Clock::advance(STATUS_UPDATE_RETRY_INTERVAL_SECONDS);
 
   WAIT_UNTIL(statusUpdateCall);
 

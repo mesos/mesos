@@ -1,6 +1,8 @@
 #ifndef __PROCESS_BASED_ISOLATION_MODULE_HPP__
 #define __PROCESS_BASED_ISOLATION_MODULE_HPP__
 
+#include <string>
+
 #include <sys/types.h>
 
 #include "isolation_module.hpp"

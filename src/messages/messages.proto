@@ -2,6 +2,13 @@ import "mesos.proto";
 
 package mesos.internal;
 
+// TODO(benh): Provide comments for each of these messages. Also,
+// consider splitting these messages into different "packages" which
+// represent which messages get handled by which components (e.g., the
+// "mesos.internal.executor" package includes messages that the
+// executor handles).
+
+
 // TODO(benh): It would be great if this could just be a
 // TaskDescription wherever it gets used! However, doing so would
 // require adding the framework_id field, the executor_id field, and
@@ -170,9 +177,15 @@ message HeartbeatMessage {
 }
 
 
-message KillFrameworkMessage {
+// Tells a slave to shut down all executors of the given framework.
+message ShutdownFrameworkMessage {
   required FrameworkID framework_id = 1;
 }
+
+
+// Tells the executor to initiate a shut down by invoking
+// Executor::shutdown.
+message ShutdownExecutorMessage {}
 
 
 message UpdateFrameworkMessage {
@@ -230,6 +243,3 @@ message NewMasterDetectedMessage {
 message GotMasterTokenMessage {
   required string token = 1;
 }
-
-
-message ShutdownMessage {}

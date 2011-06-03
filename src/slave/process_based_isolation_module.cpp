@@ -6,6 +6,7 @@
 
 #include "process_based_isolation_module.hpp"
 
+#include "common/foreach.hpp"
 #include "common/type_utils.hpp"
 
 using namespace mesos;
@@ -21,7 +22,11 @@ using std::string;
 
 
 ProcessBasedIsolationModule::ProcessBasedIsolationModule()
+  : initialized(false)
 {
+  // Spawn the reaper, note that it might send us a message before we
+  // actually get spawned ourselves, but that's okay, the message will
+  // just get dropped.
   reaper = new Reaper();
   spawn(reaper);
   dispatch(reaper, &Reaper::addProcessExitedListener, this);
@@ -60,12 +65,13 @@ void ProcessBasedIsolationModule::launchExecutor(
     LOG(FATAL) << "Cannot launch executors before initialization!";
   }
 
-  LOG(INFO) << "Starting executor '" << executorInfo.uri()
-            << "' for framework " << frameworkId;
+  LOG(INFO) << "Launching '" << executorInfo.uri()
+            << "' for executor '" << executorInfo.executor_id()
+            << "' of framework " << frameworkId;
 
   pid_t pid;
   if ((pid = fork()) == -1) {
-    PLOG(ERROR) << "Failed to fork to launch new executor";
+    PLOG(FATAL) << "Failed to fork to launch new executor";
   }
 
   if (pid) {
@@ -95,16 +101,28 @@ void ProcessBasedIsolationModule::killExecutor(
     const FrameworkID& frameworkId,
     const ExecutorID& executorId)
 {
+  if (!pgids.contains(frameworkId) ||
+      !pgids[frameworkId].contains(executorId)) {
+    LOG(ERROR) << "ERROR! Asked to kill an unknown executor!";
+    return;
+  }
+
   if (pgids[frameworkId][executorId] != -1) {
     // TODO(benh): Consider sending a SIGTERM, then after so much time
     // if it still hasn't exited do a SIGKILL (can use a libprocess
-    // process for this).
+    // process for this). This might not be necessary because we have
+    // higher-level semantics via the first shut down phase that gets
+    // initiated by the slave.
     LOG(INFO) << "Sending SIGKILL to process group "
               << pgids[frameworkId][executorId];
 
     killpg(pgids[frameworkId][executorId], SIGKILL);
 
     pgids[frameworkId].erase(executorId);
+
+    if (pgids[frameworkId].size() == 0) {
+      pgids.erase(frameworkId);
+    }
 
     // TODO(benh): Kill all of the process's descendants? Perhaps
     // create a new libprocess process that continually tries to kill

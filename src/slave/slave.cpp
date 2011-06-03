@@ -27,9 +27,11 @@ struct Executor
       info(_info),
       directory(_directory),
       id(_info.executor_id()),
-      pid(UPID()) {}
+      uuid(UUID::random()),
+      pid(UPID()),
+      shutdown(false) {}
 
-  virtual ~Executor()
+  ~Executor()
   {
     // Delete the tasks.
     foreachvalue (Task* task, launchedTasks) {
@@ -86,9 +88,13 @@ struct Executor
 
   const string directory;
 
+  const UUID uuid; // Distinguishes executor instances with same ExecutorID.
+
   UPID pid;
 
-  Resources resources;
+  bool shutdown; // Indicates if executor is being shut down.
+
+  Resources resources; // Currently consumed resources.
 
   hashmap<TaskID, TaskDescription> queuedTasks;
   hashmap<TaskID, Task*> launchedTasks;
@@ -103,7 +109,7 @@ struct Framework
             const UPID& _pid)
     : id(_id), info(_info), pid(_pid) {}
 
-  virtual ~Framework() {}
+  ~Framework() {}
 
   Executor* createExecutor(const ExecutorInfo& executorInfo,
                            const string& directory)
@@ -216,7 +222,7 @@ Slave::~Slave()
   // TODO(benh): Shut down and free frameworks?
 
   // TODO(benh): Shut down and free executors? The executor should get
-  // an "exited" event and initiate shutdown itself.
+  // an "exited" event and initiate a shut down itself.
 }
 
 
@@ -254,6 +260,11 @@ void Slave::registerOptions(Configurator* configurator)
       "frameworks_home",
       "Directory prepended to relative executor\n"
       "paths (default: MESOS_HOME/frameworks)");
+
+  configurator->addOption<double>(
+      "executor_shutdown_timeout_seconds",
+      "Amount of time (in seconds) to wait for an executor to shut down\n",
+      EXECUTOR_SHUTDOWN_TIMEOUT_SECONDS);
 }
 
 
@@ -367,9 +378,9 @@ void Slave::initialize()
       &KillTaskMessage::framework_id,
       &KillTaskMessage::task_id);
 
-  installProtobufHandler<KillFrameworkMessage>(
-      &Slave::killFramework,
-      &KillFrameworkMessage::framework_id);
+  installProtobufHandler<ShutdownFrameworkMessage>(
+      &Slave::shutdownFramework,
+      &ShutdownFrameworkMessage::framework_id);
 
   installProtobufHandler<FrameworkToExecutorMessage>(
       &Slave::schedulerMessage,
@@ -456,18 +467,26 @@ void Slave::operator () ()
 
   while (true) {
     serve(1);
-    if (name() == process::TERMINATE) {
+    if (name() == TERMINATE) {
       LOG(INFO) << "Asked to terminate by " << from();
-      foreachvalue (Framework* framework, utils::copy(frameworks)) {
-        removeFramework(framework);
+      foreachkey (const FrameworkID& frameworkId, frameworks) {
+        // TODO(benh): Because a shut down isn't instantaneous (but has
+        // a shut down/kill phases) we might not actually propogate all
+        // the status updates appropriately here. Consider providing
+        // an alternative function which skips the shut down phase and
+        // simply does a kill (sending all status updates
+        // immediately). Of course, this still isn't sufficient
+        // because those status updates might get lost and we won't
+        // resend them unless we build that into the system.
+        shutdownFramework(frameworkId);
       }
       break;
     }
   }
 
   // Stop the isolation module.
-  terminate(isolationModule->self());
-  wait(isolationModule->self());
+  terminate(isolationModule);
+  wait(isolationModule);
 }
 
 
@@ -540,15 +559,38 @@ void Slave::runTask(const FrameworkInfo& frameworkInfo,
     frameworks[frameworkId] = framework;
   }
 
+  const ExecutorInfo& executorInfo = task.has_executor()
+    ? task.executor()
+    : framework->info.executor();
+
+  const ExecutorID& executorId = executorInfo.executor_id();
+
   // Either send the task to an executor or start a new executor
   // and queue the task until the executor has started.
-  Executor* executor = task.has_executor()
-    ? framework->getExecutor(task.executor().executor_id())
-    : framework->getExecutor(framework->info.executor().executor_id());
-        
+  Executor* executor = framework->getExecutor(executorId);
+
   if (executor != NULL) {
-    if (!executor->pid) {
+    if (executor->shutdown) {
+      LOG(WARNING) << "WARNING! Asked to run task '" << task.task_id()
+                   << "' for framework " << frameworkId
+                   << " with executor '" << executorId
+                   << "' which is being shut down";
+
+      StatusUpdateMessage message;
+      StatusUpdate* update = message.mutable_update();
+      update->mutable_framework_id()->MergeFrom(frameworkId);
+      update->mutable_slave_id()->MergeFrom(id);
+      TaskStatus* status = update->mutable_status();
+      status->mutable_task_id()->MergeFrom(task.task_id());
+      status->set_state(TASK_LOST);
+      update->set_timestamp(elapsedTime());
+      update->set_uuid(UUID::random().toBytes());
+      send(master, message);
+    } else if (!executor->pid) {
       // Queue task until the executor starts up.
+      LOG(INFO) << "Queuing task '" << task.task_id()
+                << "' for executor " << executorId
+                << " of framework '" << frameworkId;
       executor->queuedTasks[task.task_id()] = task;
     } else {
       // Add the task and send it to the executor.
@@ -570,13 +612,7 @@ void Slave::runTask(const FrameworkInfo& frameworkInfo,
     }
   } else {
     // Launch an executor for this task.
-    ExecutorInfo executorInfo = task.has_executor()
-      ? task.executor()
-      : framework->info.executor();
-
-    ExecutorID executorId = executorInfo.executor_id();
-
-    string directory = getUniqueWorkDirectory(framework->id, executorId);
+    const string& directory = getUniqueWorkDirectory(framework->id, executorId);
 
     LOG(INFO) << "Using '" << directory
               << "' as work directory for executor '" << executorId
@@ -614,7 +650,7 @@ void Slave::killTask(const FrameworkID& frameworkId,
     StatusUpdate* update = message.mutable_update();
     update->mutable_framework_id()->MergeFrom(frameworkId);
     update->mutable_slave_id()->MergeFrom(id);
-    TaskStatus *status = update->mutable_status();
+    TaskStatus* status = update->mutable_status();
     status->mutable_task_id()->MergeFrom(taskId);
     status->set_state(TASK_LOST);
     update->set_timestamp(elapsedTime());
@@ -637,7 +673,7 @@ void Slave::killTask(const FrameworkID& frameworkId,
     StatusUpdate* update = message.mutable_update();
     update->mutable_framework_id()->MergeFrom(framework->id);
     update->mutable_slave_id()->MergeFrom(id);
-    TaskStatus *status = update->mutable_status();
+    TaskStatus* status = update->mutable_status();
     status->mutable_task_id()->MergeFrom(taskId);
     status->set_state(TASK_LOST);
     update->set_timestamp(elapsedTime());
@@ -657,7 +693,7 @@ void Slave::killTask(const FrameworkID& frameworkId,
     update->mutable_framework_id()->MergeFrom(framework->id);
     update->mutable_executor_id()->MergeFrom(executor->id);
     update->mutable_slave_id()->MergeFrom(id);
-    TaskStatus *status = update->mutable_status();
+    TaskStatus* status = update->mutable_status();
     status->mutable_task_id()->MergeFrom(taskId);
     status->set_state(TASK_KILLED);
     update->set_timestamp(elapsedTime());
@@ -674,13 +710,23 @@ void Slave::killTask(const FrameworkID& frameworkId,
 }
 
 
-void Slave::killFramework(const FrameworkID& frameworkId)
+// TODO(benh): Consider sending a boolean that specifies if the
+// shut down should be graceful or immediate. Likewise, consider
+// sending back a shut down acknowledgement, because otherwise you
+// couuld get into a state where a shut down was sent, dropped, and
+// therefore never processed.
+void Slave::shutdownFramework(const FrameworkID& frameworkId)
 {
-  LOG(INFO) << "Asked to kill framework " << frameworkId;
+  LOG(INFO) << "Asked to shut down framework " << frameworkId;
 
   Framework* framework = getFramework(frameworkId);
   if (framework != NULL) {
-    removeFramework(framework);
+    LOG(INFO) << "Shutting down framework " << framework->id;
+
+    // Shut down all executors of this framework.
+    foreachvalue (Executor* executor, framework->executors) {
+      shutdownExecutor(framework, executor);
+    }
   }
 }
 
@@ -837,7 +883,7 @@ void Slave::registerExecutor(const FrameworkID& frameworkId,
     LOG(WARNING) << "Framework " << frameworkId
                  << " does not exist (it may have been killed),"
                  << " telling executor to exit";
-    send(from(), ShutdownMessage());
+    send(from(), ShutdownExecutorMessage());
     return;
   }
 
@@ -847,12 +893,12 @@ void Slave::registerExecutor(const FrameworkID& frameworkId,
   if (executor == NULL) {
     LOG(WARNING) << "WARNING! Unexpected executor '" << executorId
                  << "' registering for framework " << frameworkId;
-    send(from(), ShutdownMessage());
+    send(from(), ShutdownExecutorMessage());
   } else if (executor->pid) {
     LOG(WARNING) << "WARNING! executor '" << executorId
                  << "' of framework " << frameworkId
                  << " is already running";
-    send(from(), ShutdownMessage());
+    send(from(), ShutdownExecutorMessage());
   } else {
     // Save the pid for the executor.
     executor->pid = from();
@@ -1048,7 +1094,7 @@ void Slave::statusUpdate(const StatusUpdate& update)
       UUID uuid = UUID::fromBytes(update.uuid());
 
       // Send us a message to try and resend after some delay.
-      delay(STATUS_UPDATE_RETRY_INTERVAL,
+      delay(STATUS_UPDATE_RETRY_INTERVAL_SECONDS,
             self(), &Slave::statusUpdateTimeout,
             framework->id, uuid);
 
@@ -1509,14 +1555,14 @@ Framework* Slave::getFramework(const FrameworkID& frameworkId)
 // }
 
 
+// N.B. When the slave is running in "local" mode then the pid is
+// uninteresting (and possibly could cause bugs).
 void Slave::executorStarted(const FrameworkID& frameworkId,
                             const ExecutorID& executorId,
                             pid_t pid)
 {
-  // TODO(benh): If the slave is running in "local" mode than the pid
-  // is uninteresting here, and if we ever write the pid to file, we
-  // should write something that makes is such that we don't try and
-  // ever recover and connect to an executor with pid 0!
+  LOG(INFO) << "Executor '" << executorId << "' of framework "
+            << frameworkId << " has started at " << pid;
 }
 
 
@@ -1541,9 +1587,9 @@ void Slave::executorExited(const FrameworkID& frameworkId,
     return;
   }
 
-  LOG(INFO) << "Exited executor '" << executorId
+  LOG(INFO) << "Executor '" << executorId
             << "' of framework " << frameworkId
-            << " with status " << status;
+            << " has exited with status " << status;
 
   ExitedExecutorMessage message;
   message.mutable_slave_id()->MergeFrom(id);
@@ -1552,57 +1598,85 @@ void Slave::executorExited(const FrameworkID& frameworkId,
   message.set_status(status);
   send(master, message);
 
-  removeExecutor(framework, executor, false);
+  // TODO(benh): Send status updates for remaining tasks here rather
+  // than at the master! As in, eliminate the code in
+  // Master::exitedExecutor and put it here.
 
+  framework->destroyExecutor(executor->id);
+
+  // Cleanup if this framework has nothing running.
   if (framework->executors.size() == 0) {
-    removeFramework(framework);
+    // TODO(benh): But there might be some remaining status updates
+    // that haven't been acknowledged!
+    frameworks.erase(framework->id);
+    delete framework;
   }
 }
 
 
-// Remove a framework (including its executor(s) if killExecutors is true).
-void Slave::removeFramework(Framework* framework, bool killExecutors)
+void Slave::shutdownExecutor(Framework* framework, Executor* executor)
 {
-  LOG(INFO) << "Cleaning up framework " << framework->id;
+  LOG(INFO) << "Shutting down executor '" << executor->id
+            << "' of framework " << framework->id;
 
-  // Shutdown all executors of this framework.
-  foreachvalue (Executor* executor, utils::copy(framework->executors)) {
-    removeExecutor(framework, executor, killExecutors);
-  }
+  send(executor->pid, ShutdownExecutorMessage());
 
-  frameworks.erase(framework->id);
-  delete framework;
+  executor->shutdown = true;
+
+  // Prepare for sending a kill if the executor doesn't comply.
+  double timeout = conf.get<double>("executor_shutdown_timeout_seconds",
+                                    EXECUTOR_SHUTDOWN_TIMEOUT_SECONDS);
+
+  delay(timeout, self(),
+        &Slave::shutdownExecutorTimeout,
+        framework->id, executor->id, executor->uuid);
 }
 
 
-void Slave::removeExecutor(Framework* framework,
-                           Executor* executor,
-                           bool killExecutor)
+void Slave::shutdownExecutorTimeout(const FrameworkID& frameworkId,
+                                    const ExecutorID& executorId,
+                                    const UUID& uuid)
 {
-  if (killExecutor) {
-    LOG(INFO) << "Shutting down executor '" << executor->id
-              << "' of framework " << framework->id;
+  Framework* framework = getFramework(frameworkId);
+  if (framework == NULL) {
+    return;
+  }
 
-    send(executor->pid, ShutdownMessage());
+  Executor* executor = framework->getExecutor(executorId);
+  if (executor == NULL) {
+    return;
+  }
 
-    // TODO(benh): There really isn't ANY time between when an
-    // executor gets a shutdown message and the isolation module goes
-    // and kills it. We should really think about making the semantics
-    // of this better.
-
+  // Make sure this timeout is valid.
+  if (executor->uuid == uuid) {
     LOG(INFO) << "Killing executor '" << executor->id
               << "' of framework " << framework->id;
 
     dispatch(isolationModule,
              &IsolationModule::killExecutor,
              framework->id, executor->id);
+
+    ExitedExecutorMessage message;
+    message.mutable_slave_id()->MergeFrom(id);
+    message.mutable_framework_id()->MergeFrom(frameworkId);
+    message.mutable_executor_id()->MergeFrom(executorId);
+    message.set_status(-1);
+    send(master, message);
+
+    // TODO(benh): Send status updates for remaining tasks here rather
+    // than at the master! As in, eliminate the code in
+    // Master::exitedExecutor and put it here.
+
+    framework->destroyExecutor(executor->id);
+
+    // Cleanup if this framework has nothing running.
+    if (framework->executors.size() == 0) {
+      // TODO(benh): But there might be some remaining status updates
+      // that haven't been acknowledged!
+      frameworks.erase(framework->id);
+      delete framework;
+    }
   }
-
-  // TODO(benh): We need to push a bunch of status updates which
-  // signifies all tasks are dead (once the Master stops doing this
-  // for us).
-
-  framework->destroyExecutor(executor->id);
 }
 
 
