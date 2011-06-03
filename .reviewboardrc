@@ -1,0 +1,3 @@
+REPOSITORY = 'mesos'
+REVIEWBOARD_URL = 'http://reviewboard.local.twitter.com'
+
