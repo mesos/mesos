@@ -1,3 +1,6 @@
+#include <sys/types.h>
+#include <sys/wait.h>
+
 #include <process/dispatch.hpp>
 
 #include "reaper.hpp"

@@ -46,6 +46,8 @@ using std::map;
 using std::string;
 using std::vector;
 
+using process::wait; // Necessary on some OS's to disambiguate.
+
 using std::tr1::bind;
 
 

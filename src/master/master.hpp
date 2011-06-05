@@ -15,6 +15,7 @@
 #include "common/multimap.hpp"
 #include "common/resources.hpp"
 #include "common/type_utils.hpp"
+#include "common/units.hpp"
 #include "common/utils.hpp"
 
 #include "configurator/configurator.hpp"

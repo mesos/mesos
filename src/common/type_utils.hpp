@@ -10,11 +10,6 @@
 #include "messages/messages.hpp"
 
 
-// Some memory unit constants.
-const int32_t Megabyte = 1;
-const int32_t Gigabyte = 1024 * Megabyte;
-
-
 namespace mesos {
 
 inline std::ostream& operator << (std::ostream& stream, const FrameworkID& frameworkId)

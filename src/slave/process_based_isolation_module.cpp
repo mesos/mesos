@@ -20,6 +20,8 @@ using launcher::ExecutorLauncher;
 using std::map;
 using std::string;
 
+using process::wait; // Necessary on some OS's to disambiguate.
+
 
 ProcessBasedIsolationModule::ProcessBasedIsolationModule()
   : initialized(false)

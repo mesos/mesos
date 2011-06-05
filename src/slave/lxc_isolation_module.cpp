@@ -1,14 +1,14 @@
-#include <map>
-
 #include <algorithm>
-#include <stdlib.h>
-#include <unistd.h>
+#include <sstream>
+#include <map>
 
 #include <process/dispatch.hpp>
 
 #include "lxc_isolation_module.hpp"
 
 #include "common/foreach.hpp"
+#include "common/type_utils.hpp"
+#include "common/units.hpp"
 
 #include "launcher/launcher.hpp"
 
@@ -20,16 +20,68 @@ using namespace process;
 
 using launcher::ExecutorLauncher;
 
+using process::wait; // Necessary on some OS's to disambiguate.
+
 using std::map;
+using std::max;
 using std::string;
+
 
 namespace {
 
 const int32_t CPU_SHARES_PER_CPU = 1024;
 const int32_t MIN_CPU_SHARES = 10;
-const int64_t MIN_RSS = 128 * Megabyte;
+const int64_t MIN_RSS_MB = 128 * Megabyte;
 
+
+// TODO(benh): Factor this out into common/utils or possibly into
+// libprocess so that it can handle blocking.
+// Run a shell command formatted with varargs and return its exit code.
+int shell(const char* format, ...)
+{
+  char* cmd;
+  FILE* f;
+  int ret;
+  va_list args;
+  va_start(args, format);
+  if (vasprintf(&cmd, format, args) == -1)
+    return -1;
+  if ((f = popen(cmd, "w")) == NULL)
+    return -1;
+  ret = pclose(f);
+  if (ret == -1)
+    LOG(INFO) << "pclose error: " << strerror(errno);
+  free(cmd);
+  va_end(args);
+  return ret;
 }
+
+
+// Attempt to set a resource limit of a container for a given cgroup
+// property (e.g. cpu.shares). Returns true on success.
+bool setResourceLimit(const string& container,
+		      const string& property,
+		      int64_t value)
+{
+  LOG(INFO) << "Setting " << property
+            << " for container " << container
+            << " to " << value;
+
+  int ret = shell("lxc-cgroup -n %s %s %lld",
+                  container.c_str(),
+                  property.c_str(),
+                  value);
+  if (ret != 0) {
+    LOG(ERROR) << "Failed to set " << property
+               << " for container " << container
+               << ": lxc-cgroup returned " << ret;
+    return false;
+  }
+
+  return true;
+}
+
+} // namespace {
 
 
 LxcIsolationModule::LxcIsolationModule()
@@ -88,23 +140,27 @@ void LxcIsolationModule::launchExecutor(
     LOG(FATAL) << "Cannot launch executors before initialization!";
   }
 
+  const ExecutorID& executorId = executorInfo.executor_id();
+
   LOG(INFO) << "Launching '" << executorInfo.uri()
-            << "' for executor '" << executorInfo.executor_id()
+            << "' for executor '" << executorId
             << "' of framework " << frameworkId;
 
-  infos[frameworkId][executorInfo.executor_id()] = new FrameworkInfo();
-
-  // Get location of Mesos install in order to find mesos-launcher.
-  string mesosLauncher = conf.get("home", ".") + "/mesos-launcher";
-
   // Create a name for the container.
-  ostringstream out;
-  out << "mesos.executor-" << executorInfo.executor_id()
+  std::ostringstream out;
+  out << "mesos.executor-" << executorId
       << ".framework-" << frameworkId;
 
-  string containerName = out.str();
+  const string& container = out.str();
 
-  infos[frameworkId][executorInfo.executor_id()]->container = containerName;
+  ContainerInfo* info = new ContainerInfo();
+
+  info->frameworkId = frameworkId;
+  info->executorId = executorId;
+  info->container = container;
+  info->pid = -1;
+
+  infos[frameworkId][executorId] = info;
 
   // Run lxc-execute mesos-launcher using a fork-exec (since lxc-execute
   // does not return until the container is finished). Note that lxc-execute
@@ -116,11 +172,11 @@ void LxcIsolationModule::launchExecutor(
 
   if (pid) {
     // In parent process.
-    infos[frameworkId][executorInfo.executor_id()]->pid = pid;
+    info->pid = pid;
 
     // Tell the slave this executor has started.
     dispatch(slave, &Slave::executorStarted,
-             frameworkId, executorInfo.executor_id(), pid);
+             frameworkId, executorId, pid);
   } else {
     // Create an ExecutorLauncher to set up the environment for executing
     // an external launcher_main.cpp process (inside of lxc-execute).
@@ -133,7 +189,7 @@ void LxcIsolationModule::launchExecutor(
 
     ExecutorLauncher* launcher =
       new ExecutorLauncher(frameworkId,
-			   executorInfo.executor_id(),
+			   executorId,
 			   executorInfo.uri(),
 			   frameworkInfo.user(),
                            directory,
@@ -146,9 +202,12 @@ void LxcIsolationModule::launchExecutor(
 			   params);
 
     launcher->setupEnvironmentForLauncherMain();
+
+    // Get location of Mesos install in order to find mesos-launcher.
+    string mesosLauncher = conf.get("home", ".") + "/mesos-launcher";
     
     // Run lxc-execute.
-    execlp("lxc-execute", "lxc-execute", "-n", containerName.c_str(),
+    execlp("lxc-execute", "lxc-execute", "-n", container.c_str(),
            mesosLauncher.c_str(), (char *) NULL);
 
     // If we get here, the execlp call failed.
@@ -161,28 +220,28 @@ void LxcIsolationModule::killExecutor(
     const FrameworkID& frameworkId,
     const ExecutorID& executorId)
 {
-  if (!infos.countains(frameworkId) ||
+  if (!infos.contains(frameworkId) ||
       !infos[frameworkId].contains(executorId)) {
     LOG(ERROR) << "ERROR! Asked to kill an unknown executor!";
     return;
   }
 
-  FrameworkInfo* info = infos[frameworkId][executorId];
+  ContainerInfo* info = infos[frameworkId][executorId];
 
-  if (info->container != "") {
-    LOG(INFO) << "Stopping container " << info->container;
+  CHECK(info->container != "");
 
-    int ret = shell("lxc-stop -n %s", info->container.c_str());
-    if (ret != 0) {
-      LOG(ERROR) << "lxc-stop returned " << ret;
-    }
+  LOG(INFO) << "Stopping container " << info->container;
 
-    infos[frameworkId].erase(executorId);
-    delete info;
+  int ret = shell("lxc-stop -n %s", info->container.c_str());
+  if (ret != 0) {
+    LOG(ERROR) << "lxc-stop returned " << ret;
+  }
 
-    if (infos[frameworkId].size() == 0) {
-      infos.erase(frameworkId);
-    }
+  infos[frameworkId].erase(executorId);
+  delete info;
+
+  if (infos[frameworkId].size() == 0) {
+    infos.erase(frameworkId);
   }
 }
 
@@ -198,82 +257,50 @@ void LxcIsolationModule::resourcesChanged(
     return;
   }
 
-  if (infos[frameworkId][executorId]->container != "") {
-    // For now, just try setting the CPUs and memory right away, and kill the
-    // framework if this fails.
-    // A smarter thing to do might be to only update them periodically in a
-    // separate thread, and to give frameworks some time to scale down their
-    // memory usage.
+  ContainerInfo* info = infos[frameworkId][executorId];
 
-    double cpu = resources.getScalar("cpu", Resource::Scalar()).value();
-    int32_t cpuShares = max(CPU_SHARES_PER_CPU * (int32_t) cpu, MIN_CPU_SHARES);
-    if (!setResourceLimit(frameworkId, executorId, "cpu.shares", cpuShares)) {
-      // TODO(benh): Kill the executor, but do it in such a way that
-      // the slave finds out about it exiting.
-      return;
-    }
+  CHECK(info->container != "");
 
-    double mem = resources.getScalar("mem", Resource::Scalar()).value();
-    int64_t rssLimit = max((int64_t) mem, MIN_RSS) * 1024LL * 1024LL;
-    if (!setResourceLimit(frameworkId, executorId, "memory.limit_in_bytes", rssLimit)) {
-      // TODO(benh): Kill the executor, but do it in such a way that
-      // the slave finds out about it exiting.
-      return;
-    }
+  const string& container = info->container;
+
+  // For now, just try setting the CPUs and memory right away, and kill the
+  // framework if this fails (needs to be fixed).
+  // A smarter thing to do might be to only update them periodically in a
+  // separate thread, and to give frameworks some time to scale down their
+  // memory usage.
+  string property;
+  uint64_t value;
+
+  double cpu = resources.getScalar("cpu", Resource::Scalar()).value();
+  int32_t cpuShares = max(CPU_SHARES_PER_CPU * (int32_t) cpu, MIN_CPU_SHARES);
+
+  property = "cpu.shares";
+  value = cpuShares;
+
+  if (!setResourceLimit(container, property, value)) {
+    // TODO(benh): Kill the executor, but do it in such a way that
+    // the slave finds out about it exiting.
+    return;
   }
-}
 
+  double mem = resources.getScalar("mem", Resource::Scalar()).value();
+  int64_t rssLimit = max((int64_t) mem, MIN_RSS_MB) * 1024LL * 1024LL;
 
-bool LxcIsolationModule::setResourceLimit(
-    const string& container,
-    const string& property,
-    int64_t value)
-{
-  LOG(INFO) << "Setting " << property
-            << " for container " << << container
-            << " to " << value;
+  property = "memory.limit_in_bytes";
+  value = rssLimit;
 
-  int ret = shell("lxc-cgroup -n %s %s %lld",
-                  container.c_str(),
-                  property.c_str(),
-                  value);
-  if (ret != 0) {
-    LOG(ERROR) << "Failed to set " << property
-               << " for container " << framework->frameworkId
-               << ": lxc-cgroup returned " << ret;
-    return false;
-  } else {
-    return true;
+  if (!setResourceLimit(container, property, value)) {
+    // TODO(benh): Kill the executor, but do it in such a way that
+    // the slave finds out about it exiting.
+    return;
   }
-}
-
-
-// TODO(benh): Factor this out into common/utils or possibly into
-// libprocess so that it can handle blocking.
-int LxcIsolationModule::shell(const char* fmt, ...)
-{
-  char* cmd;
-  FILE* f;
-  int ret;
-  va_list args;
-  va_start(args, fmt);
-  if (vasprintf(&cmd, fmt, args) == -1)
-    return -1;
-  if ((f = popen(cmd, "w")) == NULL)
-    return -1;
-  ret = pclose(f);
-  if (ret == -1)
-    LOG(INFO) << "pclose error: " << strerror(errno);
-  free(cmd);
-  va_end(args);
-  return ret;
 }
 
 
 void LxcIsolationModule::processExited(pid_t pid, int status)
 {
   foreachkey (const FrameworkID& frameworkId, infos) {
-    foreachpair (const ExecutorID& executorId, FrameworkInfo* info, infos[frameworkId]) {
+    foreachpair (const ExecutorID& executorId, ContainerInfo* info, infos[frameworkId]) {
       if (info->pid == pid) {
         // Kill the container.
         killExecutor(frameworkId, executorId);

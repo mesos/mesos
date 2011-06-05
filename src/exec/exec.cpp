@@ -32,6 +32,8 @@ using boost::cref;
 
 using std::string;
 
+using process::wait; // Necessary on some OS's to disambiguate.
+
 
 namespace mesos { namespace internal {
 

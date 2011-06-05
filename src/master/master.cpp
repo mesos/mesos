@@ -22,6 +22,8 @@
 using std::string;
 using std::vector;
 
+using process::wait; // Necessary on some OS's to disambiguate.
+
 
 namespace mesos { namespace internal { namespace master {
 
@@ -149,14 +151,14 @@ struct SlaveReregistrar
 
 
 Master::Master()
-  : ProtobufProcess<Master>("master")
+  : ProcessBase("master")
 {
   initialize();
 }
 
 
 Master::Master(const Configuration& conf)
-  : ProtobufProcess<Master>("master"),
+  : ProcessBase("master"),
     conf(conf)
 {
   initialize();
@@ -1203,12 +1205,12 @@ void Master::processOfferReply(Offer* offer,
 
   // Get out the timeout for left over resources (if exists), and use
   // that to calculate the expiry timeout.
-  int timeout = DEFAULT_REFUSAL_TIMEOUT;
+  double timeout = DEFAULT_REFUSAL_TIMEOUT;
 
   for (int i = 0; i < params.param_size(); i++) {
     if (params.param(i).key() == "timeout") {
       try {
-        timeout = boost::lexical_cast<int>(params.param(i).value());
+        timeout = boost::lexical_cast<double>(params.param(i).value());
       } catch (boost::bad_lexical_cast&) {
         string error = "Failed to convert value '" +
           params.param(i).value() + "' for key 'timeout' to an integer";

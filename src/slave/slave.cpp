@@ -14,6 +14,8 @@ using namespace process;
 
 using std::string;
 
+using process::wait; // Necessary on some OS's to disambiguate.
+
 
 namespace mesos { namespace internal { namespace slave {
 
@@ -193,7 +195,7 @@ struct Framework
 Slave::Slave(const Configuration& _conf,
              bool _local,
              IsolationModule* _isolationModule)
-  : ProtobufProcess<Slave>("slave"),
+  : ProcessBase("slave"),
     conf(_conf),
     local(_local),
     isolationModule(_isolationModule)
@@ -208,7 +210,7 @@ Slave::Slave(const Configuration& _conf,
 Slave::Slave(const Resources& _resources,
              bool _local,
              IsolationModule *_isolationModule)
-  : ProtobufProcess<Slave>("slave"),
+  : ProcessBase("slave"),
     resources(_resources),
     local(_local),
     isolationModule(_isolationModule)
