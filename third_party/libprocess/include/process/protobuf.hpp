@@ -17,7 +17,8 @@
 // Process that allows you to install protocol buffer handlers in
 // addition to normal message and HTTP handlers. Then you can simply
 // send around protocol buffer objects which will get passed to the
-// appropriate handlers.
+// appropriate handlers. Note that this header file assumes you will
+// be linking against BOTH libprotobuf and libglog.
 
 
 namespace google { namespace protobuf {
@@ -61,6 +62,14 @@ protected:
     // function, and then the one we get from process::Process will be
     // sufficient?
     do { if (serve() == process::TERMINATE) break; } while (true);
+  }
+
+  template <typename M>
+  M message()
+  {
+    M m;
+    m.ParseFromString(body());
+    return m;
   }
 
   void send(const process::UPID& to,

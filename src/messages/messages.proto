@@ -2,6 +2,13 @@ import "mesos.proto";
 
 package mesos.internal;
 
+// TODO(benh): Provide comments for each of these messages. Also,
+// consider splitting these messages into different "packages" which
+// represent which messages get handled by which components (e.g., the
+// "mesos.internal.executor" package includes messages that the
+// executor handles).
+
+
 // TODO(benh): It would be great if this could just be a
 // TaskDescription wherever it gets used! However, doing so would
 // require adding the framework_id field, the executor_id field, and
@@ -26,7 +33,7 @@ message StatusUpdate {
   optional SlaveID slave_id = 3;
   required TaskStatus status = 4;
   required double timestamp = 5;
-  required int32 sequence = 6;
+  required bytes uuid = 6;
 }
 
 
@@ -115,8 +122,7 @@ message KillTaskMessage {
 
 message StatusUpdateMessage {
   required StatusUpdate update = 1;
-  // TODO(benh): Provide PID to allow scheds to send acks directly.
-  required bool reliable = 3;
+  optional string pid = 2;
 }
 
 
@@ -124,7 +130,7 @@ message StatusUpdateAcknowledgementMessage {
   required SlaveID slave_id = 1;
   required FrameworkID framework_id = 2;
   required TaskID task_id = 3;
-  required uint32 sequence = 4;
+  required bytes uuid = 4;
 }
 
 
@@ -171,9 +177,15 @@ message HeartbeatMessage {
 }
 
 
-message KillFrameworkMessage {
+// Tells a slave to shut down all executors of the given framework.
+message ShutdownFrameworkMessage {
   required FrameworkID framework_id = 1;
 }
+
+
+// Tells the executor to initiate a shut down by invoking
+// Executor::shutdown.
+message ShutdownExecutorMessage {}
 
 
 message UpdateFrameworkMessage {
@@ -237,72 +249,4 @@ message NewMasterDetectedMessage {
 
 message GotMasterTokenMessage {
   required string token = 1;
-}
-
-
-// Replicated log messages.
-
-
-message PromiseRequest {
-  required uint64 id = 1;
-  optional uint64 position = 2;
-}
-
-
-message PromiseResponse {
-  required bool okay = 1;
-  optional uint64 id = 2;
-  optional uint64 position = 3;
-  optional bytes bytes = 4;
-}
-
-
-message AppendRequest {
-  required uint64 id = 1;
-  required uint64 position = 2;
-  required bytes bytes = 3;
-}
-
-
-message AppendResponse {
-  required uint64 position = 1;
-}
-
-
-message LearnMessage {
-  required uint64 id = 1;
-  required uint64 position = 2;
-  required bytes bytes = 3;
-}
-
-
-message LogRecord
-{
-  enum Type {
-    PROMISE = 1;
-    APPEND = 2;
-    LEARN = 3;
-  }
-
-  message Promise {
-    required uint64 id = 1;
-    optional uint64 position = 2;
-  }
-
-  message Append {
-    required uint64 id = 1;
-    required uint64 position = 2;
-    required bytes bytes = 3;
-  }
-
-  message Learn {
-    required uint64 id = 1;
-    required uint64 position = 2;
-    required bytes bytes = 3;
-  }
-
-  required Type type = 1;
-  optional Promise promise = 2;
-  optional Append append = 3;
-  optional Learn learn = 4;
 }

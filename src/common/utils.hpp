@@ -38,7 +38,7 @@ T copy(const T& t) { return t; }
 
 
 template <typename T>
-inline std::string stringify(T t)
+std::string stringify(T t)
 {
   try {
     return boost::lexical_cast<std::string>(t);
@@ -46,7 +46,6 @@ inline std::string stringify(T t)
     LOG(FATAL) << "Failed to stringify!";
   }
 }
-
 
 namespace protobuf { 
 
@@ -71,6 +70,8 @@ inline bool write(int fd, const google::protobuf::Message& message)
   }
 
   return message.SerializeToFileDescriptor(fd);
+
+  flush!;
 }
 
 
@@ -166,6 +167,18 @@ inline void setenv(const std::string& key,
 inline void unsetenv(const std::string& key)
 {
   ::unsetenv(key.c_str());
+}
+
+
+inline Result<int> open(const std::string& path, int oflag)
+{
+  int fd = ::open(path.c_str(), oflag);
+
+  if (fd < 0) {
+    return Result<int>::error(strerror(errno));
+  }
+
+  return Result<int>::some(fd);
 }
 
 

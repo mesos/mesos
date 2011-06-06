@@ -1,6 +1,8 @@
 #ifndef __PROCESS_BASED_ISOLATION_MODULE_HPP__
 #define __PROCESS_BASED_ISOLATION_MODULE_HPP__
 
+#include <string>
+
 #include <sys/types.h>
 
 #include "isolation_module.hpp"
@@ -55,9 +57,9 @@ protected:
       const std::string& directory);
 
 private:
-  // No copying.
+  // No copying, no assigning.
   ProcessBasedIsolationModule(const ProcessBasedIsolationModule&);
-  void operator = (const ProcessBasedIsolationModule&);
+  ProcessBasedIsolationModule& operator = (const ProcessBasedIsolationModule&);
 
   // TODO(benh): Make variables const by passing them via constructor.
   Configuration conf;

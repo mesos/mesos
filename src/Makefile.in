@@ -110,7 +110,7 @@ ifeq ($(OS_NAME),linux)
   SLAVE_OBJ += slave/lxc_isolation_module.o
 endif
 
-PROTOBUF_OBJ = mesos.pb.o messages/messages.pb.o
+PROTOBUF_OBJ = mesos.pb.o messages/messages.pb.o messages/log.pb.o
 
 MASTER_WEBUI_OBJ = master/webui.o
 MASTER_SWIG_WEBUI_OBJ = webui/master/swig/master_wrap.o
@@ -259,9 +259,15 @@ mesos.pb.cc: @top_srcdir@/include/mesos/mesos.proto
 $(INCLUDEDIR)/mesos/mesos.hpp: mesos.pb.cc | $(INCLUDEDIR) $(INCLUDEDIR)/mesos
 	cp mesos.pb.h $(INCLUDEDIR)/mesos/mesos.hpp
 
+# TODO(benh): Clean up how protobuf objects get built.
+
 messages/messages.pb.cc: $(SRCDIR)/messages/messages.proto
 	mkdir -p messages
 	$(PROTOC) -I$(SRCDIR)/messages -I@top_srcdir@/include/mesos --cpp_out=messages $(SRCDIR)/messages/messages.proto
+
+messages/log.pb.cc: $(SRCDIR)/messages/log.proto
+	mkdir -p messages
+	$(PROTOC) -I$(SRCDIR)/messages -I@top_srcdir@/include/mesos --cpp_out=messages $(SRCDIR)/messages/log.proto
 
 common/build.o: $(SRCDIR)/common/build.cpp force | common
 	$(CXX) -c $(CXXFLAGS) -DBUILD_DATE="\"$$(date '+%Y-%m-%d %H:%M:%S')\"" -DBUILD_USER="\"$$USER\"" -DBUILD_FLAGS="\"$(CFLAGS) $(CXXFLAGS)\"" -o $@ $<
@@ -333,7 +339,7 @@ $(MESOS_JAVA_JAR): $(SRCDIR)/java/src/org/apache/mesos/*.java @top_srcdir@/inclu
 ifdef JAVA_HOME
 	mkdir -p @top_builddir@/$(PROTOBUF)/java/src/main/java
 	$(PROTOC) --java_out=@top_builddir@/$(PROTOBUF)/java/src/main/java -I@top_srcdir@/$(PROTOBUF)/src @top_srcdir@/$(PROTOBUF)/src/google/protobuf/descriptor.proto
-	$(JAVA_HOME)/bin/javac -d @top_builddir@/$(PROTOBUF)/java/src/main/java @top_srcdir@/$(PROTOBUF)/java/src/main/java/com/google/protobuf/*.java @top_builddir@/$(PROTOBUF)/java/src/main/java/com/google/protobuf/*.java
+	$(JAVA_HOME)/bin/javac -d @top_builddir@/$(PROTOBUF)/java/src/main/java @top_srcdir@/$(PROTOBUF)/java/src/main/java/com/google/protobuf/*.java
 	rm -f java/classes/org/apache/mesos/*
 	mkdir -p java/classes/org/apache/mesos
 	$(JAVA_HOME)/bin/javac -classpath @top_builddir@/$(PROTOBUF)/java/src/main/java -sourcepath java/generated -d java/classes java/generated/org/apache/mesos/*.java

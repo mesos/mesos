@@ -434,13 +434,6 @@ void Master::initialize()
       &FrameworkToExecutorMessage::executor_id,
       &FrameworkToExecutorMessage::data);
 
-  installProtobufHandler<StatusUpdateAcknowledgementMessage>(
-      &Master::statusUpdateAcknowledgement,
-      &StatusUpdateAcknowledgementMessage::framework_id,
-      &StatusUpdateAcknowledgementMessage::task_id,
-      &StatusUpdateAcknowledgementMessage::slave_id,
-      &StatusUpdateAcknowledgementMessage::sequence);
-
   installProtobufHandler<RegisterSlaveMessage>(
       &Master::registerSlave,
       &RegisterSlaveMessage::slave);
@@ -458,7 +451,7 @@ void Master::initialize()
   installProtobufHandler<StatusUpdateMessage>(
       &Master::statusUpdate,
       &StatusUpdateMessage::update,
-      &StatusUpdateMessage::reliable);
+      &StatusUpdateMessage::pid);
 
   installProtobufHandler<ExecutorToFrameworkMessage>(
       &Master::executorMessage,
@@ -487,13 +480,13 @@ void Master::initialize()
 }
 
 
-void Master::newMasterDetected(const string& pid)
+void Master::newMasterDetected(const UPID& pid)
 {
   // Check and see if we are (1) still waiting to be the active
   // master, (2) newly active master, (3) no longer active master,
   // or (4) still active master.
 
-  UPID master(pid);
+  UPID master = pid;
 
   if (master != self() && !active) {
     LOG(INFO) << "Waiting to be master!";
@@ -673,7 +666,6 @@ void Master::resourceOfferReply(const FrameworkID& frameworkId,
         status->mutable_task_id()->MergeFrom(task.task_id());
         status->set_state(TASK_LOST);
         update->set_timestamp(elapsedTime());
-        message.set_reliable(false);
         send(framework->pid, message);
       }
     }
@@ -730,7 +722,6 @@ void Master::killTask(const FrameworkID& frameworkId,
       status->mutable_task_id()->MergeFrom(taskId);
       status->set_state(TASK_LOST);
       update->set_timestamp(elapsedTime());
-      message.set_reliable(false);
       send(framework->pid, message);
     }
   }
@@ -768,39 +759,6 @@ void Master::schedulerMessage(const SlaveID& slaveId,
                  << frameworkId << " to slave " << slaveId
                  << " because framework does not exist";
     stats.invalidFrameworkMessages++;
-  }
-}
-
-
-void Master::statusUpdateAcknowledgement(const FrameworkID& frameworkId,
-                                         const TaskID& taskId,
-                                         const SlaveID& slaveId,
-                                         int32_t sequence)
-{
-  Framework* framework = getFramework(frameworkId);
-  if (framework != NULL) {
-    Slave* slave = getSlave(slaveId);
-    if (slave != NULL) {
-      LOG(INFO) << "Sending slave " << slaveId
-                << " status update acknowledgement for task " << taskId
-                << " of framework " << frameworkId;
-      StatusUpdateAcknowledgementMessage message;
-      message.mutable_framework_id()->MergeFrom(frameworkId);
-      message.mutable_slave_id()->MergeFrom(slaveId);
-      message.mutable_task_id()->MergeFrom(taskId);
-      message.set_sequence(sequence);
-      send(slave->pid, message);
-    } else {
-      LOG(WARNING) << "Cannot tell slave " << slaveId
-                   << " of status update acknowledgement for task " << taskId
-                   << " of framework " << frameworkId
-                   << " because slave does not exist";
-    }
-  } else {
-    LOG(WARNING) << "Cannot tell slave " << slaveId
-                 << " of status update acknowledgement for task " << taskId
-                 << " of framework " << frameworkId
-                 << " because framework does not exist";
   }
 }
 
@@ -889,7 +847,7 @@ void Master::unregisterSlave(const SlaveID& slaveId)
 }
 
 
-void Master::statusUpdate(const StatusUpdate& update, bool reliable)
+void Master::statusUpdate(const StatusUpdate& update, const UPID& pid)
 {
   const TaskStatus& status = update.status();
 
@@ -905,7 +863,7 @@ void Master::statusUpdate(const StatusUpdate& update, bool reliable)
       // Pass on the (transformed) status update to the framework.
       StatusUpdateMessage message;
       message.mutable_update()->MergeFrom(update);
-      message.set_reliable(reliable);
+      message.set_pid(pid);
       send(framework->pid, message);
 
       // Lookup the task and see if we need to update anything locally.
@@ -1021,7 +979,6 @@ void Master::exitedExecutor(const SlaveID& slaveId,
           status->mutable_task_id()->MergeFrom(task->task_id());
           status->set_state(TASK_LOST);
           update->set_timestamp(elapsedTime());
-          message.set_reliable(false);
           send(framework->pid, message);
 
           LOG(INFO) << "Removing task " << task->task_id()
@@ -1399,13 +1356,13 @@ void Master::terminateFramework(Framework* framework,
 
 
 void Master::removeFramework(Framework* framework)
-{ 
+{
   framework->active = false;
   // TODO: Notify allocator that a framework removal is beginning?
   
-  // Tell slaves to kill the framework
+  // Tell slaves to shutdown the framework.
   foreachvalue (Slave* slave, slaves) {
-    KillFrameworkMessage message;
+    ShutdownFrameworkMessage message;
     message.mutable_framework_id()->MergeFrom(framework->id);
     send(slave->pid, message);
   }
@@ -1531,7 +1488,6 @@ void Master::removeSlave(Slave* slave)
       status->mutable_task_id()->MergeFrom(task->task_id());
       status->set_state(TASK_LOST);
       update->set_timestamp(elapsedTime());
-      message.set_reliable(false);
       send(framework->pid, message);
     }
     removeTask(framework, slave, task, TRR_SLAVE_LOST);

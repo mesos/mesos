@@ -20,6 +20,7 @@
 .*
 Makefile
 autom4te.cache
+build/
 config.cache
 config.log
 config.status

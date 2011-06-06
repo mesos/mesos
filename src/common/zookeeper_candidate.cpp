@@ -35,7 +35,7 @@ public:
   void submit(const PID<Candidate>& candidate, const string& data);
   void resign(const PID<Candidate>& candidate);
 
-  // ZooKeeper events.
+  // ZooKeeper events. TODO(*): Use a ZooKeeper listener?
   void connected();
   void reconnecting();
   void reconnected();
@@ -273,7 +273,7 @@ void ElectionProcess::elect()
   }
 
   // (Re)set a watch on the znode.
-  ret = zk->getChildren(znode, true, NULL);  
+  ret = zk->getChildren(znode, true, NULL);
 
   if (ret != ZOK) {
     LOG(FATAL) << "Failed to set a watch on '" << znode

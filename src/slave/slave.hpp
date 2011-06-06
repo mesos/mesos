@@ -9,6 +9,7 @@
 
 #include "common/resources.hpp"
 #include "common/hashmap.hpp"
+#include "common/uuid.hpp"
 
 #include "configurator/configurator.hpp"
 
@@ -17,14 +18,18 @@
 
 namespace mesos { namespace internal { namespace slave {
 
+using namespace process;
+
 struct Framework;
 struct Executor;
 
+// TODO(benh): Also make configuration options be constants.
 
-const double STATUS_UPDATE_RETRY_INTERVAL = 10;
+const double EXECUTOR_SHUTDOWN_TIMEOUT_SECONDS = 5.0;
+const double STATUS_UPDATE_RETRY_INTERVAL_SECONDS = 10.0;
 
 
-// Slave process. 
+// Slave process.
 class Slave : public ProtobufProcess<Slave>
 {
 public:
@@ -40,9 +45,9 @@ public:
 
   static void registerOptions(Configurator* configurator);
 
-  process::Promise<state::SlaveState*> getState();
+  Promise<state::SlaveState*> getState();
 
-  void newMasterDetected(const std::string& pid);
+  void newMasterDetected(const UPID& pid);
   void noMasterDetected();
   void masterDetectionFailure();
   void registered(const SlaveID& slaveId);
@@ -53,7 +58,7 @@ public:
                const TaskDescription& task);
   void killTask(const FrameworkID& frameworkId,
                 const TaskID& taskId);
-  void killFramework(const FrameworkID& frameworkId);
+  void shutdownFramework(const FrameworkID& frameworkId);
   void schedulerMessage(const SlaveID& slaveId,
 			const FrameworkID& frameworkId,
 			const ExecutorID& executorId,
@@ -62,7 +67,8 @@ public:
                        const std::string& pid);
   void statusUpdateAcknowledgement(const SlaveID& slaveId,
                                    const FrameworkID& frameworkId,
-                                   const TaskID& taskId);
+                                   const TaskID& taskId,
+                                   const std::string& uuid);
   void registerExecutor(const FrameworkID& frameworkId,
                         const ExecutorID& executorId);
   void statusUpdate(const StatusUpdate& update);
@@ -73,7 +79,7 @@ public:
   void ping();
   void exited();
 
-  void statusUpdateTimeout(const StatusUpdate& update);
+  void statusUpdateTimeout(const FrameworkID& frameworkId, const UUID& uuid);
 
   void executorStarted(const FrameworkID& frameworkId,
                        const ExecutorID& executorId,
@@ -91,13 +97,18 @@ protected:
   // Helper routine to lookup a framework.
   Framework* getFramework(const FrameworkID& frameworkId);
 
-  // Remove a framework (possibly killing its executors).
-  void removeFramework(Framework* framework, bool killExecutors = true);
+  // Shut down an executor. This is a two phase process. First, an
+  // executor receives a shut down message (shut down phase), then
+  // after a configurable timeout the slave actually forces a kill
+  // (kill phase, via the isolation module) if the executor has not
+  // exited.
+  void shutdownExecutor(Framework* framework, Executor* executor);
 
-  // Remove an executor (possibly sending it a kill).
-  void removeExecutor(Framework* framework,
-                      Executor* executor,
-                      bool killExecutor = true);
+  // Handle the second phase of shutting down an executor for those
+  // executors that have not properly shutdown within a timeout.
+  void shutdownExecutorTimeout(const FrameworkID& frameworkId,
+                               const ExecutorID& executorId,
+                               const UUID& uuid);
 
 //   // Create a new status update stream.
 //   StatusUpdates* createStatusUpdateStream(const StatusUpdateStreamID& streamId,
@@ -113,11 +124,11 @@ protected:
 
 private:
   // TODO(benh): Better naming and name scope for these http handlers.
-  process::Promise<process::HttpResponse> http_info_json(const process::HttpRequest& request);
-  process::Promise<process::HttpResponse> http_frameworks_json(const process::HttpRequest& request);
-  process::Promise<process::HttpResponse> http_tasks_json(const process::HttpRequest& request);
-  process::Promise<process::HttpResponse> http_stats_json(const process::HttpRequest& request);
-  process::Promise<process::HttpResponse> http_vars(const process::HttpRequest& request);
+  Promise<HttpResponse> http_info_json(const HttpRequest& request);
+  Promise<HttpResponse> http_frameworks_json(const HttpRequest& request);
+  Promise<HttpResponse> http_tasks_json(const HttpRequest& request);
+  Promise<HttpResponse> http_stats_json(const HttpRequest& request);
+  Promise<HttpResponse> http_vars(const HttpRequest& request);
 
   const Configuration conf;
 
@@ -126,7 +137,7 @@ private:
   SlaveID id;
   SlaveInfo info;
 
-  process::UPID master;
+  UPID master;
 
   Resources resources;
 
