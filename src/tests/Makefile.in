@@ -82,10 +82,10 @@ EXEC_LIB = $(LIBDIR)/libmesos_exec.a
 
 TESTS_OBJ = main.o utils.o master_tests.o resource_offer_tests.o	\
 	    resource_offer_reply_tests.o fault_tolerant_tests.o		\
-	    resources_tests.o uuid_tests.o external_tests.o		\
-	    sample_frameworks_tests.o configurator_tests.o		\
-	    string_utils_tests.o multimap_tests.o			\
-	    lxc_isolation_tests.o
+	    log_tests.o resources_tests.o uuid_tests.o			\
+	    external_tests.o sample_frameworks_tests.o			\
+	    configurator_tests.o string_utils_tests.o multimap_tests.o	\
+	    protobuf_io_tests.o lxc_isolation_tests.o
 
 ALLTESTS_EXE = $(BINDIR)/tests/all-tests
 

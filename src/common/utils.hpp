@@ -1,8 +1,9 @@
 #ifndef __UTILS_HPP__
 #define __UTILS_HPP__
 
-#include <errno.h>
 #include <dirent.h>
+#include <errno.h>
+#include <fcntl.h>
 #include <libgen.h>
 #include <limits.h>
 #include <netdb.h>
@@ -52,7 +53,7 @@ namespace protobuf {
 // Write out the given protobuf to the specified file descriptor by
 // first writing out the length of the protobuf followed by the
 // contents.
-inline bool write(int fd, const google::protobuf::Message& message)
+inline Result<bool> write(int fd, const google::protobuf::Message& message)
 {
   if (!message.IsInitialized()) {
     LOG(ERROR) << "Failed to write protocol buffer to file, "
@@ -64,63 +65,75 @@ inline bool write(int fd, const google::protobuf::Message& message)
   
   ssize_t length = ::write(fd, (void*) &size, sizeof(size));
 
+  CHECK(length != 0);
+
   if (length != sizeof(size)) {
-    PLOG(ERROR) << "Failed to write protocol buffer to file, write";
-    return false;
+    return Result<bool>::error(strerror(errno));
   }
 
   return message.SerializeToFileDescriptor(fd);
-
-  flush!;
 }
 
 
 // Read the next protobuf from the file by first reading the "size"
 // followed by the contents (as written by 'write' above).
-inline bool read(int fd, google::protobuf::Message* message)
+inline Result<bool> read(int fd, google::protobuf::Message* message)
 {
   if (message == NULL) {
-    return false;
+    return Result<bool>::error("Null message");
   }
+
+  message->Clear();
 
   // Save the offset so we can re-adjust if something goes wrong.
   off_t offset = lseek(fd, 0, SEEK_CUR);
 
   if (offset < 0) {
-    return false;
+    return Result<bool>::error(strerror(errno));
   }
 
   uint32_t size;
   ssize_t length = ::read(fd, (void*) &size, sizeof(size));
 
+  if (length == 0) {
+    return Result<bool>::none();
+  }
+
   if (length != sizeof(size)) {
-    PLOG(ERROR) << "Failed to read protocol buffer from file, read";
-
-    // Return the file position.
-
+    // Save the error, reset the file offset, and return the error.
+    Result<bool> result = Result<bool>::error(strerror(errno));
     lseek(fd, offset, SEEK_SET);
-    return false;
+    return result;
   }
 
   char* temp = new char[size];
 
   length = ::read(fd, temp, size);
 
+  if (length == 0) {
+    return Result<bool>::none();
+  }
+
   if (length != size) {
-    PLOG(ERROR) << "Failed to read protocol buffer from file, read";
-
-    // Return the file position.
+    // Save the error, reset the file offset, and return the error.
+    Result<bool> result = Result<bool>::error(strerror(errno));
     lseek(fd, offset, SEEK_SET);
-
-    return false;
+    return result;
   }
 
   google::protobuf::io::ArrayInputStream stream(temp, length);
-  bool result = message->ParseFromZeroCopyStream(&stream);
+  bool parsed = message->ParseFromZeroCopyStream(&stream);
 
   delete[] temp;
 
-  return result;
+  if (!parsed) {
+    // Save the error, reset the file offset, and return the error.
+    Result<bool> result = Result<bool>::error("Failed to parse protobuf");
+    lseek(fd, offset, SEEK_SET);
+    return result;
+  }
+
+  return true;
 }
 
 } // namespace protobuf {
@@ -170,15 +183,35 @@ inline void unsetenv(const std::string& key)
 }
 
 
-inline Result<int> open(const std::string& path, int oflag)
+inline Result<int> open(const std::string& path, int oflag, mode_t mode = 0)
 {
-  int fd = ::open(path.c_str(), oflag);
+  int fd = ::open(path.c_str(), oflag, mode);
 
   if (fd < 0) {
     return Result<int>::error(strerror(errno));
   }
 
   return Result<int>::some(fd);
+}
+
+
+inline Result<bool> close(int fd)
+{
+  if (::close(fd) != 0) {
+    return Result<bool>::error(strerror(errno));
+  }
+
+  return true;
+}
+
+
+inline Result<bool> rm(const std::string& path)
+{
+  if (::remove(path.c_str()) != 0) {
+    return Result<bool>::error(strerror(errno));
+  }
+
+  return true;
 }
 
 

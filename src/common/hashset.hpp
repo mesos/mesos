@@ -20,12 +20,12 @@ class hashset : public boost::unordered_set<Elem>
 {
 public:
   // Checks whether this map contains a binding for a key.
-  bool contains(const Elem& elem) { return count(elem) > 0; }
+  bool contains(const Elem& elem) const { return count(elem) > 0; }
 
   // Checks whether there exists a value in this set that returns the
   // a result equal to 'r' when the specified method is invoked.
   template <typename R, typename T>
-  bool exists(R (T::*method)(), R r)
+  bool exists(R (T::*method)(), R r) const
   {
     foreach (const Elem& elem, *this) {
       const T* t = boost::get_pointer(elem);
@@ -38,7 +38,7 @@ public:
   // Checks whether there exists an element in this set whose
   // specified member is equal to 'r'.
   template <typename R, typename T>
-  bool exists(R (T::*member), R r)
+  bool exists(R (T::*member), R r) const
   {
     foreach (const Elem& elem, *this) {
       const T* t = boost::get_pointer(elem);

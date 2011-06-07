@@ -68,7 +68,7 @@ protected:
   M message()
   {
     M m;
-    m.ParseFromString(body());
+    m.ParseFromString(process::Process<T>::body());
     return m;
   }
 
@@ -328,51 +328,6 @@ inline void post(const process::UPID& to,
   message.SerializeToString(&data);
   post(to, message.GetTypeName(), data.data(), data.size());
 }
-
-
-// template <typename Request, typename Response>
-// class RequestResponseProcess
-//   : public ProtobufProcess<RequestResponseProcess<Request, Response> >
-// {
-// public:
-//   RequestResponseProcess(
-//       const UPID& _pid,
-//       const Request& _request,
-//       const Promise<Response>& _promise)
-//     : pid(_pid), request(_request), promise(_promise) {}
-
-// protected:
-//   virtual void operator () ()
-//   {
-//     send(pid, request);
-//     ProcessBase::receive();
-//     Response response;
-//     CHECK(ProcessBase::name() == response.GetTypeName());
-//     response.ParseFromString(ProcessBase::body());
-//     promise.set(response);
-//   }
-
-// private:
-//   const UPID pid;
-//   const Request request;
-//   Promise<Response> promise;
-// };
-
-
-// template <typename Request, typename Response>
-// struct Protocol
-// {
-//   Future<Response> operator () (const UPID& pid, const Request& request)
-//   {
-//     Future<Response> future;
-//     Promise<Response> promise;
-//     promise.associate(future);
-//     RequestResponseProcess<Request, Response>* process =
-//       new RequestResponseProcess<Request, Response>(pid, request, promise);
-//     spawn(process, true);
-//     return future;
-//   }
-// };
 
 } // namespace process {
 

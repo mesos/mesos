@@ -1,5 +1,5 @@
-#ifndef __OPTION_HPP__
-#define __OPTION_HPP__
+#ifndef __CONFIGURATOR_OPTION_HPP__
+#define __CONFIGURATOR_OPTION_HPP__
 
 #include <string>
 
@@ -75,16 +75,16 @@ public:
 /**
  * Registered option with help string and default value
  **/
-class Option {
+class ConfigOption {
 public:
-  Option() : hasDefault(false), validator(NULL) {}
+  ConfigOption() : hasDefault(false), validator(NULL) {}
 
-  Option(const std::string& _helpString,
-         const ValidatorBase& _validator,
-         bool _hasShortName,
-         char _shortName,
-         bool _hasDefault,
-         const std::string& _defaultValue)
+  ConfigOption(const std::string& _helpString,
+               const ValidatorBase& _validator,
+               bool _hasShortName,
+               char _shortName,
+               bool _hasDefault,
+               const std::string& _defaultValue)
     : helpString(_helpString), 
       hasDefault(_hasDefault),
       defaultValue(_defaultValue),
@@ -94,7 +94,7 @@ public:
     validator = _validator.clone();
   }
   
-  Option(const Option& opt)
+  ConfigOption(const ConfigOption& opt)
     : helpString(opt.helpString), 
       hasDefault(opt.hasDefault),
       hasShortName(opt.hasShortName),
@@ -104,7 +104,7 @@ public:
     validator = (opt.validator == NULL) ? NULL : opt.validator->clone();
   }
 
-  Option &operator=(const Option& opt)
+  ConfigOption &operator=(const ConfigOption& opt)
   {
     helpString = opt.helpString;
     hasDefault = opt.hasDefault;
@@ -115,7 +115,7 @@ public:
     return *this;
   }
 
-  ~Option() 
+  ~ConfigOption() 
   { 
     if (validator != 0) delete validator; 
   }
@@ -130,4 +130,4 @@ public:
 
 } }   // end mesos :: internal namespace
 
-#endif
+#endif // __CONFIGURATOR_OPTION_HPP__

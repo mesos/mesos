@@ -10,6 +10,8 @@ template <typename T>
 class Result
 {
 public:
+  Result(const T& _t) : state(SOME), t(new T(_t)) {}
+
   static Result<T> none()
   {
     return Result<T>(NONE);

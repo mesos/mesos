@@ -7,8 +7,8 @@
 
 #include <glog/logging.h>
 
-#include "configuration.hpp"
-#include "option.hpp"
+#include "configurator/configuration.hpp"
+#include "configurator/option.hpp"
 
 
 namespace mesos { namespace internal {
@@ -47,7 +47,7 @@ public:
 
 private:
   Configuration conf;
-  std::map<std::string, Option> options;
+  std::map<std::string, ConfigOption> options;
 
 public:
 
@@ -100,12 +100,12 @@ private:
       std::string message = "Duplicate option registration: " + name;
       throw ConfigurationException(message.c_str());
     }
-    options[name] = Option(helpString,
-                           Validator<T>(), 
-                           hasShortName,
-                           shortName,
-                           hasDefault,
-                           defaultValue);
+    options[name] = ConfigOption(helpString,
+                                 Validator<T>(), 
+                                 hasShortName,
+                                 shortName,
+                                 hasDefault,
+                                 defaultValue);
   }
 
 public:

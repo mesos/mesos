@@ -132,7 +132,7 @@ endif
 
 EXEC_LIB_OBJ = exec/exec.o
 
-SCHED_LIB_OBJ = sched/sched.o local/local.o log/log.o
+SCHED_LIB_OBJ = sched/sched.o local/local.o log/replica.o
 
 BASIC_OBJ = $(MASTER_OBJ) $(SLAVE_OBJ) $(COMMON_OBJ)  \
 	    $(SCHED_LIB_OBJ) $(EXEC_LIB_OBJ)
@@ -339,7 +339,7 @@ $(MESOS_JAVA_JAR): $(SRCDIR)/java/src/org/apache/mesos/*.java @top_srcdir@/inclu
 ifdef JAVA_HOME
 	mkdir -p @top_builddir@/$(PROTOBUF)/java/src/main/java
 	$(PROTOC) --java_out=@top_builddir@/$(PROTOBUF)/java/src/main/java -I@top_srcdir@/$(PROTOBUF)/src @top_srcdir@/$(PROTOBUF)/src/google/protobuf/descriptor.proto
-	$(JAVA_HOME)/bin/javac -d @top_builddir@/$(PROTOBUF)/java/src/main/java @top_srcdir@/$(PROTOBUF)/java/src/main/java/com/google/protobuf/*.java
+	$(JAVA_HOME)/bin/javac -d @top_builddir@/$(PROTOBUF)/java/src/main/java @top_srcdir@/$(PROTOBUF)/java/src/main/java/com/google/protobuf/*.java @top_builddir@/$(PROTOBUF)/java/src/main/java/com/google/protobuf/*.java
 	rm -f java/classes/org/apache/mesos/*
 	mkdir -p java/classes/org/apache/mesos
 	$(JAVA_HOME)/bin/javac -classpath @top_builddir@/$(PROTOBUF)/java/src/main/java -sourcepath java/generated -d java/classes java/generated/org/apache/mesos/*.java
