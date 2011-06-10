@@ -1,5 +1,5 @@
-#include <iomanip>
 #include <fstream>
+#include <iomanip>
 #include <sstream>
 
 #include <glog/logging.h>
@@ -1796,6 +1796,8 @@ Promise<HttpResponse> Master::http_stats_json(const HttpRequest& request)
 
   std::ostringstream out;
 
+  out << std::setprecision(10);
+
   out <<
     "{" <<
     "\"uptime\":" << elapsedTime() - startTime << "," <<
@@ -1837,6 +1839,8 @@ Promise<HttpResponse> Master::http_vars(const HttpRequest& request)
   foreachpair (const string& key, const string& value, conf.getMap()) {
     out << key << " " << value << "\n";
   }
+
+  out << std::setprecision(10);
 
   out <<
     "uptime " << elapsedTime() - startTime << "\n" <<
