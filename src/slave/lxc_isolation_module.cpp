@@ -300,17 +300,17 @@ void LxcIsolationModule::resourcesChanged(
 void LxcIsolationModule::processExited(pid_t pid, int status)
 {
   foreachkey (const FrameworkID& frameworkId, infos) {
-    foreachpair (const ExecutorID& executorId, ContainerInfo* info, infos[frameworkId]) {
+    foreachvalue (ContainerInfo* info, infos[frameworkId]) {
       if (info->pid == pid) {
-        // Kill the container.
-        killExecutor(frameworkId, executorId);
-
         LOG(INFO) << "Telling slave of lost executor " << executorId
                   << " of framework " << frameworkId;
 
         dispatch(slave, &Slave::executorExited,
-                 frameworkId, executorId, status);
-        break;
+                 info->frameworkId, info->executorId, status);
+
+        // Try and cleanup after the executor.
+        killExecutor(frameworkId, executorId);
+        return;
       }
     }
   }

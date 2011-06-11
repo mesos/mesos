@@ -178,15 +178,15 @@ void ProcessBasedIsolationModule::processExited(pid_t pid, int status)
   foreachkey (const FrameworkID& frameworkId, pgids) {
     foreachpair (const ExecutorID& executorId, pid_t pgid, pgids[frameworkId]) {
       if (pgid == pid) {
-        // Kill the process group to clean up the tasks.
-        killExecutor(frameworkId, executorId);
-
         LOG(INFO) << "Telling slave of lost executor " << executorId
                   << " of framework " << frameworkId;
 
         dispatch(slave, &Slave::executorExited,
                  frameworkId, executorId, status);
-        break;
+
+        // Try and cleanup after the executor.
+        killExecutor(frameworkId, executorId);
+	return;
       }
     }
   }
