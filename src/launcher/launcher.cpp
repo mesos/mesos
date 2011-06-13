@@ -90,6 +90,8 @@ void ExecutorLauncher::run()
 // Create the executor's working directory and return its path.
 void ExecutorLauncher::createWorkingDirectory()
 {
+  cout << "Creating directory " << workDirectory << endl;
+
   // Split the path into tokens by "/" and make each directory
   vector<string> tokens;
   StringUtils::split(workDirectory, "/", &tokens);
@@ -171,7 +173,7 @@ string ExecutorLauncher::fetchExecutor()
              << "executor path, making it: " << executor << endl;
       } else {
         fatal("A relative path was passed for the executor, but " \
-              "neither MESOS_HOME nor FRAMEWORKS_HOME is set. " \
+              "neither MESOS_HOME nor MESOS_FRAMEWORKS_HOME is set." \
               "Please either specify one of these config options " \
               "or avoid using a relative path.");
       }
@@ -256,6 +258,8 @@ void ExecutorLauncher::setupEnvVariablesFromParams()
 
 void ExecutorLauncher::switchUser()
 {
+  cout << "Switching user to " << user << endl;
+
   struct passwd *passwd;
   if ((passwd = getpwnam(user.c_str())) == NULL)
     fatal("failed to get username information for %s", user.c_str());

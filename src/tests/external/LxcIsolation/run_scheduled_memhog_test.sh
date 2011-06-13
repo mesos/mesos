@@ -30,7 +30,7 @@ fi
 $MESOS_HOME/mesos-slave \
     --url=master@localhost:5432 \
     --isolation=lxc \
-    --resources="cpus:2;mem=$[512*1024*1024]" \
+    --resources="cpus:2;mem:$[512*1024*1024]" \
     > slave.log 2>&1 &
 SLAVE_PID=$!
 echo "Launched slave, PID = $SLAVE_PID"
@@ -47,7 +47,7 @@ fi
 
 # Launch memhog
 echo "Running scheduled-memhog"
-$MESOS_HOME/scheduled-memhog master@localhost:5432 schedule > memhog.log 2>&1
+$MESOS_HOME/examples/scheduled-memhog master@localhost:5432 schedule > memhog.log 2>&1
 EXIT_CODE=$?
 echo "Memhog exit code: $?"
 sleep 2

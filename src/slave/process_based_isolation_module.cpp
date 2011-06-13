@@ -120,11 +120,14 @@ void ProcessBasedIsolationModule::killExecutor(
 
     killpg(pgids[frameworkId][executorId], SIGKILL);
 
-    pgids[frameworkId].erase(executorId);
-
-    if (pgids[frameworkId].size() == 0) {
+    if (pgids[frameworkId].size() == 1) {
       pgids.erase(frameworkId);
+    } else {
+      pgids[frameworkId].erase(executorId);
     }
+
+    // NOTE: Both frameworkId and executorId are no longer valid
+    // because they have just been deleted above!
 
     // TODO(benh): Kill all of the process's descendants? Perhaps
     // create a new libprocess process that continually tries to kill

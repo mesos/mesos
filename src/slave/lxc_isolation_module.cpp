@@ -9,6 +9,7 @@
 #include "common/foreach.hpp"
 #include "common/type_utils.hpp"
 #include "common/units.hpp"
+#include "common/utils.hpp"
 
 #include "launcher/launcher.hpp"
 
@@ -178,6 +179,24 @@ void LxcIsolationModule::launchExecutor(
     dispatch(slave, &Slave::executorStarted,
              frameworkId, executorId, pid);
   } else {
+    // Close unnecessary file descriptors. Note that we are assuming
+    // stdin, stdout, and stderr can ONLY be found at the POSIX
+    // specified file numbers (0, 1, 2).
+    foreach (const string& entry, utils::os::listdir("/proc/self/fd")) {
+      if (entry != "." && entry != "..") {
+	try {
+	  int fd = boost::lexical_cast<int>(entry);
+	  if (fd != STDIN_FILENO &&
+	      fd != STDOUT_FILENO &&
+	      fd != STDERR_FILENO) {
+	    close(fd);
+	  }
+	} catch (boost::bad_lexical_cast&) {
+	  LOG(FATAL) << "Failed to close file descriptors";
+	}
+      }
+    }
+
     // Create an ExecutorLauncher to set up the environment for executing
     // an external launcher_main.cpp process (inside of lxc-execute).
     map<string, string> params;
@@ -204,7 +223,7 @@ void LxcIsolationModule::launchExecutor(
     launcher->setupEnvironmentForLauncherMain();
 
     // Get location of Mesos install in order to find mesos-launcher.
-    string mesosLauncher = conf.get("home", ".") + "/mesos-launcher";
+    string mesosLauncher = conf.get("home", ".") + "/bin/mesos-launcher";
     
     // Run lxc-execute.
     execlp("lxc-execute", "lxc-execute", "-n", container.c_str(),
@@ -237,12 +256,16 @@ void LxcIsolationModule::killExecutor(
     LOG(ERROR) << "lxc-stop returned " << ret;
   }
 
-  infos[frameworkId].erase(executorId);
+  if (infos[frameworkId].size() == 1) {
+    infos.erase(frameworkId);
+  } else {
+    infos[frameworkId].erase(executorId);
+  }
+
   delete info;
 
-  if (infos[frameworkId].size() == 0) {
-    infos.erase(frameworkId);
-  }
+  // NOTE: Both frameworkId and executorId are no longer valid because
+  // they have just been deleted above!
 }
 
 
@@ -302,14 +325,15 @@ void LxcIsolationModule::processExited(pid_t pid, int status)
   foreachkey (const FrameworkID& frameworkId, infos) {
     foreachvalue (ContainerInfo* info, infos[frameworkId]) {
       if (info->pid == pid) {
-        LOG(INFO) << "Telling slave of lost executor " << executorId
-                  << " of framework " << frameworkId;
+        LOG(INFO) << "Telling slave of lost executor "
+		  << info->executorId
+                  << " of framework " << info->frameworkId;
 
         dispatch(slave, &Slave::executorExited,
                  info->frameworkId, info->executorId, status);
 
         // Try and cleanup after the executor.
-        killExecutor(frameworkId, executorId);
+        killExecutor(info->frameworkId, info->executorId);
         return;
       }
     }
