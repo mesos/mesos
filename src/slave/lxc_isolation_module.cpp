@@ -218,6 +218,7 @@ void LxcIsolationModule::launchExecutor(
 			   conf.get("hadoop_home", ""),
 			   !local,
 			   conf.get("switch_user", true),
+			   container,
 			   params);
 
     launcher->setupEnvironmentForLauncherMain();

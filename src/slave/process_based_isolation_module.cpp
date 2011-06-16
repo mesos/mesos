@@ -172,6 +172,7 @@ ExecutorLauncher* ProcessBasedIsolationModule::createExecutorLauncher(
                               conf.get("hadoop_home", ""),
                               !local,
                               conf.get("switch_user", true),
+			      "",
                               params);
 }
 
