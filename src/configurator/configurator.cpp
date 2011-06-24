@@ -55,7 +55,7 @@ Configurator::Configurator()
 
 void Configurator::validate()
 {
-  foreachpair (const string& key, const Option& opt, options) {
+  foreachpair (const string& key, const ConfigOption& opt, options) {
     if (conf.contains(key) && opt.validator &&
         !opt.validator->isValid(conf[key])) {
       string msg = "Invalid value for '" + key + "' option: " + conf[key];
@@ -300,12 +300,12 @@ string Configurator::getUsage() const
 {
   const int PAD = 5;
   string usage;
-  
+
   map<string,string> col1; // key -> col 1 string
   int maxLen = 0;
 
   // construct string for the first column and get size of column
-  foreachpair (const string& key, const Option& opt, options) {
+  foreachpair (const string& key, const ConfigOption& opt, options) {
     string val;
     if (opt.validator->isBool())
       val = "  --[no-]" + key;
@@ -318,12 +318,12 @@ string Configurator::getUsage() const
       else
         val += string(" (or -") + opt.shortName + " VAL)";
     }
-    
+
     col1[key] = val;
     maxLen = val.size() > maxLen ? val.size() : maxLen;
   }
 
-  foreachpair (const string& key, const Option& opt, options) {
+  foreachpair (const string& key, const ConfigOption& opt, options) {
     string helpStr = opt.helpString;
     string line = col1[key];
 
@@ -361,11 +361,11 @@ string Configurator::getUsage() const
   }
   return usage;
 }
-  
+
 
 void Configurator::loadDefaults()
 {
-  foreachpair (const string& key, const Option& option, options) {
+  foreachpair (const string& key, const ConfigOption& option, options) {
     if (option.hasDefault && !conf.contains(key)) {
       conf[key] = option.defaultValue;
     }
@@ -390,7 +390,7 @@ Configuration& Configurator::getConfiguration()
 
 string Configurator::getLongName(char shortName) const
 {
-  foreachpair (const string& key, const Option& opt, options) {
+  foreachpair (const string& key, const ConfigOption& opt, options) {
     if (opt.hasShortName && opt.shortName == shortName)
       return key;
   }
