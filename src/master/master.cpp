@@ -1,5 +1,5 @@
-#include <iomanip>
 #include <fstream>
+#include <iomanip>
 #include <sstream>
 
 #include <glog/logging.h>
@@ -12,6 +12,7 @@
 #include "common/build.hpp"
 #include "common/date_utils.hpp"
 #include "common/utils.hpp"
+#include "common/uuid.hpp"
 
 #include "allocator.hpp"
 #include "allocator_factory.hpp"
@@ -668,6 +669,7 @@ void Master::resourceOfferReply(const FrameworkID& frameworkId,
         status->mutable_task_id()->MergeFrom(task.task_id());
         status->set_state(TASK_LOST);
         update->set_timestamp(elapsedTime());
+	update->set_uuid(UUID::random().toBytes());
         send(framework->pid, message);
       }
     }
@@ -724,6 +726,7 @@ void Master::killTask(const FrameworkID& frameworkId,
       status->mutable_task_id()->MergeFrom(taskId);
       status->set_state(TASK_LOST);
       update->set_timestamp(elapsedTime());
+      update->set_uuid(UUID::random().toBytes());
       send(framework->pid, message);
     }
   }
@@ -981,6 +984,7 @@ void Master::exitedExecutor(const SlaveID& slaveId,
           status->mutable_task_id()->MergeFrom(task->task_id());
           status->set_state(TASK_LOST);
           update->set_timestamp(elapsedTime());
+	  update->set_uuid(UUID::random().toBytes());
           send(framework->pid, message);
 
           LOG(INFO) << "Removing task " << task->task_id()
@@ -1490,6 +1494,7 @@ void Master::removeSlave(Slave* slave)
       status->mutable_task_id()->MergeFrom(task->task_id());
       status->set_state(TASK_LOST);
       update->set_timestamp(elapsedTime());
+      update->set_uuid(UUID::random().toBytes());
       send(framework->pid, message);
     }
     removeTask(framework, slave, task, TRR_SLAVE_LOST);
@@ -1791,6 +1796,8 @@ Promise<HttpResponse> Master::http_stats_json(const HttpRequest& request)
 
   std::ostringstream out;
 
+  out << std::setprecision(10);
+
   out <<
     "{" <<
     "\"uptime\":" << elapsedTime() - startTime << "," <<
@@ -1832,6 +1839,8 @@ Promise<HttpResponse> Master::http_vars(const HttpRequest& request)
   foreachpair (const string& key, const string& value, conf.getMap()) {
     out << key << " " << value << "\n";
   }
+
+  out << std::setprecision(10);
 
   out <<
     "uptime " << elapsedTime() - startTime << "\n" <<

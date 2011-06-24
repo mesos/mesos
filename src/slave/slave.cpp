@@ -1,6 +1,7 @@
 #include <errno.h>
 
 #include <algorithm>
+#include <iomanip>
 
 #include <process/timer.hpp>
 
@@ -1319,6 +1320,8 @@ Promise<HttpResponse> Slave::http_stats_json(const HttpRequest& request)
 
   std::ostringstream out;
 
+  out << std::setprecision(10);
+
   out <<
     "{" <<
     "\"uptime\":" << elapsedTime() - startTime << "," <<
@@ -1357,6 +1360,8 @@ Promise<HttpResponse> Slave::http_vars(const HttpRequest& request)
   foreachpair (const string& key, const string& value, conf.getMap()) {
     out << key << " " << value << "\n";
   }
+
+  out << std::setprecision(10);
 
   out <<
     "uptime " << elapsedTime() - startTime << "\n" <<

@@ -570,7 +570,7 @@ bool ZooKeeperSlavesManagerStorage::parse(const string& key, const string& s,
 
 SlavesManager::SlavesManager(const Configuration& conf,
                              const PID<Master>& _master)
-  : process::Process<SlavesManager>("slaves"),
+  : process::ProcessBase("slaves"),
     master(_master)
 {
   // Create the slave manager storage based on configuration.
