@@ -132,7 +132,7 @@ endif
 
 EXEC_LIB_OBJ = exec/exec.o
 
-SCHED_LIB_OBJ = sched/sched.o local/local.o log/replica.o
+SCHED_LIB_OBJ = sched/sched.o local/local.o log/replica.o log/coordinator.o
 
 BASIC_OBJ = $(MASTER_OBJ) $(SLAVE_OBJ) $(COMMON_OBJ)  \
 	    $(SCHED_LIB_OBJ) $(EXEC_LIB_OBJ)

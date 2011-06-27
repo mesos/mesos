@@ -3,7 +3,7 @@
 
 #include <process/process.hpp>
 
-// Provides "dispatch" abiltiies for a process. That is, given a local
+// Provides "dispatch" abilities for a process. That is, given a local
 // (i.e., typed) pid, one can dispatch a method to it more naturally
 // then sending a string and some bytes of data. This provides better
 // type safety.
@@ -912,6 +912,7 @@ template <typename T>
 void __associate(const Future<T>& future, Promise<T> promise)
 {
   if (future.ready()) {
+    assert(!promise.future().ready()); // Either pending or discarded.
     promise.set(future.get());
   } else if (future.discarded()) {
     promise.future().discard();

@@ -93,7 +93,7 @@ public:
   {
     validator = _validator.clone();
   }
-  
+
   ConfigOption(const ConfigOption& opt)
     : helpString(opt.helpString),
       hasDefault(opt.hasDefault),
@@ -115,8 +115,8 @@ public:
     return *this;
   }
 
-  ~ConfigOption() 
-  { 
+  ~ConfigOption()
+  {
     if (validator != 0) delete validator;
   }
 

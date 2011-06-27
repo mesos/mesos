@@ -64,7 +64,7 @@ public:
   void onReady(const Callback& callback) const;
   void onDiscarded(const Callback& callback) const;
 
-private:
+// private:
   friend class Promise<T>;
 
   bool set(const T& _t);
@@ -87,30 +87,60 @@ private:
 };
 
 
+// Internal helper utilities.
+namespace internal {
+
+inline void acquire(int* lock)
+{
+  while (!__sync_bool_compare_and_swap(lock, 0, 1)) {
+    asm volatile ("pause");
+  }
+}
+
+inline void release(int* lock)
+{
+  // Unlock via a compare-and-swap so we get a memory barrier too.
+  bool unlocked = __sync_bool_compare_and_swap(lock, 1, 0);
+  assert(unlocked);
+}
+
+namespace callbacks {
+
 template <typename T>
-void __select(const Future<T>& future, Promise<Future<T> > done);
+void select(const Future<T>& future, Promise<Future<T> > promise)
+{
+  assert(future.ready());
+  // Don't set the promise if it's already ready or discarded.
+  if (!promise.future().ready() && !promise.future().discarded()) {
+    promise.set(future);
+  }
+}
+
+} // namespace callback {
+} // namespace internal {
 
 
+// Returns an option of a ready future or none in the event of
+// timeout. Note that select DOES NOT return for a future that has
+// been discarded.
 template <typename T>
 Option<Future<T> > select(const std::set<Future<T> >& futures, double secs)
 {
   Promise<Future<T> > promise;
 
   std::tr1::function<void(const Future<T>&)> callback =
-    std::tr1::bind(__select<T>, std::tr1::placeholders::_1, promise);
+    std::tr1::bind(internal::callbacks::select<T>,
+                   std::tr1::placeholders::_1, promise);
 
   typename std::set<Future<T> >::iterator iterator;
   for (iterator = futures.begin(); iterator != futures.end(); ++iterator) {
     const Future<T>& future = *iterator;
     future.onReady(callback);
-    future.onDiscarded(callback);
   }
 
   Future<Future<T> > future = promise.future();
 
-  future.await(secs);
-
-  if (future.ready()) {
+  if (future.await(secs)) {
     return Option<Future<T> >::some(future.get());
   } else {
     future.discard();
@@ -120,27 +150,14 @@ Option<Future<T> > select(const std::set<Future<T> >& futures, double secs)
 
 
 template <typename T>
-void __select(const Future<T>& future, Promise<Future<T> > done)
+void discard(const std::set<Future<T> >& futures)
 {
-  done.set(future);
+  typename std::set<Future<T> >::const_iterator iterator;
+  for (iterator = futures.begin(); iterator != futures.end(); ++iterator) {
+    Future<T> future = *iterator;
+    future.discard();
+  }
 }
-
-
-namespace internal {
-
-inline void acquire(int* lock)
-{
-  while (!__sync_bool_compare_and_swap(lock, 0, 1))
-    asm volatile ("pause");
-}
-
-inline void release(int* lock)
-{
-  // Unlock via a compare-and-swap so we get a memory barrier too.
-  __sync_bool_compare_and_swap(lock, 1, 0);
-}
-
-} // namespace internal {
 
 
 template <typename T>
@@ -231,8 +248,8 @@ bool Future<T>::discard()
   {
     assert(state != NULL);
     if (*state == PENDING) {
-      *state = DISCARDED;
       latch->trigger();
+      *state = DISCARDED;
       result = true;
     }
   }
@@ -241,11 +258,13 @@ bool Future<T>::discard()
   // Invoke all callbacks associated with this future being
   // DISCARDED. We don't need a lock because the state is now in
   // DISCARDED so there should not be any concurrent modications.
-  while (!discarded_callbacks->empty()) {
-    const Callback& callback = discarded_callbacks->front();
-    // TODO(*): Invoke callbacks in another execution context.
-    callback(*this);
-    discarded_callbacks->pop();
+  if (result) {
+    while (!discarded_callbacks->empty()) {
+      const Callback& callback = discarded_callbacks->front();
+      // TODO(*): Invoke callbacks in another execution context.
+      callback(*this);
+      discarded_callbacks->pop();
+    }
   }
 
   return result;
@@ -352,15 +371,21 @@ bool Future<T>::set(const T& _t)
 {
   bool result = false;
 
+  // TODO(benh): For now, you can't set a future more than once, and
+  // we trigger a rather harse assertion violation when that occurs.
+
   assert(lock != NULL);
   internal::acquire(lock);
   {
     assert(state != NULL);
+    assert(*state != READY);
     if (*state == PENDING) {
-      *state = READY;
       *t = new T(_t);
       latch->trigger();
+      *state = READY;
       result = true;
+    } else {
+      assert(*state == DISCARDED);
     }
   }
   internal::release(lock);
@@ -368,11 +393,13 @@ bool Future<T>::set(const T& _t)
   // Invoke all callbacks associated with this future being READY. We
   // don't need a lock because the state is now in READY so there
   // should not be any concurrent modications.
-  while (!ready_callbacks->empty()) {
-    const Callback& callback = ready_callbacks->front();
-    // TODO(*): Invoke callbacks in another execution context.
-    callback(*this);
-    ready_callbacks->pop();
+  if (result) {
+    while (!ready_callbacks->empty()) {
+      const Callback& callback = ready_callbacks->front();
+      // TODO(*): Invoke callbacks in another execution context.
+      callback(*this);
+      ready_callbacks->pop();
+    }
   }
 
   return result;
@@ -399,30 +426,46 @@ void Future<T>::cleanup()
 {
   assert(refs != NULL);
   if (__sync_sub_and_fetch(refs, 1) == 0) {
-    // Increment the reference count and try and discard the future if
-    // it's still in pending (invokes any discarded callbacks that
-    // have been setup).
-    *refs = 1;
-    discard();
+    // Discard the future if it is still pending (so we invoke any
+    // discarded callbacks that have been setup). Note that we put the
+    // reference count back at 1 here in case one of the callbacks
+    // decides it wants to keep a reference.
+    assert(state != NULL);
+    if (*state == PENDING) {
+      *refs = 1;
+      discard();
+    }
 
     // Now try and cleanup again (this time we know the future has
-    // either been discarded or was not pending).
+    // either been discarded or was not pending). Note that one of the
+    // callbacks might have stored the future, in which case we'll
+    // just return without doing anything, but the state will forever
+    // be "discarded".
     assert(refs != NULL);
     if (__sync_sub_and_fetch(refs, 1) == 0) {
       delete refs;
+      refs = NULL;
       assert(lock != NULL);
       delete lock;
+      lock = NULL;
       assert(state != NULL);
       delete state;
+      state = NULL;
       assert(t != NULL);
-      if (*t != NULL)
+      if (*t != NULL) {
         delete *t;
+      }
+      delete t;
+      t = NULL;
       assert(ready_callbacks != NULL);
       delete ready_callbacks;
+      ready_callbacks = NULL;
       assert(discarded_callbacks != NULL);
       delete discarded_callbacks;
+      discarded_callbacks = NULL;
       assert(latch != NULL);
       delete latch;
+      latch = NULL;
     }
   }
 }

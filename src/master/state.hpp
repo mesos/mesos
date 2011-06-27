@@ -17,7 +17,7 @@
 namespace mesos { namespace internal { namespace master { namespace state {
 
 struct SlaveResources
-{  
+{
   std::string slave_id;
   double cpus;
   double mem;

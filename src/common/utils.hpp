@@ -50,7 +50,25 @@ std::string stringify(T t)
   }
 }
 
-namespace protobuf { 
+
+template <typename T>
+std::string stringify(const std::set<T>& set)
+{
+  std::ostringstream out;
+  out << "{ ";
+  typename std::set<T>::const_iterator iterator = set.begin();
+  while (iterator != set.end()) {
+    out << utils::stringify(*iterator);
+    if (++iterator != set.end()) {
+      out << ", ";
+    }
+  }
+  out << " }";
+  return out.str();
+}
+
+
+namespace protobuf {
 
 // Write out the given protobuf to the specified file descriptor by
 // first writing out the length of the protobuf followed by the
@@ -64,14 +82,17 @@ inline Result<bool> write(int fd, const google::protobuf::Message& message)
   }
 
   uint32_t size = message.ByteSize();
-  
+
   ssize_t length = ::write(fd, (void*) &size, sizeof(size));
 
-  CHECK(length != 0);
-
-  if (length != sizeof(size)) {
-    return Result<bool>::error(strerror(errno));
+  if (length == -1) {
+    std::string error = strerror(errno);
+    error = error + " (" + __FILE__ + ":" + utils::stringify(__LINE__) + ")";
+    return Result<bool>::error(error);
   }
+
+  CHECK(length != 0);
+  CHECK(length == sizeof(size)); // TODO(benh): Handle a non-blocking fd?
 
   return message.SerializeToFileDescriptor(fd);
 }
@@ -81,9 +102,7 @@ inline Result<bool> write(int fd, const google::protobuf::Message& message)
 // followed by the contents (as written by 'write' above).
 inline Result<bool> read(int fd, google::protobuf::Message* message)
 {
-  if (message == NULL) {
-    return Result<bool>::error("Null message");
-  }
+  CHECK(message != NULL);
 
   message->Clear();
 
@@ -91,7 +110,9 @@ inline Result<bool> read(int fd, google::protobuf::Message* message)
   off_t offset = lseek(fd, 0, SEEK_CUR);
 
   if (offset < 0) {
-    return Result<bool>::error(strerror(errno));
+    std::string error = strerror(errno);
+    error = error + " (" + __FILE__ + ":" + utils::stringify(__LINE__) + ")";
+    return Result<bool>::error(error);
   }
 
   uint32_t size;
@@ -99,13 +120,15 @@ inline Result<bool> read(int fd, google::protobuf::Message* message)
 
   if (length == 0) {
     return Result<bool>::none();
-  }
-
-  if (length != sizeof(size)) {
+  } else if (length == -1) {
     // Save the error, reset the file offset, and return the error.
-    Result<bool> result = Result<bool>::error(strerror(errno));
+    std::string error = strerror(errno);
+    error = error + " (" + __FILE__ + ":" + utils::stringify(__LINE__) + ")";
+    Result<bool> result = Result<bool>::error(error);
     lseek(fd, offset, SEEK_SET);
     return result;
+  } else if (length != sizeof(size)) {
+    return false;
   }
 
   char* temp = new char[size];
@@ -113,14 +136,19 @@ inline Result<bool> read(int fd, google::protobuf::Message* message)
   length = ::read(fd, temp, size);
 
   if (length == 0) {
+    delete[] temp;
     return Result<bool>::none();
-  }
-
-  if (length != size) {
+  } else if (length == -1) {
     // Save the error, reset the file offset, and return the error.
-    Result<bool> result = Result<bool>::error(strerror(errno));
+    std::string error = strerror(errno);
+    error = error + " (" + __FILE__ + ":" + utils::stringify(__LINE__) + ")";
+    Result<bool> result = Result<bool>::error(error);
     lseek(fd, offset, SEEK_SET);
+    delete[] temp;
     return result;
+  } else if (length != size) {
+    delete[] temp;
+    return false;
   }
 
   google::protobuf::io::ArrayInputStream stream(temp, length);
@@ -130,7 +158,9 @@ inline Result<bool> read(int fd, google::protobuf::Message* message)
 
   if (!parsed) {
     // Save the error, reset the file offset, and return the error.
-    Result<bool> result = Result<bool>::error("Failed to parse protobuf");
+    std::string error = "Failed to parse protobuf";
+    error = error + " (" + __FILE__ + ":" + utils::stringify(__LINE__) + ")";
+    Result<bool> result = Result<bool>::error(error);
     lseek(fd, offset, SEEK_SET);
     return result;
   }
@@ -318,11 +348,12 @@ inline std::string getcwd()
       delete[] temp;
       return result;
     } else {
-      delete[] temp;
       if (errno != ERANGE) {
+        delete[] temp;
         return std::string();
       }
       size *= 2;
+      delete[] temp;
     }
   }
 

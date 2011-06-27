@@ -164,7 +164,7 @@ Master::Master(const Configuration& conf)
 {
   initialize();
 }
-                   
+
 
 Master::~Master()
 {

@@ -999,6 +999,8 @@ void * schedule(void *arg)
       }
     }
 
+    VLOG(2) << "Resuming " << process->pid;
+
     process->lock();
     {
       CHECK(process->state == ProcessBase::INIT ||
@@ -2325,6 +2327,7 @@ void ProcessManager::run(ProcessBase *process)
   process->unlock();
 
   try {
+    VLOG(2) << "Invoking " << process->pid;
     (*process)();
   } catch (const std::exception &e) {
     std::cerr << "libprocess: " << process->pid

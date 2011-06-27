@@ -5,8 +5,6 @@ template <typename T>
 class Option
 {
 public:
-  Option(const T& _t) : state(SOME), t(new T(_t)) {}
-
   static Option<T> none()
   {
     return Option<T>(NONE);
@@ -33,9 +31,7 @@ public:
 
   ~Option()
   {
-    if (t != NULL) {
-      delete t;
-    }
+    delete t;
   }
 
   Option<T>& operator = (const Option<T>& that)
@@ -52,10 +48,10 @@ public:
     return *this;
   }
 
-  bool isSome() { return state == SOME; }
-  bool isNone() { return state == NONE; }
+  bool isSome() const { return state == SOME; }
+  bool isNone() const { return state == NONE; }
 
-  T get() { assert(state == SOME); return *t; }
+  T get() const { assert(state == SOME); return *t; }
 
 private:
   enum State {
@@ -71,4 +67,3 @@ private:
 };
 
 #endif // __OPTION_HPP__
-

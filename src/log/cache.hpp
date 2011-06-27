@@ -127,7 +127,7 @@ std::ostream& operator << (
     stream << *i2 << std::endl;
   }
 }
-  
+
 
 }}} // namespace mesos { namespace internal { namespace log {
 

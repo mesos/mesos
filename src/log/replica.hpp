@@ -2,6 +2,7 @@
 #define __LOG_REPLICA_HPP__
 
 #include <algorithm>
+#include <set>
 #include <string>
 
 #include <process/protobuf.hpp>
@@ -16,145 +17,93 @@
 
 namespace mesos { namespace internal { namespace log {
 
+namespace protocol {
+
+// Some replica protocol declarations.
+extern Protocol<PromiseRequest, PromiseResponse> promise;
+extern Protocol<WriteRequest, WriteResponse> write;
+extern Protocol<CommitRequest, CommitResponse> commit;
+extern Protocol<LearnRequest, LearnResponse> learn;
+
+} // namespace protocol {
+
 // TODO(benh|jsirois): Integrate ZooKeeper!
 
 class ReplicaProcess : public ProtobufProcess<ReplicaProcess>
 {
 public:
-  ReplicaProcess(const std::string& file);
+  // Constructs a new replica process using specified file as the
+  // backing store and a cache with the specified capacity.
+  ReplicaProcess(const std::string& file, int capacity = 100000);
 
   virtual ~ReplicaProcess();
 
   // Handles a request from a coordinator to promise not to accept
-  // writes from any coordinator with a lower id.
-  void promise(uint64_t id, uint64_t position);
+  // writes from any other coordinator.
+  void promise(const PromiseRequest& request);
 
-  // Handles a request to insert a nop in the log.
-  void nop(uint64_t id, uint64_t position);
+  // Handles a request from a coordinator to write an action.
+  void write(const WriteRequest& request);
 
-  // Handles a request to append to the log.
-  void append(uint64_t id, uint64_t position, const std::string& bytes);
+  // Handles a request from a coordinator to commit an action.
+  void commit(const CommitRequest& request);
 
-  // Handles a request to truncate the log.
-  void truncate(uint64_t id, uint64_t position, uint64_t at);
+  // Handles a request from a coordinator (or replica) to learn the
+  // specified position in the log.
+  void learn(uint64_t position);
 
   // Handles a message notifying of a learned action.
   void learned(const Action& action);
 
-  // Handles a request to learn the specified position in the log.
-  void learn(uint64_t position);
+  // Returns the action associated with this position. A none result
+  // means that no action is known for this position. An error result
+  // means that there was an error while trying to get this action
+  // (for example, going to disk to read the log may have
+  // failed). Note that reading a position that has been learned to
+  // be truncated will also return an error.
+  Result<Action> read(uint64_t position);
+
+  // Returns missing positions in the log (i.e., unlearned or holes)
+  // up to the specified position.
+  std::set<uint64_t> missing(uint64_t position);
 
 private:
-  // Returns the action associated with this position. A result of
-  // type Result::NONE means that no action is known for this
-  // position. A result of type Result::ERROR means that there was an
-  // error while trying to get this action (for example, going to disk
-  // to read the log may have failed).
-  Result<Action> get(uint64_t position);
-
   // Helper routines that write a record corresponding to the
   // specified argument. Returns true on success and false otherwise.
-  bool write(const Promise& promise);
-  bool write(const Action& action);
+  bool persist(const Promise& promise);
+  bool persist(const Action& action);
 
   // Helper routine to recover log state (e.g., on restart).
   void recover();
 
-  // File info for the log.
+  // File name for the log.
   const std::string file;
+
+  // File descriptor for the log. Note that this descriptor is used
+  // for both reading and writing. This is accomplished because the
+  // file gets opend in append only mode, so all writes will naturally
+  // move the file offset to the end. Thus, reading is just a matter
+  // of seeking to some offset (usually the beginning).
   int fd;
 
   // Last promised coordinator.
   uint64_t promised;
 
+  // Start position of log (after *learned* truncations).
+  uint64_t start;
+
   // Last position written in the log.
-  uint64_t index;
+  uint64_t end;
+
+  // Holes in the log.
+  std::set<uint64_t> holes;
+
+  // Unlearned positions in the log.
+  std::set<uint64_t> unlearned;
 
   // Cache of log actions (indexed by position).
   cache<uint64_t, Action> cache;
 };
-
-
-inline Result<Action> ReplicaProcess::get(uint64_t position)
-{
-  Option<Action> option = cache.get(position);
-
-  if (option.isSome()) {
-    return option.get();
-  } else {
-    CHECK(fd != -1);
-
-    // Make sure we start at the beginning of the log.
-    if (lseek(fd, 0, SEEK_SET) < 0) {
-      LOG(FATAL) << "Failed to seek to the beginning of the log";
-    }
-
-    Record record;
-    Result<bool> result = Result<bool>::none();
-
-    do {
-      result = utils::protobuf::read(fd, &record);
-      if (result.isError()) {
-        return Result<Action>::error(result.error());
-      } else if (result.isNone()) {
-        return Result<Action>::none();
-      } else {
-        CHECK(result.isSome());
-        if (record.type() == Record::ACTION &&
-            record.action().position() == position) {
-          cache.put(position, record.action());
-          return record.action();
-        }
-      }
-    } while (result.isSome());
-
-    LOG(FATAL) << "Failed to find action in file OR reach EOF?";
-  }
-}
-
-
-inline bool ReplicaProcess::write(const Promise& promise)
-{
-  Record record;
-  record.set_type(Record::PROMISE);
-  record.mutable_promise()->MergeFrom(promise);
-
-  Result<bool> result = utils::protobuf::write(fd, record);
-
-  if (result.isError()) {
-    LOG(ERROR) << "Error writing to log: " << result.error();
-    return false;
-  }
-
-  CHECK(result.isSome());
-
-  return result.get();
-}
-
-
-inline bool ReplicaProcess::write(const Action& action)
-{
-  Record record;
-  record.set_type(Record::ACTION);
-  record.mutable_action()->MergeFrom(action);
-
-  Result<bool> result = utils::protobuf::write(fd, record);
-
-  if (result.isError()) {
-    LOG(ERROR) << "Error writing to log: " << result.error();
-    return false;
-  }
-
-  CHECK(result.isSome());
-
-  if (result.get()) {
-    index = std::max(index, action.position());
-    cache.put(index, action);
-    return true;
-  }
-
-  return false;
-}
 
 }}} // namespace mesos { namespace internal { namespace log {
 

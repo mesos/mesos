@@ -31,9 +31,7 @@ public:
 
   ~Option()
   {
-    if (t != NULL) {
-      delete t;
-    }
+    delete t;
   }
 
   Option<T>& operator = (const Option<T>& that)
