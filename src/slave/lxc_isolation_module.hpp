@@ -38,24 +38,16 @@ public:
 
   virtual void processExited(pid_t pid, int status);
 
-protected:
-  // Run a shell command formatted with varargs and return its exit code.
-  int shell(const char* format, ...);
-
-  // Attempt to set a resource limit of a container for a given cgroup
-  // property (e.g. cpu.shares). Returns true on success.
-  bool setResourceLimit(const std::string& container,
-			const std::string& property,
-                        int64_t value);
-
 private:
   // No copying, no assigning.
   LxcIsolationModule(const LxcIsolationModule&);
-  LxcBasedIsolationModule& operator = (const LxcIsolationModule&);
+  LxcIsolationModule& operator = (const LxcIsolationModule&);
 
   // Per-framework information object maintained in info hashmap.
-  struct FrameworkInfo
+  struct ContainerInfo
   {
+    FrameworkID frameworkId;
+    ExecutorID executorId;
     std::string container; // Name of Linux container used for this framework.
     pid_t pid; // PID of lxc-execute command running the executor.
   };
@@ -66,7 +58,7 @@ private:
   process::PID<Slave> slave;
   bool initialized;
   Reaper* reaper;
-  hashmap<FrameworkID, hashmap<ExecutorID, FrameworkInfo*> > infos;
+  hashmap<FrameworkID, hashmap<ExecutorID, ContainerInfo*> > infos;
 };
 
 }}} // namespace mesos { namespace internal { namespace slave {

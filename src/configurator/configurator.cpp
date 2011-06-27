@@ -300,7 +300,7 @@ string Configurator::getUsage() const
 {
   const int PAD = 5;
   string usage;
-  
+
   map<string,string> col1; // key -> col 1 string
   int maxLen = 0;
 
@@ -318,7 +318,7 @@ string Configurator::getUsage() const
       else
         val += string(" (or -") + opt.shortName + " VAL)";
     }
-    
+
     col1[key] = val;
     maxLen = val.size() > maxLen ? val.size() : maxLen;
   }
@@ -361,7 +361,7 @@ string Configurator::getUsage() const
   }
   return usage;
 }
-  
+
 
 void Configurator::loadDefaults()
 {

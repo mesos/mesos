@@ -20,6 +20,8 @@ using launcher::ExecutorLauncher;
 using std::map;
 using std::string;
 
+using process::wait; // Necessary on some OS's to disambiguate.
+
 
 ProcessBasedIsolationModule::ProcessBasedIsolationModule()
   : initialized(false)
@@ -118,11 +120,14 @@ void ProcessBasedIsolationModule::killExecutor(
 
     killpg(pgids[frameworkId][executorId], SIGKILL);
 
-    pgids[frameworkId].erase(executorId);
-
-    if (pgids[frameworkId].size() == 0) {
+    if (pgids[frameworkId].size() == 1) {
       pgids.erase(frameworkId);
+    } else {
+      pgids[frameworkId].erase(executorId);
     }
+
+    // NOTE: Both frameworkId and executorId are no longer valid
+    // because they have just been deleted above!
 
     // TODO(benh): Kill all of the process's descendants? Perhaps
     // create a new libprocess process that continually tries to kill
@@ -167,6 +172,7 @@ ExecutorLauncher* ProcessBasedIsolationModule::createExecutorLauncher(
                               conf.get("hadoop_home", ""),
                               !local,
                               conf.get("switch_user", true),
+			      "",
                               params);
 }
 
@@ -176,15 +182,15 @@ void ProcessBasedIsolationModule::processExited(pid_t pid, int status)
   foreachkey (const FrameworkID& frameworkId, pgids) {
     foreachpair (const ExecutorID& executorId, pid_t pgid, pgids[frameworkId]) {
       if (pgid == pid) {
-        // Kill the process group to clean up the tasks.
-        killExecutor(frameworkId, executorId);
-
         LOG(INFO) << "Telling slave of lost executor " << executorId
                   << " of framework " << frameworkId;
 
         dispatch(slave, &Slave::executorExited,
                  frameworkId, executorId, status);
-        break;
+
+        // Try and cleanup after the executor.
+        killExecutor(frameworkId, executorId);
+	return;
       }
     }
   }

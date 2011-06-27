@@ -20,6 +20,8 @@
 
 #include <google/protobuf/io/zero_copy_stream_impl.h>
 
+#include <list>
+
 #include <boost/lexical_cast.hpp>
 
 #include "common/foreach.hpp"
@@ -328,18 +330,18 @@ inline std::string getcwd()
 }
 
 
-inline std::vector<std::string> listdir(const std::string& directory)
+inline std::list<std::string> listdir(const std::string& directory)
 {
-  std::vector<std::string> result;
+  std::list<std::string> result;
 
-  DIR* dirp = opendir(directory.c_str());
+  DIR* dir = opendir(directory.c_str());
 
-  if (dirp == NULL) {
-    return std::vector<std::string>();
+  if (dir == NULL) {
+    return std::list<std::string>();
   }
 
   // Calculate the size for a "directory entry".
-  long name_max = fpathconf(dirfd(dirp), _PC_NAME_MAX);
+  long name_max = fpathconf(dirfd(dir), _PC_NAME_MAX);
 
   // If we don't get a valid size, check NAME_MAX, but fall back on
   // 255 in the worst case ... Danger, Will Robinson!
@@ -347,31 +349,34 @@ inline std::vector<std::string> listdir(const std::string& directory)
     name_max = (NAME_MAX > 255) ? NAME_MAX : 255;
   }
 
-  size_t name_end = (size_t) offsetof(struct dirent, d_name) + name_max + 1;
+  size_t name_end =
+    (size_t) offsetof(dirent, d_name) + name_max + 1;
 
-  size_t size = (name_end > sizeof(struct dirent)
+  size_t size = (name_end > sizeof(dirent)
                  ? name_end
-                 : sizeof(struct dirent));
+                 : sizeof(dirent));
 
-  struct dirent* temp = (struct dirent*) malloc(size);
+  dirent* temp = (dirent*) malloc(size);
 
   if (temp == NULL) {
     free(temp);
-    return std::vector<std::string>();
+    closedir(dir);
+    return std::list<std::string>();
   }
 
   struct dirent* entry;
 
   int error;
 
-  while ((error = readdir_r(dirp, temp, &entry)) == 0 && entry != NULL) {
+  while ((error = readdir_r(dir, temp, &entry)) == 0 && entry != NULL) {
     result.push_back(entry->d_name);
   }
 
   free(temp);
+  closedir(dir);
 
   if (error != 0) {
-    return std::vector<std::string>();
+    return std::list<std::string>();
   }
 
   return result;

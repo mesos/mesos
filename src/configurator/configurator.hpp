@@ -12,7 +12,7 @@
 
 
 namespace mesos { namespace internal {
-    
+
 
 /**
  * Exception type thrown by Configurator.
@@ -25,7 +25,7 @@ struct ConfigurationException : std::exception
 };
 
 
-/** 
+/**
  * This class populates a Configuration object, which can be retrieved
  * with getConfiguration(), by reading variables from the command
  * line, a config file or the environment.
@@ -101,7 +101,7 @@ private:
       throw ConfigurationException(message.c_str());
     }
     options[name] = ConfigOption(helpString,
-                                 Validator<T>(), 
+                                 Validator<T>(),
                                  hasShortName,
                                  shortName,
                                  hasDefault,

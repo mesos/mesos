@@ -17,6 +17,10 @@ public:
     return Option<T>(SOME, new T(t));
   }
 
+  Option() : state(NONE), t(NULL) {}
+
+  Option(const T& _t) : state(SOME), t(new T(_t)) {}
+
   Option(const Option<T>& that)
   {
     state = that.state;
@@ -53,12 +57,12 @@ public:
 
   T get() { assert(state == SOME); return *t; }
 
+private:
   enum State {
     SOME,
     NONE,
   };
 
-private:
   Option(State _state, T* _t = NULL)
     : state(_state), t(_t) {}
 

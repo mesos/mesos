@@ -95,7 +95,7 @@ public:
   }
   
   ConfigOption(const ConfigOption& opt)
-    : helpString(opt.helpString), 
+    : helpString(opt.helpString),
       hasDefault(opt.hasDefault),
       hasShortName(opt.hasShortName),
       shortName(opt.shortName),
@@ -117,7 +117,7 @@ public:
 
   ~ConfigOption() 
   { 
-    if (validator != 0) delete validator; 
+    if (validator != 0) delete validator;
   }
 
   std::string helpString;

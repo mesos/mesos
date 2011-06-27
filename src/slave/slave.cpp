@@ -1,6 +1,7 @@
 #include <errno.h>
 
 #include <algorithm>
+#include <iomanip>
 
 #include <process/timer.hpp>
 
@@ -13,6 +14,8 @@
 using namespace process;
 
 using std::string;
+
+using process::wait; // Necessary on some OS's to disambiguate.
 
 
 namespace mesos { namespace internal { namespace slave {
@@ -193,7 +196,7 @@ struct Framework
 Slave::Slave(const Configuration& _conf,
              bool _local,
              IsolationModule* _isolationModule)
-  : ProtobufProcess<Slave>("slave"),
+  : ProcessBase("slave"),
     conf(_conf),
     local(_local),
     isolationModule(_isolationModule)
@@ -208,7 +211,7 @@ Slave::Slave(const Configuration& _conf,
 Slave::Slave(const Resources& _resources,
              bool _local,
              IsolationModule *_isolationModule)
-  : ProtobufProcess<Slave>("slave"),
+  : ProcessBase("slave"),
     resources(_resources),
     local(_local),
     isolationModule(_isolationModule)
@@ -1317,6 +1320,8 @@ Promise<HttpResponse> Slave::http_stats_json(const HttpRequest& request)
 
   std::ostringstream out;
 
+  out << std::setprecision(10);
+
   out <<
     "{" <<
     "\"uptime\":" << elapsedTime() - startTime << "," <<
@@ -1355,6 +1360,8 @@ Promise<HttpResponse> Slave::http_vars(const HttpRequest& request)
   foreachpair (const string& key, const string& value, conf.getMap()) {
     out << key << " " << value << "\n";
   }
+
+  out << std::setprecision(10);
 
   out <<
     "uptime " << elapsedTime() - startTime << "\n" <<
