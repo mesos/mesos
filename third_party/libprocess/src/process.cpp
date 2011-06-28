@@ -2349,7 +2349,7 @@ void ProcessManager::cleanup(ProcessBase *process)
 
   // Stop new process references from being created.
   process->state = ProcessBase::FINISHING;
-
+ 
   /* Remove process. */
   synchronized (processes) {
     // Remove from internal clock (if necessary).
@@ -2398,7 +2398,12 @@ void ProcessManager::cleanup(ProcessBase *process)
       foreachpair (_, set<ProcessBase *> &waiting, waiters) {
         CHECK(waiting.find(process) == waiting.end());
       }
-
+ 
+      // Confirm process not in runq.
+      synchronized (runq) {
+        CHECK(find(runq.begin(), runq.end(), process) == runq.end());
+      }
+ 
       // Grab all the waiting processes that are now resumable.
       foreach (ProcessBase *waiter, waiters[process]) {
         resumable.push_back(waiter);
@@ -2422,11 +2427,6 @@ void ProcessManager::cleanup(ProcessBase *process)
 
   // Inform socket manager.
   socket_manager->exited(process);
-
-  // Confirm process not in runq.
-  synchronized (runq) {
-    CHECK(find(runq.begin(), runq.end(), process) == runq.end());
-  }
 
   // N.B. After opening the gate we can no longer dereference
   // 'process' since it might already be cleaned up by user code (a
