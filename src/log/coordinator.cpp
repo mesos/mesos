@@ -32,7 +32,7 @@ Coordinator::Coordinator(int _quorum,
 Coordinator::~Coordinator() {}
 
 
-Result<bool> Coordinator::elect(uint64_t _id)
+Result<uint64_t> Coordinator::elect(uint64_t _id)
 {
   CHECK(!ready);
 
@@ -56,7 +56,7 @@ Result<bool> Coordinator::elect(uint64_t _id)
       CHECK(option.get().ready());
       const PromiseResponse& response = option.get().get();
       if (!response.okay()) {
-        return false;
+        return Result<uint64_t>::error("Coordinator demoted");
       } else if (response.okay()) {
         CHECK(response.has_position());
         index = std::max(index, response.position());
@@ -88,9 +88,9 @@ Result<bool> Coordinator::elect(uint64_t _id)
     foreach (uint64_t position, positions) {
       Result<Action> result = fill(position);
       if (result.isError()) {
-        return Result<bool>::error(result.error());
+        return Result<uint64_t>::error(result.error());
       } else if (result.isNone()) {
-        return Result<bool>::none();
+        return Result<uint64_t>::none();
       } else {
         CHECK(result.isSome());
         CHECK(result.get().position() == position);
@@ -98,19 +98,18 @@ Result<bool> Coordinator::elect(uint64_t _id)
     }
 
     index += 1;
-
-    return true;
+    return index - 1;
   }
 
   // Timed out ...
-  return Result<bool>::none();
+  return Result<uint64_t>::none();
 }
 
 
-Result<bool> Coordinator::demote()
+Result<uint64_t> Coordinator::demote()
 {
   ready = false;
-  return true;
+  return index - 1;
 }
 
 
@@ -168,9 +167,14 @@ Result<list<pair<uint64_t, string> > > Coordinator::read(
     uint64_t from,
     uint64_t to)
 {
+  LOG(INFO) << "Coordinator requested read from " << from << " -> " << to;
+
   if (!ready) {
     return Result<list<pair<uint64_t, string> > >::error(
         "Coordinator not elected");
+  } else if (from == 0) { // TODO(benh): Fix this hack!
+    return Result<list<pair<uint64_t, string> > >::error(
+        "Bad read range (from == 0)");
   } else if (to < from) {
     return Result<list<pair<uint64_t, string> > >::error(
         "Bad read range (to < from)");

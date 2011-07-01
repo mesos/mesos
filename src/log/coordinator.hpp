@@ -30,10 +30,11 @@ public:
   ~Coordinator();
 
   // Handles coordinator election/demotion. A result of none means the
-  // coordinator failed to achieve a quorum (e.g., due to timeout)
-  // but can be retried.
-  Result<bool> elect(uint64_t id);
-  Result<bool> demote();
+  // coordinator failed to achieve a quorum (e.g., due to timeout) but
+  // can be retried. A some result returns the last committed log
+  // position.
+  Result<uint64_t> elect(uint64_t id);
+  Result<uint64_t> demote();
 
   // Returns the result of trying to append the specified bytes. A
   // result of none means the append failed (e.g., due to timeout),

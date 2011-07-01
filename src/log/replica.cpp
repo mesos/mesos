@@ -89,8 +89,9 @@ ReplicaProcess::~ReplicaProcess()
 void ReplicaProcess::promise(const PromiseRequest& request)
 {
   if (request.has_position()) {
-    LOG(INFO) << "Replica received explicit promise request from "
-              << request.id() << " for position " << request.position();
+    LOG(INFO) << "Replica received explicit promise request from"
+              << " coordinator " << request.id()
+              << " for position " << request.position();
 
     // Need to get the action for the specified position.
     Result<Action> result = read(request.position());
@@ -139,8 +140,8 @@ void ReplicaProcess::promise(const PromiseRequest& request)
       }
     }
   } else {
-    LOG(INFO) << "Replica received implicit promise request from "
-              << request.id();
+    LOG(INFO) << "Replica received implicit promise request from"
+              << " coordinator " << request.id();
 
     if (request.id() < promised) {
       PromiseResponse response;
@@ -406,7 +407,9 @@ void ReplicaProcess::learn(uint64_t position)
 
 Result<Action> ReplicaProcess::read(uint64_t position)
 {
-  if (position < start) {
+  if (position == 0) { // TODO(benh): Remove this hack.
+    return Result<Action>::none();
+  } else if (position < start) {
     return Result<Action>::error("Attempted to read truncated position");
   } else if (end < position) {
     return Result<Action>::none();
@@ -466,7 +469,7 @@ Result<Action> ReplicaProcess::read(uint64_t position)
 }
 
 
-set<uint64_t> ReplicaProcess::missing(uint64_t position)
+set<uint64_t> ReplicaProcess::missing(uint64_t index)
 {
   // Start off with all the unlearned positions.
   set<uint64_t> positions = unlearned;
@@ -476,9 +479,10 @@ set<uint64_t> ReplicaProcess::missing(uint64_t position)
     positions.insert(hole);
   }
 
-  // And finally all the missing positions beyond the end.
-  for (; position > end; position--) {
-    positions.insert(position);
+  // And finally add all the unknown positions beyond our end to the
+  // index specified.
+  for (; index >= end; index--) {
+    positions.insert(index);
   }
 
   return positions;
@@ -590,8 +594,8 @@ void ReplicaProcess::recover()
         }
       } else {
         // Must have crashed when trying to write this record or this
-        // record got corrupted. Truncate after this point and only
-
+        // record got corrupted. Just truncate after this point rather
+        // than doing any fancy heuristical recovery.
         LOG(WARNING) << "Found a partially written record during recovery";
         if (ftruncate(fd, lseek(fd, 0, SEEK_CUR)) != 0) {
           LOG(FATAL) << "Failed to truncate during recovery";
@@ -602,7 +606,6 @@ void ReplicaProcess::recover()
 
   // Determine the holes.
   for (uint64_t position = start; position < end; position++) {
-    CHECK(learned.count(position) > 0 && unlearned.count(position) > 0);
     if (learned.count(position) == 0 && unlearned.count(position) == 0) {
       holes.insert(position);
     }
@@ -610,7 +613,8 @@ void ReplicaProcess::recover()
 
   LOG(INFO) << "Replica recovered with log positions "
             << start << " -> " << end
-            << " and holes " << utils::stringify(holes);
+            << " and holes " << utils::stringify(holes)
+            << " and unlearned " << utils::stringify(unlearned);
 }
 
 }}} // namespace mesos { namespace internal { namespace log {
