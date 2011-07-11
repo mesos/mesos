@@ -479,10 +479,14 @@ set<uint64_t> ReplicaProcess::missing(uint64_t index)
     positions.insert(hole);
   }
 
-  // And finally add all the unknown positions beyond our end to the
-  // index specified.
+  // And finally add all the unknown positions beyond our end.
   for (; index >= end; index--) {
     positions.insert(index);
+
+    // Don't wrap around 0!
+    if (index == 0) {
+      break;
+    }
   }
 
   return positions;
@@ -583,7 +587,7 @@ void ReplicaProcess::recover()
             unlearned.erase(record.action().position());
             if (record.action().has_type() &&
                 record.action().type() == Action::TRUNCATE) {
-              start = std::max(start, record.action().position());
+              start = std::max(start, record.action().truncate().to());
             }
           } else {
             learned.erase(record.action().position());
