@@ -20,6 +20,7 @@
 #include <unistd.h>
 
 #include <list>
+#include <map>
 #include <set>
 #include <string>
 #include <vector>
@@ -45,6 +46,7 @@ using namespace mesos::internal::log;
 using namespace process;
 
 using std::list;
+using std::map;
 using std::pair;
 using std::set;
 using std::string;
@@ -71,12 +73,15 @@ char** args; // Command line arguments for doing a restart.
 void restart()
 {
   LOG(INFO) << "Restarting ...";
-  execlp(args[0], args[0], args[1], args[2], args[3], args[4], (char *) NULL);
+  execv(args[0], args);
   fatalerror("Failed to exec");
 }
 
 
-bool coordinate(Coordinator* coordinator, uint64_t id)
+bool coordinate(Coordinator* coordinator,
+                uint64_t id,
+                int end,
+                map<int, int> truncations)
 {
   const int attempts = 3;
 
@@ -146,7 +151,30 @@ bool coordinate(Coordinator* coordinator, uint64_t id)
   LOG(INFO) << "Attempting to do " << writes << " writes";
 
   attempt = 1;
-  while (writes > 0) {
+  while (writes > 0 && value <= end) {
+    if (truncations.count(value) > 0) {
+      int to = truncations[value];
+      Result<uint64_t> result = coordinator->truncate(to);
+      if (result.isError()) {
+        LOG(INFO) << "Restarting due to truncate error";
+        restart();
+      } else if (result.isNone()) {
+        if (attempt == attempts) {
+          LOG(INFO) << "Restarting after too many attempts";
+          restart();
+        } else {
+          attempt++;
+          sleep(1);
+          continue;
+        }
+      } else {
+        CHECK(result.isSome());
+        LOG(INFO) << "Truncated to " << to;
+        sleep(1);
+        attempt = 1;
+      }
+    }
+
     Result<uint64_t> result = coordinator->append(utils::stringify(value));
     if (result.isError()) {
       LOG(INFO) << "Restarting due to append error";
@@ -169,9 +197,8 @@ bool coordinate(Coordinator* coordinator, uint64_t id)
     }
   }
 
-  restart();
-
-  return false;
+  exit(0);
+  return true;
 }
 
 
@@ -181,7 +208,9 @@ public:
   LogProcess(int _quorum,
              const string& _file,
              const string& _servers,
-             const string& _znode);
+             const string& _znode,
+             int _end,
+             const map<int, int>& _truncations);
 
   virtual ~LogProcess();
 
@@ -213,6 +242,12 @@ private:
 
   // Log file.
   string file;
+
+  // Termination value (when to stop writing to the log).
+  int end;
+
+  // Truncation points.
+  map<int, int> truncations;
 
   // Coordinator id.
   uint64_t id;
@@ -280,11 +315,15 @@ private:
 LogProcess::LogProcess(int _quorum,
                        const string& _file,
                        const string& _servers,
-                       const string& _znode)
+                       const string& _znode,
+                       int _end,
+                       const map<int, int>& _truncations)
   : quorum(_quorum),
     file(_file),
     servers(_servers),
     znode(_znode),
+    end(_end),
+    truncations(_truncations),
     id(0),
     elected(false),
     replica(NULL),
@@ -547,7 +586,7 @@ void LogProcess::elect()
 
   if (id == min && !elected) {
     elected = true;
-    process::run(&coordinate, coordinator, id);
+    process::run(&coordinate, coordinator, id, end, truncations);
   } else if (elected) {
     LOG(INFO) << "Restarting due to demoted";
     restart();
@@ -557,8 +596,9 @@ void LogProcess::elect()
 
 int main(int argc, char** argv)
 {
-  if (argc != 5) {
-    fatal("Usage: %s <quorum> <file> <servers> <znode>", argv[0]);
+  if (argc < 6) {
+    fatal("Usage: %s <quorum> <file> <servers> <znode> <end> <at> <to> ...",
+          argv[0]);
   }
 
   args = argv;
@@ -567,10 +607,24 @@ int main(int argc, char** argv)
   string file = argv[2];
   string servers = argv[3];
   string znode = argv[4];
+  int end = atoi(argv[5]);
+
+  map<int, int> truncations;
+
+  for (int i = 6; argv[i] != NULL; i += 2) {
+    if (argv[i + 1] == NULL) {
+      fatal("Expecting 'to' argument for truncation");
+    }
+
+    int at = atoi(argv[i]);
+    int to = atoi(argv[i + 1]);
+    
+    truncations[at] = to;
+  }
 
   process::initialize(true);
 
-  LogProcess log(quorum, file, servers, znode);
+  LogProcess log(quorum, file, servers, znode, end, truncations);
   spawn(log);
   wait(log);
 
