@@ -433,6 +433,8 @@ class GroupProcess : public ProtobufProcess<GroupProcess>
 public:
   GroupProcess() {}
 
+  GroupProcess(const std::set<process::UPID>& _pids) : pids(_pids) {}
+
   virtual ~GroupProcess() {}
 
   void add(const process::UPID& pid)

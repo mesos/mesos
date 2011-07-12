@@ -410,6 +410,7 @@ TEST(CoordinatorTest, AppendRead)
   ReplicaProcess replica2(file2);
   spawn(replica2);
 
+  // TODO(benh): Use utils::set<n>(replica1.self(), replica2.self())
   GroupProcess group;
   spawn(group);
 
