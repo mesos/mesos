@@ -21,7 +21,7 @@ namespace mesos { namespace internal { namespace log {
 Coordinator::Coordinator(int _quorum,
                          ReplicaProcess* _replica,
                          GroupProcess* _group)
-  : ready(false),
+  : elected(false),
     quorum(_quorum),
     replica(_replica),
     group(_group),
@@ -34,7 +34,7 @@ Coordinator::~Coordinator() {}
 
 Result<uint64_t> Coordinator::elect(uint64_t _id)
 {
-  CHECK(!ready);
+  CHECK(!elected);
 
   id = _id;
 
@@ -74,7 +74,7 @@ Result<uint64_t> Coordinator::elect(uint64_t _id)
 
   // Either we have a quorum or we timed out.
   if (okays >= quorum) {
-    ready = true;
+    elected = true;
 
     // Need to "catchup" local replica (i.e., fill in any unlearned
     // and/or missing positions) so that we can do local reads.
@@ -108,14 +108,14 @@ Result<uint64_t> Coordinator::elect(uint64_t _id)
 
 Result<uint64_t> Coordinator::demote()
 {
-  ready = false;
+  elected = false;
   return index - 1;
 }
 
 
 Result<uint64_t> Coordinator::append(const string& bytes)
 {
-  if (!ready) {
+  if (!elected) {
     return Result<uint64_t>::error("Coordinator not elected");
   }
 
@@ -140,7 +140,7 @@ Result<uint64_t> Coordinator::append(const string& bytes)
 
 Result<uint64_t> Coordinator::truncate(uint64_t to)
 {
-  if (!ready) {
+  if (!elected) {
     return Result<uint64_t>::error("Coordinator not elected");
   }
 
@@ -169,7 +169,7 @@ Result<list<pair<uint64_t, string> > > Coordinator::read(
 {
   LOG(INFO) << "Coordinator requested read from " << from << " -> " << to;
 
-  if (!ready) {
+  if (!elected) {
     return Result<list<pair<uint64_t, string> > >::error(
         "Coordinator not elected");
   } else if (from == 0) { // TODO(benh): Fix this hack!
@@ -235,10 +235,23 @@ Result<uint64_t> Coordinator::write(const Action& action)
             << Action::Type_Name(action.type())
             << " action at position " << action.position();
 
-  CHECK(ready);
+  CHECK(elected);
 
   CHECK(action.has_performed());
   CHECK(action.has_type());
+
+  // TODO(benh): Eliminate this special case hack?
+  if (quorum == 1) {
+    Result<uint64_t> result = commit(action);
+    if (result.isError()) {
+      return Result<uint64_t>::error(result.error());
+    } else if (result.isNone()) {
+      return Result<uint64_t>::none();
+    } else {
+      CHECK(result.isSome());
+      return action.position();
+    }
+  }
 
   WriteRequest request;
   request.set_id(id);
@@ -308,7 +321,7 @@ Result<uint64_t> Coordinator::write(const Action& action)
 
 Result<uint64_t> Coordinator::commit(const Action& action)
 {
-  CHECK(ready);
+  CHECK(elected);
 
   CommitRequest request;
   request.set_id(id);
@@ -368,6 +381,8 @@ Result<Action> Coordinator::fill(uint64_t position)
 {
   LOG(INFO) << "Coordinator attempting to fill position "
             << position << " in the log";
+
+  CHECK(elected);
 
   PromiseRequest request;
   request.set_id(id);

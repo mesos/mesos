@@ -32,9 +32,10 @@ extern Protocol<LearnRequest, LearnResponse> learn;
 class ReplicaProcess : public ProtobufProcess<ReplicaProcess>
 {
 public:
-  // Constructs a new replica process using specified file as the
-  // backing store and a cache with the specified capacity.
-  ReplicaProcess(const std::string& file, int capacity = 100000);
+  // Constructs a new replica process using specified path as the
+  // underlying local file for the backing store and a cache with the
+  // specified capacity.
+  ReplicaProcess(const std::string& path, int capacity = 100000);
 
   virtual ~ReplicaProcess();
 
@@ -67,6 +68,12 @@ public:
   // up to the specified position.
   std::set<uint64_t> missing(uint64_t position);
 
+  // Returns the beginning position of the log.
+  Result<uint64_t> beginning();
+
+  // Returns the last written position in the log.
+  Result<uint64_t> ending();
+
 private:
   // Helper routines that write a record corresponding to the
   // specified argument. Returns true on success and false otherwise.
@@ -76,8 +83,8 @@ private:
   // Helper routine to recover log state (e.g., on restart).
   void recover();
 
-  // File name for the log.
-  const std::string file;
+  // Path to the log.
+  const std::string path;
 
   // File descriptor for the log. Note that this descriptor is used
   // for both reading and writing. This is accomplished because the
@@ -89,10 +96,10 @@ private:
   // Last promised coordinator.
   uint64_t promised;
 
-  // Start position of log (after *learned* truncations).
-  uint64_t start;
+  // Beginning position of log (after *learned* truncations).
+  uint64_t begin;
 
-  // Last position written in the log.
+  // Ending position of log (last written position).
   uint64_t end;
 
   // Holes in the log.

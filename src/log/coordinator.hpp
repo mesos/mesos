@@ -83,7 +83,7 @@ private:
   template <typename M>
   void remotecast(const M& m);
 
-  bool ready; // True if this coordinator is ready to handle requests.
+  bool elected; // True if this coordinator has been elected.
 
   int quorum; // Quorum size.
 

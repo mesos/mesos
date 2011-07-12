@@ -25,18 +25,18 @@ Protocol<LearnRequest, LearnResponse> learn;
 } // namespace protocol {
 
 
-ReplicaProcess::ReplicaProcess(const string& _file, int capacity)
-  : file(_file),
+ReplicaProcess::ReplicaProcess(const string& _path, int capacity)
+  : path(_path),
     fd(-1),
     promised(0),
-    start(0),
+    begin(0),
     end(0),
     cache(capacity)
 {
-  LOG(INFO) << "Attempting to open log at '" << file << "'";
+  LOG(INFO) << "Attempting to open log at '" << path << "'";
 
   Result<int> result =
-    utils::os::open(file, O_RDWR | O_CREAT | O_APPEND,
+    utils::os::open(path, O_RDWR | O_CREAT | O_APPEND,
                     S_IRUSR | S_IWUSR | S_IRGRP | S_IRWXO);
 
   CHECK(result.isSome()) << "Failed to open log";
@@ -409,7 +409,7 @@ Result<Action> ReplicaProcess::read(uint64_t position)
 {
   if (position == 0) { // TODO(benh): Remove this hack.
     return Result<Action>::none();
-  } else if (position < start) {
+  } else if (position < begin) {
     return Result<Action>::error("Attempted to read truncated position");
   } else if (end < position) {
     return Result<Action>::none();
@@ -493,6 +493,18 @@ set<uint64_t> ReplicaProcess::missing(uint64_t index)
 }
 
 
+Result<uint64_t> ReplicaProcess::beginning()
+{
+  return begin;
+}
+
+
+Result<uint64_t> ReplicaProcess::ending()
+{
+  return end;
+}
+
+
 bool ReplicaProcess::persist(const Promise& promise)
 {
   Record record;
@@ -535,7 +547,7 @@ bool ReplicaProcess::persist(const Action& action)
     if (action.has_learned() && action.learned()) {
       unlearned.erase(action.position());
       if (action.has_type() && action.type() == Action::TRUNCATE) {
-        start = std::max(start, action.truncate().to());
+        begin = std::max(begin, action.truncate().to());
       }
     }
 
@@ -587,7 +599,7 @@ void ReplicaProcess::recover()
             unlearned.erase(record.action().position());
             if (record.action().has_type() &&
                 record.action().type() == Action::TRUNCATE) {
-              start = std::max(start, record.action().truncate().to());
+              begin = std::max(begin, record.action().truncate().to());
             }
           } else {
             learned.erase(record.action().position());
@@ -609,14 +621,14 @@ void ReplicaProcess::recover()
   } while (result.isSome());
 
   // Determine the holes.
-  for (uint64_t position = start; position < end; position++) {
+  for (uint64_t position = begin; position < end; position++) {
     if (learned.count(position) == 0 && unlearned.count(position) == 0) {
       holes.insert(position);
     }
   }
 
   LOG(INFO) << "Replica recovered with log positions "
-            << start << " -> " << end
+            << begin << " -> " << end
             << " and holes " << utils::stringify(holes)
             << " and unlearned " << utils::stringify(unlearned);
 }
