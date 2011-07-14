@@ -121,6 +121,7 @@ message TaskStatus {
 message ExecutorInfo {
   required ExecutorID executor_id = 1;
   required string uri = 2;
+  repeated Resource resources = 5;
   optional Params params = 3;
   optional bytes data = 4;
 }

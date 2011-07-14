@@ -61,7 +61,8 @@ void ProcessBasedIsolationModule::launchExecutor(
     const FrameworkID& frameworkId,
     const FrameworkInfo& frameworkInfo,
     const ExecutorInfo& executorInfo,
-    const string& directory)
+    const string& directory,
+    const Resources& resources)
 {
   if (!initialized) {
     LOG(FATAL) << "Cannot launch executors before initialization!";

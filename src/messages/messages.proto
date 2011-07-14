@@ -153,6 +153,7 @@ message RegisterSlaveMessage {
 message ReregisterSlaveMessage {
   required SlaveID slave_id = 1;
   required SlaveInfo slave = 2;
+  repeated ExecutorInfo executor_infos = 4;
   repeated Task tasks = 3;
 }
 

@@ -32,7 +32,8 @@ struct Executor
       id(_info.executor_id()),
       uuid(UUID::random()),
       pid(UPID()),
-      shutdown(false) {}
+      shutdown(false),
+      resources(_info.resources()) {}
 
   ~Executor()
   {
@@ -513,6 +514,7 @@ void Slave::newMasterDetected(const UPID& pid)
 
     foreachvalue (Framework* framework, frameworks) {
       foreachvalue (Executor* executor, framework->executors) {
+	message.add_executor_infos()->MergeFrom(executor->info);
 	foreachvalue (Task* task, executor->launchedTasks) {
           // TODO(benh): Also need to send queued tasks here ...
 	  message.add_tasks()->MergeFrom(*task);
@@ -631,8 +633,8 @@ void Slave::runTask(const FrameworkInfo& frameworkInfo,
     // trying to launch the executor.)
     dispatch(isolationModule,
              &IsolationModule::launchExecutor,
-             framework->id, framework->info, executor->info, directory);
-
+             framework->id, framework->info, executor->info,
+             directory, executor->resources);
   }
 }
 

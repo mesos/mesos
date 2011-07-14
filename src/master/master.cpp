@@ -125,15 +125,17 @@ struct SlaveRegistrar
 struct SlaveReregistrar
 {
   static bool run(Slave* slave,
+		  const vector<ExecutorInfo>& executorInfos,
                   const vector<Task>& tasks,
                   const PID<Master>& master)
   {
     // TODO(benh): Do a reverse lookup to ensure IP maps to
     // hostname, or check credentials of this slave.
-    dispatch(master, &Master::readdSlave, slave, tasks);
+    dispatch(master, &Master::readdSlave, slave, executorInfos, tasks);
   }
 
   static bool run(Slave* slave,
+                  const vector<ExecutorInfo>& executorInfos,
                   const vector<Task>& tasks,
                   const PID<Master>& master,
                   const PID<SlavesManager>& slavesManager)
@@ -146,7 +148,7 @@ struct SlaveReregistrar
       return false;
     }
 
-    return run(slave, tasks, master);
+    return run(slave, executorInfos, tasks, master);
   }
 };
 
@@ -445,6 +447,7 @@ void Master::initialize()
       &Master::reregisterSlave,
       &ReregisterSlaveMessage::slave_id,
       &ReregisterSlaveMessage::slave,
+      &ReregisterSlaveMessage::executor_infos,
       &ReregisterSlaveMessage::tasks);
 
   installProtobufHandler<UnregisterSlaveMessage>(
@@ -602,6 +605,7 @@ void Master::reregisterFramework(const FrameworkID& frameworkId,
       // TODO(benh): Check for root submissions like above!
 
       addFramework(framework);
+
       // Add any running tasks reported by slaves for this framework.
       foreachpair (const SlaveID& slaveId, Slave* slave, slaves) {
         foreachvalue (Task* task, slave->tasks) {
@@ -791,6 +795,7 @@ void Master::registerSlave(const SlaveInfo& slaveInfo)
 
 void Master::reregisterSlave(const SlaveID& slaveId,
                              const SlaveInfo& slaveInfo,
+			     const vector<ExecutorInfo>& executorInfos,
                              const vector<Task>& tasks)
 {
   if (slaveId == "") {
@@ -824,10 +829,10 @@ void Master::reregisterSlave(const SlaveID& slaveId,
 
       // Checks if this slave, or if all slaves, can be accepted.
       if (slaveHostnamePorts.count(slaveInfo.hostname(), from().port) > 0) {
-        run(&SlaveReregistrar::run, slave, tasks, self());
+        run(&SlaveReregistrar::run, slave, executorInfos, tasks, self());
       } else if (conf.get<string>("slaves", "*") == "*") {
         run(&SlaveReregistrar::run,
-            slave, tasks, self(), slavesManager->self());
+            slave, executorInfos, tasks, self(), slavesManager->self());
       } else {
         LOG(WARNING) << "Cannot re-register slave at "
                      << slaveInfo.hostname() << ":" << from().port
@@ -974,7 +979,7 @@ void Master::exitedExecutor(const SlaveID& slaveId,
       // Tell the framework which tasks have been lost.
       foreachvalue (Task* task, utils::copy(framework->tasks)) {
         if (task->slave_id() == slave->id &&
-            task->executor_id() == executorId) {
+	    task->executor_id() == executorId) {
           StatusUpdateMessage message;
           StatusUpdate* update = message.mutable_update();
           update->mutable_framework_id()->MergeFrom(task->framework_id());
@@ -994,6 +999,9 @@ void Master::exitedExecutor(const SlaveID& slaveId,
           removeTask(framework, slave, task, TRR_EXECUTOR_LOST);
         }
       }
+
+      // Remove executor from slave.
+      slave->removeExecutor(frameworkId, executorId);
 
       // TODO(benh): Send the framework it's executor's exit
       // status? Or maybe at least have something like
@@ -1151,8 +1159,10 @@ void Master::processOfferReply(Offer* offer,
     resourcesOffered[r.slave] = r.resources;
   }
 
-  // Count used resources and check that its tasks are valid.
+  // Determine used resources and used executors and check that all of
+  // the tasks are valid.
   hashmap<Slave*, Resources> resourcesUsed;
+  hashset<ExecutorID> executorsUsed;
   foreach (const TaskDescription& task, tasks) {
     // Check whether the task is on a valid slave.
     Slave* slave = getSlave(task.slave_id());
@@ -1177,6 +1187,27 @@ void Master::processOfferReply(Offer* offer,
         terminateFramework(framework, 0, "Invalid resources for task");
         return;
       }
+    }
+
+    // Determine the executor and executor id for this task.
+    const ExecutorInfo& executorInfo = task.has_executor()
+      ? task.executor()
+      : framework->info.executor();
+
+    // TODO(benh): Require executors to specify some resources. Note
+    // that doing this here will mean that we won't fail a framework
+    // that has no resources for it's default executor until it tries
+    // to launch it's first task.
+
+    const ExecutorID& executorId = executorInfo.executor_id();
+
+    // Include resources used by an executor for each task that has an
+    // executor that is not yet running on the slave.
+    if (!executorsUsed.contains(executorId)) {
+      if (!slave->hasExecutor(framework->id, executorId)) {
+	resourcesUsed[slave] += executorInfo.resources();
+      }
+      executorsUsed.insert(executorId);
     }
 
     resourcesUsed[slave] += task.resources();
@@ -1263,14 +1294,14 @@ void Master::launchTask(Framework* framework, const TaskDescription& task)
   Slave* slave = getSlave(task.slave_id());
   CHECK(slave != NULL);
 
-  // Determine the executor ID for this task.
-  const ExecutorID& executorId = task.has_executor()
-    ? task.executor().executor_id()
-    : framework->info.executor().executor_id();
+  // Determine the executor for this task.
+  const ExecutorInfo& executorInfo = task.has_executor()
+    ? task.executor()
+    : framework->info.executor();
 
   Task* t = new Task();
   t->mutable_framework_id()->MergeFrom(framework->id);
-  t->mutable_executor_id()->MergeFrom(executorId);
+  t->mutable_executor_id()->MergeFrom(executorInfo.executor_id());
   t->set_state(TASK_STARTING);
   t->set_name(task.name());
   t->mutable_task_id()->MergeFrom(task.task_id());
@@ -1278,6 +1309,11 @@ void Master::launchTask(Framework* framework, const TaskDescription& task)
   t->mutable_resources()->MergeFrom(task.resources());
 
   framework->addTask(t);
+
+  if (!slave->hasExecutor(framework->id, executorInfo.executor_id())) {
+    slave->addExecutor(framework->id, executorInfo);
+  }
+
   slave->addTask(t);
 
   allocator->taskAdded(t);
@@ -1429,17 +1465,29 @@ void Master::addSlave(Slave* slave, bool reregister)
 }
 
 
-void Master::readdSlave(Slave* slave, const vector<Task>& tasks)
+void Master::readdSlave(Slave* slave,
+			const vector<ExecutorInfo>& executorInfos,
+			const vector<Task>& tasks)
 {
   CHECK(slave != NULL);
 
   addSlave(slave, true);
 
-  for (int i = 0; i < tasks.size(); i++) {
-    Task* task = new Task(tasks[i]);
+  foreach (const Task& task, tasks) {
+    Task* t = new Task(task);
+
+    // Find the executor running this task and add it to the slave.
+    foreach (const ExecutorInfo& executorInfo, executorInfos) {
+      if (executorInfo.executor_id() == task.executor_id()) {
+	if (!slave->hasExecutor(task.framework_id(), task.executor_id())) {
+	  slave->addExecutor(task.framework_id(), executorInfo);
+	}
+	break;
+      }
+    }
 
     // Add the task to the slave.
-    slave->addTask(task);
+    slave->addTask(t);
 
     // Try and add the task to the framework too, but since the
     // framework might not yet be connected we won't be able to
@@ -1447,9 +1495,9 @@ void Master::readdSlave(Slave* slave, const vector<Task>& tasks)
     // will add them then. We also tell this slave the current
     // framework pid for this task. Again, we do the same thing
     // if a framework currently isn't registered.
-    Framework* framework = getFramework(task->framework_id());
+    Framework* framework = getFramework(task.framework_id());
     if (framework != NULL) {
-      framework->addTask(task);
+      framework->addTask(t);
       UpdateFrameworkMessage message;
       message.mutable_framework_id()->MergeFrom(framework->id);
       message.set_pid(framework->pid);
@@ -1458,8 +1506,8 @@ void Master::readdSlave(Slave* slave, const vector<Task>& tasks)
       // TODO(benh): We should really put a timeout on how long we
       // keep tasks running on a slave that never have frameworks
       // reregister and claim them.
-      LOG(WARNING) << "Possibly orphaned task " << task->task_id()
-                   << " of framework " << task->framework_id()
+      LOG(WARNING) << "Possibly orphaned task " << task.task_id()
+                   << " of framework " << task.framework_id()
                    << " running on slave " << slave->id;
     }
   }
