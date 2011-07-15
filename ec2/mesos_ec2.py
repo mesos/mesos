@@ -39,7 +39,7 @@ def parse_args():
       help="Master instance type (leave empty for same as instance-type)")
   parser.add_option("-z", "--zone", default="",
       help="Availability zone to launch instances in")
-  parser.add_option("-a", "--ami", default="ami-fa4eb393",
+  parser.add_option("-a", "--ami", default="ami-4521e52c",
       help="Amazon Machine Image ID to use")
   parser.add_option("-o", "--os", default="amazon64",
       help="OS on the Amazon Machine Image (default: amazon64)")
