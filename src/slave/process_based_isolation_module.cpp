@@ -68,9 +68,13 @@ void ProcessBasedIsolationModule::launchExecutor(
     LOG(FATAL) << "Cannot launch executors before initialization!";
   }
 
-  LOG(INFO) << "Launching '" << executorInfo.uri()
-            << "' for executor '" << executorInfo.executor_id()
-            << "' of framework " << frameworkId;
+  const ExecutorID& executorId = executorInfo.executor_id();
+
+  LOG(INFO) << "Launching " << executorId
+            << " (" << executorInfo.uri() << ")"
+            << " in " << directory
+            << " with resources " << resources
+            << "' for framework " << frameworkId;
 
   pid_t pid;
   if ((pid = fork()) == -1) {
@@ -78,13 +82,15 @@ void ProcessBasedIsolationModule::launchExecutor(
   }
 
   if (pid) {
-    // In parent process, record the pgid for killpg later.
-    LOG(INFO) << "Started executor, OS pid = " << pid;
-    pgids[frameworkId][executorInfo.executor_id()] = pid;
+    // In parent process.
+    LOG(INFO) << "Forked executor at = " << pid;
+
+    // Record the pid (as a pgid to be used by killpg).
+    pgids[frameworkId][executorId] = pid;
 
     // Tell the slave this executor has started.
     dispatch(slave, &Slave::executorStarted,
-             frameworkId, executorInfo.executor_id(), pid);
+             frameworkId, executorId, pid);
   } else {
     // In child process, make cleanup easier.
     if ((pid = setsid()) == -1) {

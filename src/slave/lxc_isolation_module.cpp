@@ -120,9 +120,11 @@ void LxcIsolationModule::launchExecutor(
 
   const ExecutorID& executorId = executorInfo.executor_id();
 
-  LOG(INFO) << "Launching '" << executorInfo.uri()
-            << "' for executor '" << executorId
-            << "' of framework " << frameworkId;
+  LOG(INFO) << "Launching " << executorId
+            << " (" << executorInfo.uri() << ")"
+            << " in " << directory
+            << " with resources " << resources
+            << "' for framework " << frameworkId;
 
   // Create a name for the container.
   std::ostringstream out;
@@ -144,11 +146,14 @@ void LxcIsolationModule::launchExecutor(
   // automatically creates the container and will delete it when finished.
   pid_t pid;
   if ((pid = fork()) == -1) {
-    PLOG(FATAL) << "Failed to fork to launch lxc-execute";
+    PLOG(FATAL) << "Failed to fork to launch new executor";
   }
 
   if (pid) {
     // In parent process.
+    LOG(INFO) << "Forked executor at = " << pid;
+
+    // Record the pid.
     info->pid = pid;
 
     // Tell the slave this executor has started.
