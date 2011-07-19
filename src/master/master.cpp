@@ -1009,6 +1009,8 @@ void Master::exitedExecutor(const SlaveID& slaveId,
                     << " of framework " << frameworkId
                     << " because of lost executor";
 
+          stats.tasks[TASK_LOST]++;
+
           removeTask(framework, slave, task, TRR_EXECUTOR_LOST);
         }
       }
@@ -1016,9 +1018,9 @@ void Master::exitedExecutor(const SlaveID& slaveId,
       // Remove executor from slave.
       slave->removeExecutor(frameworkId, executorId);
 
-      // TODO(benh): Send the framework it's executor's exit
-      // status? Or maybe at least have something like
-      // M2F_EXECUTOR_LOST?
+      // TODO(benh): Send the framework it's executor's exit status?
+      // Or maybe at least have something like
+      // Scheduler::executorLost?
     }
   }
 }
