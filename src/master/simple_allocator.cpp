@@ -136,11 +136,11 @@ struct DominantShareComparator
 
         if (total > 0) {
           const Resource::Scalar& scalar1 =
-            f1->resources.getScalar(resource.name(), Resource::Scalar());
+            f1->resources.get(resource.name(), Resource::Scalar());
           share1 = max(share1, scalar1.value() / total);
 
           const Resource::Scalar& scalar2 =
-            f2->resources.getScalar(resource.name(), Resource::Scalar());
+            f2->resources.get(resource.name(), Resource::Scalar());
           share2 = max(share2, scalar2.value() / total);
         }
       }
@@ -212,15 +212,8 @@ void SimpleAllocator::makeNewOffers(const vector<Slave*>& slaves)
       // resources, rather than the master pushing resources out to
       // frameworks.
 
-      Resource::Scalar cpus;
-      cpus.set_value(0);
-
-      cpus = allocatable.getScalar("cpus", cpus);
-
-      Resource::Scalar mem;
-      mem.set_value(0);
-
-      mem = allocatable.getScalar("mem", mem);
+      Resource::Scalar cpus = allocatable.get("cpus", Resource::Scalar());
+      Resource::Scalar mem = allocatable.get("mem", Resource::Scalar());
 
       if (cpus.value() >= MIN_CPUS && mem.value() > MIN_MEM) {
         VLOG(1) << "Found free resources: " << allocatable << " on " << slave;

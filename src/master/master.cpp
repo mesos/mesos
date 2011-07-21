@@ -214,14 +214,9 @@ Promise<state::MasterState*> Master::getState()
     new state::MasterState(build::DATE, build::USER, self());
 
   foreachvalue (Slave* s, slaves) {
-    Resources resources(s->info.resources());
-    Resource::Scalar cpus;
-    Resource::Scalar mem;
-    cpus.set_value(0);
-    mem.set_value(0);
-    cpus = resources.getScalar("cpus", cpus);
-    mem = resources.getScalar("mem", mem);
-
+    Resources resources = s->info.resources();
+    Resource::Scalar cpus = resources.get("cpus", Resource::Scalar());
+    Resource::Scalar mem = resources.get("mem", Resource::Scalar());
     state::Slave* slave =
       new state::Slave(s->id.value(), s->info.hostname(),
                        s->info.public_hostname(), cpus.value(),
@@ -231,14 +226,9 @@ Promise<state::MasterState*> Master::getState()
   }
 
   foreachvalue (Framework* f, frameworks) {
-    Resources resources(f->resources);
-    Resource::Scalar cpus;
-    Resource::Scalar mem;
-    cpus.set_value(0);
-    mem.set_value(0);
-    cpus = resources.getScalar("cpus", cpus);
-    mem = resources.getScalar("mem", mem);
-
+    Resources resources = f->resources;
+    Resource::Scalar cpus = resources.get("cpus", Resource::Scalar());
+    Resource::Scalar mem = resources.get("mem", Resource::Scalar());
     state::Framework* framework =
       new state::Framework(f->id.value(), f->info.user(),
                            f->info.name(), f->info.executor().uri(),
@@ -247,14 +237,9 @@ Promise<state::MasterState*> Master::getState()
     state->frameworks.push_back(framework);
 
     foreachvalue (Task* t, f->tasks) {
-      Resources resources(t->resources());
-      Resource::Scalar cpus;
-      Resource::Scalar mem;
-      cpus.set_value(0);
-      mem.set_value(0);
-      cpus = resources.getScalar("cpus", cpus);
-      mem = resources.getScalar("mem", mem);
-
+      Resources resources = t->resources();
+      Resource::Scalar cpus = resources.get("cpus", Resource::Scalar());
+      Resource::Scalar mem = resources.get("mem", Resource::Scalar());
       state::Task* task =
         new state::Task(t->task_id().value(), t->name(),
                         t->framework_id().value(), t->slave_id().value(),
@@ -269,14 +254,9 @@ Promise<state::MasterState*> Master::getState()
         new state::Offer(o->id.value(), o->frameworkId.value());
 
       foreach (const SlaveResources& r, o->resources) {
-        Resources resources(r.resources);
-        Resource::Scalar cpus;
-        Resource::Scalar mem;
-        cpus.set_value(0);
-        mem.set_value(0);
-        cpus = resources.getScalar("cpus", cpus);
-        mem = resources.getScalar("mem", mem);
-
+        Resources resources = r.resources;
+        Resource::Scalar cpus = resources.get("cpus", Resource::Scalar());
+        Resource::Scalar mem = resources.get("mem", Resource::Scalar());
         state::SlaveResources* sr =
           new state::SlaveResources(r.slave->id.value(),
                                     cpus.value(), mem.value());
@@ -372,7 +352,7 @@ void Master::operator () ()
 
 void Master::initialize()
 {
-  active = false;
+  elected = false;
 
   nextFrameworkId = 0;
   nextSlaveId = 0;
@@ -501,20 +481,20 @@ void Master::submitScheduler(const string& name)
 
 void Master::newMasterDetected(const UPID& pid)
 {
-  // Check and see if we are (1) still waiting to be the active
-  // master, (2) newly active master, (3) no longer active master,
-  // or (4) still active master.
+  // Check and see if we are (1) still waiting to be the elected
+  // master, (2) newly elected master, (3) no longer elected master,
+  // or (4) still elected master.
 
   UPID master = pid;
 
-  if (master != self() && !active) {
+  if (master != self() && !elected) {
     LOG(INFO) << "Waiting to be master!";
-  } else if (master == self() && !active) {
-    LOG(INFO) << "Acting as master!";
-    active = true;
-  } else if (master != self() && active) {
-    LOG(FATAL) << "No longer active master ... committing suicide!";
-  } else if (master == self() && active) {
+  } else if (master == self() && !elected) {
+    LOG(INFO) << "Elected as master!";
+    elected = true;
+  } else if (master != self() && elected) {
+    LOG(FATAL) << "No longer elected master ... committing suicide!";
+  } else if (master == self() && elected) {
     LOG(INFO) << "Still acting as master!";
   }
 }
@@ -522,8 +502,8 @@ void Master::newMasterDetected(const UPID& pid)
 
 void Master::noMasterDetected()
 {
-  if (active) {
-    LOG(FATAL) << "No longer active master ... committing suicide!";
+  if (elected) {
+    LOG(FATAL) << "No longer elected master ... committing suicide!";
   } else {
     LOG(FATAL) << "No master detected (?) ... committing suicide!";
   }
@@ -1342,6 +1322,10 @@ void Master::launchTask(Framework* framework, const TaskDescription& task)
   message.mutable_task()->MergeFrom(task);
   send(slave->pid, message);
 
+  // TODO(benh): This is a double count if the executor decides to
+  // send a status update for TASK_STARTING itself. Currently we don't
+  // disallow this although we really should have a state machine that
+  // makes sure transitions are valid.
   stats.tasks[TASK_STARTING]++;
 }
 
@@ -1782,9 +1766,9 @@ Promise<HttpResponse> Master::http_slaves_json(const HttpRequest& request)
 
   foreachvalue (Slave* slave, slaves) {
     // TODO(benh): Send all of the resources (as JSON).
-    Resources resources(slave->info.resources());
-    Resource::Scalar cpus = resources.getScalar("cpus", Resource::Scalar());
-    Resource::Scalar mem = resources.getScalar("mem", Resource::Scalar());
+    Resources resources = slave->info.resources();
+    Resource::Scalar cpus = resources.get("cpus", Resource::Scalar());
+    Resource::Scalar mem = resources.get("mem", Resource::Scalar());
     out <<
       "{" <<
       "\"id\":\"" << slave->id << "\"," <<
@@ -1821,9 +1805,9 @@ Promise<HttpResponse> Master::http_tasks_json(const HttpRequest& request)
   foreachvalue (Framework* framework, frameworks) {
     foreachvalue (Task* task, framework->tasks) {
       // TODO(benh): Send all of the resources (as JSON).
-      Resources resources(task->resources());
-      Resource::Scalar cpus = resources.getScalar("cpus", Resource::Scalar());
-      Resource::Scalar mem = resources.getScalar("mem", Resource::Scalar());
+      Resources resources = task->resources();
+      Resource::Scalar cpus = resources.get("cpus", Resource::Scalar());
+      Resource::Scalar mem = resources.get("mem", Resource::Scalar());
       out <<
         "{" <<
         "\"task_id\":\"" << task->task_id() << "\"," <<
@@ -1864,6 +1848,7 @@ Promise<HttpResponse> Master::http_stats_json(const HttpRequest& request)
   out <<
     "{" <<
     "\"uptime\":" << elapsedTime() - startTime << "," <<
+    "\"elected\":" << elected << "," <<
     "\"total_schedulers\":" << frameworks.size() << "," <<
     "\"active_schedulers\":" << getActiveFrameworks().size() << "," <<
     "\"activated_slaves\":" << slaveHostnamePorts.size() << "," <<
@@ -1876,8 +1861,32 @@ Promise<HttpResponse> Master::http_stats_json(const HttpRequest& request)
     "\"valid_status_updates\":" << stats.validStatusUpdates << "," <<
     "\"invalid_status_updates\":" << stats.invalidStatusUpdates << "," <<
     "\"valid_framework_messages\":" << stats.validFrameworkMessages << "," <<
-    "\"invalid_framework_messages\":" << stats.invalidFrameworkMessages <<
-    "}";
+    "\"invalid_framework_messages\":" << stats.invalidFrameworkMessages;
+
+  // Get total and used (note, not offered) resources in order to
+  // compute capacity of scalar resources.
+  Resources resources;
+  Resources resourcesUsed;
+  foreach (Slave* slave, getActiveSlaves()) {
+    resources += slave->info.resources();
+    resourcesUsed += slave->resourcesInUse;
+  }
+
+  foreach (const Resource& resource, resources) {
+    if (resource.type() == Resource::SCALAR) {
+      CHECK(resource.has_scalar());
+      double total = resource.scalar().value();
+      out << ",\"" << resource.name() << "_total\":" << total;
+      Option<Resource> option = resourcesUsed.get(resource);
+      CHECK(!option.isSome() || option.get().has_scalar());
+      double used = option.isSome() ? option.get().scalar().value() : 0.0;
+      out << ",\"" << resource.name() << "_used\":" << used;
+      double percent = used / total;
+      out << ",\"" << resource.name() << "_percent\":" << percent;
+    }
+  }
+
+  out << "}";
 
   HttpOKResponse response;
   response.headers["Content-Type"] = "text/x-json;charset=UTF-8";
@@ -1907,6 +1916,7 @@ Promise<HttpResponse> Master::http_vars(const HttpRequest& request)
 
   out <<
     "uptime " << elapsedTime() - startTime << "\n" <<
+    "elected " << elected << "\n" <<
     "total_schedulers " << frameworks.size() << "\n" <<
     "active_schedulers " << getActiveFrameworks().size() << "\n" <<
     "activated_slaves " << slaveHostnamePorts.size() << "\n" <<
@@ -1919,7 +1929,32 @@ Promise<HttpResponse> Master::http_vars(const HttpRequest& request)
     "valid_status_updates " << stats.validStatusUpdates << "\n" <<
     "invalid_status_updates " << stats.invalidStatusUpdates << "\n" <<
     "valid_framework_messages " << stats.validFrameworkMessages << "\n" <<
-    "invalid_framework_messages " << stats.invalidFrameworkMessages << "\n";
+    "invalid_framework_messages " << stats.invalidFrameworkMessages;
+
+  // Get total and used (note, not offered) resources in order to
+  // compute capacity of scalar resources.
+  Resources resources;
+  Resources resourcesUsed;
+  foreach (Slave* slave, getActiveSlaves()) {
+    resources += slave->info.resources();
+    resourcesUsed += slave->resourcesInUse;
+  }
+
+  foreach (const Resource& resource, resources) {
+    if (resource.type() == Resource::SCALAR) {
+      CHECK(resource.has_scalar());
+      double total = resource.scalar().value();
+      out << "\n" << resource.name() << "_total " << total;
+      Option<Resource> option = resourcesUsed.get(resource);
+      CHECK(!option.isSome() || option.get().has_scalar());
+      double used = option.isSome() ? option.get().scalar().value() : 0.0;
+      out << "\n" << resource.name() << "_used " << used;
+      double percent = used / total;
+      out << "\n" << resource.name() << "_percent " << percent;
+    }
+  }
+
+  out << "\n";
 
   HttpOKResponse response;
   response.headers["Content-Type"] = "text/plain";

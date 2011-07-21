@@ -226,7 +226,7 @@ private:
 
   const Configuration conf;
 
-  bool active;
+  bool elected;
 
   Allocator* allocator;
   SlavesManager* slavesManager;

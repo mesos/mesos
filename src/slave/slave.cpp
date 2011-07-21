@@ -274,13 +274,8 @@ void Slave::registerOptions(Configurator* configurator)
 
 Promise<state::SlaveState*> Slave::getState()
 {
-  Resources resources(this->resources);
-  Resource::Scalar cpus;
-  Resource::Scalar mem;
-  cpus.set_value(0);
-  mem.set_value(0);
-  cpus = resources.getScalar("cpus", cpus);
-  mem = resources.getScalar("mem", mem);
+  Resource::Scalar cpus = resources.get("cpus", Resource::Scalar());
+  Resource::Scalar mem = resources.get("mem", Resource::Scalar());
 
   state::SlaveState* state = new state::SlaveState(
       build::DATE, build::USER, id.value(),
@@ -288,13 +283,9 @@ Promise<state::SlaveState*> Slave::getState()
 
   foreachvalue (Framework* f, frameworks) {
     foreachvalue (Executor* e, f->executors) {
-      Resources resources(e->resources);
-      Resource::Scalar cpus;
-      Resource::Scalar mem;
-      cpus.set_value(0);
-      mem.set_value(0);
-      cpus = resources.getScalar("cpus", cpus);
-      mem = resources.getScalar("mem", mem);
+      Resources resources = e->resources;
+      Resource::Scalar cpus = resources.get("cpus", Resource::Scalar());
+      Resource::Scalar mem = resources.get("mem", Resource::Scalar());
 
       // TOOD(benh): For now, we will add a state::Framework object
       // for each executor that the framework has. Therefore, we tweak
@@ -314,13 +305,9 @@ Promise<state::SlaveState*> Slave::getState()
       state->frameworks.push_back(framework);
 
       foreachvalue (Task* t, e->launchedTasks) {
-        Resources resources(t->resources());
-        Resource::Scalar cpus;
-        Resource::Scalar mem;
-        cpus.set_value(0);
-        mem.set_value(0);
-        cpus = resources.getScalar("cpus", cpus);
-        mem = resources.getScalar("mem", mem);
+        Resources resources = t->resources();
+        Resource::Scalar cpus = resources.get("cpus", Resource::Scalar());
+        Resource::Scalar mem = resources.get("mem", Resource::Scalar());
 
         state::Task* task = new state::Task(
             t->task_id().value(), t->name(),
@@ -1283,9 +1270,9 @@ Promise<HttpResponse> Slave::http_tasks_json(const HttpRequest& request)
     foreachvalue (Executor* executor, framework->executors) {
       foreachvalue (Task* task, executor->launchedTasks) {
         // TODO(benh): Send all of the resources (as JSON).
-        Resources resources(task->resources());
-        Resource::Scalar cpus = resources.getScalar("cpus", Resource::Scalar());
-        Resource::Scalar mem = resources.getScalar("mem", Resource::Scalar());
+        Resources resources = task->resources();
+        Resource::Scalar cpus = resources.get("cpus", Resource::Scalar());
+        Resource::Scalar mem = resources.get("mem", Resource::Scalar());
         out <<
           "{" <<
           "\"task_id\":\"" << task->task_id() << "\"," <<
