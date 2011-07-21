@@ -131,6 +131,17 @@ inline Result<bool> read(int fd, google::protobuf::Message* message)
     return false;
   }
 
+  // TODO(benh): Use a different format for writing a protobuf to disk
+  // so that we don't need to have broken heuristics like this!
+  if (size > 10 * 1024 * 1024) { // 10 MB
+    // Save the error, reset the file offset, and return the error.
+    std::string error = "Size > 10 MB, possible corruption detected";
+    error = error + " (" + __FILE__ + ":" + utils::stringify(__LINE__) + ")";
+    Result<bool> result = Result<bool>::error(error);
+    lseek(fd, offset, SEEK_SET);
+    return result;
+  }
+
   char* temp = new char[size];
 
   length = ::read(fd, temp, size);
