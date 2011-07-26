@@ -24,7 +24,7 @@ LIBEV = $(LIBPROCESS)/third_party/libev-3.8
 BOOST = third_party/boost-1.37.0
 PROTOBUF = third_party/protobuf-2.3.0
 GLOG = third_party/glog-0.3.1
-GMOCK = third_party/gmock-1.5.0
+GMOCK = third_party/gmock-1.6.0
 ZOOKEEPER = third_party/zookeeper-3.3.1/src/c
 
 # Ensure that we get better debugging info.

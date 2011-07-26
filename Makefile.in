@@ -16,7 +16,7 @@ WITH_INCLUDED_ZOOKEEPER = @WITH_INCLUDED_ZOOKEEPER@
 LIBPROCESS = third_party/libprocess
 PROTOBUF = third_party/protobuf-2.3.0
 GLOG = third_party/glog-0.3.1
-GMOCK = third_party/gmock-1.5.0
+GMOCK = third_party/gmock-1.6.0
 ZOOKEEPER = third_party/zookeeper-3.3.1/src/c
 
 

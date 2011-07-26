@@ -14,7 +14,7 @@ LIBS = @LIBS@
 
 BOOST = third_party/boost-1.37.0
 GLOG = third_party/glog-0.3.1
-GMOCK = third_party/gmock-1.5.0
+GMOCK = third_party/gmock-1.6.0
 LIBEV = third_party/libev-3.8
 RY_HTTP_PARSER = third_party/ry-http-parser-1c3624a
 
