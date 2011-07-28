@@ -139,6 +139,7 @@ public:
   void registerSlave(const SlaveInfo& slaveInfo);
   void reregisterSlave(const SlaveID& slaveId,
                        const SlaveInfo& slaveInfo,
+		       const std::vector<ExecutorInfo>& executorInfos,
                        const std::vector<Task>& tasks);
   void unregisterSlave(const SlaveID& slaveId);
   void statusUpdate(const StatusUpdate& update, const UPID& pid);
@@ -200,7 +201,9 @@ protected:
   // Add a slave.
   void addSlave(Slave* slave, bool reregister = false);
 
-  void readdSlave(Slave* slave, const std::vector<Task>& tasks);
+  void readdSlave(Slave* slave,
+		  const std::vector<ExecutorInfo>& executorInfos,
+		  const std::vector<Task>& tasks);
 
   // Lose all of a slave's tasks and delete the slave object
   void removeSlave(Slave* slave);
@@ -323,28 +326,52 @@ struct Slave
       std::make_pair(task->framework_id(), task->task_id());
     CHECK(tasks.count(key) == 0);
     tasks[key] = task;
-    foreach (const Resource& resource, task->resources()) {
-      resourcesInUse += resource;
-    }
+    resourcesInUse += task->resources();
   }
-  
+
   void removeTask(Task* task)
   {
     std::pair<FrameworkID, TaskID> key =
       std::make_pair(task->framework_id(), task->task_id());
     CHECK(tasks.count(key) > 0);
     tasks.erase(key);
-    foreach (const Resource& resource, task->resources()) {
-      resourcesInUse -= resource;
+    resourcesInUse -= task->resources();
+  }
+
+  bool hasExecutor(const FrameworkID& frameworkId,
+		   const ExecutorID& executorId)
+  {
+    return executors.contains(frameworkId) &&
+      executors[frameworkId].contains(executorId);
+  }
+
+  void addExecutor(const FrameworkID& frameworkId,
+		   const ExecutorInfo& executorInfo)
+  {
+    CHECK(!hasExecutor(frameworkId, executorInfo.executor_id()));
+    executors[frameworkId][executorInfo.executor_id()] = executorInfo;
+
+    // Update the resources in use to reflect running this executor.
+    resourcesInUse += executorInfo.resources();
+  }
+
+  void removeExecutor(const FrameworkID& frameworkId,
+		      const ExecutorID& executorId)
+  {
+    if (hasExecutor(frameworkId, executorId)) {
+      // Update the resources in use to reflect removing this executor.
+      resourcesInUse -= executors[frameworkId][executorId].resources();
+
+      executors[frameworkId].erase(executorId);
+      if (executors[frameworkId].size() == 0) {
+	executors.erase(frameworkId);
+      }
     }
   }
-  
+
   Resources resourcesFree()
   {
-    Resources resources;
-    foreach (const Resource& resource, info.resources()) {
-      resources += resource;
-    }
+    Resources resources = info.resources();
     return resources - (resourcesOffered + resourcesInUse);
   }
 
@@ -360,7 +387,11 @@ struct Slave
   Resources resourcesOffered; // Resources currently in offers
   Resources resourcesInUse;   // Resources currently used by tasks
 
+  // Map of all executors running on this slave.
+  hashmap<FrameworkID, hashmap<ExecutorID, ExecutorInfo> > executors;
+
   hashmap<std::pair<FrameworkID, TaskID>, Task*> tasks;
+
   hashset<Offer*> offers; // Active offers on this slave.
 
   SlaveObserver* observer;
@@ -381,13 +412,19 @@ struct SlaveResources
 // An connected framework.
 struct Framework
 {
-  Framework(const FrameworkInfo& _info, const FrameworkID& _id,
-            const UPID& _pid, double time)
-    : info(_info), id(_id), pid(_pid), active(true),
-      registeredTime(time), reregisteredTime(time) {}
+  Framework(const FrameworkInfo& _info,
+	    const FrameworkID& _id,
+            const UPID& _pid,
+	    double time)
+    : info(_info),
+      id(_id),
+      pid(_pid),
+      active(true),
+      registeredTime(time),
+      reregisteredTime(time) {}
 
   ~Framework() {}
-  
+
   Task* getTask(const TaskID& taskId)
   {
     if (tasks.count(taskId) > 0) {
@@ -396,7 +433,7 @@ struct Framework
       return NULL;
     }
   }
-  
+
   void addTask(Task* task)
   {
     CHECK(tasks.count(task->task_id()) == 0);
@@ -405,7 +442,7 @@ struct Framework
       resources += task->resources(i);
     }
   }
-  
+
   void removeTask(const TaskID& taskId)
   {
     CHECK(tasks.count(taskId) > 0);
@@ -415,7 +452,7 @@ struct Framework
     }
     tasks.erase(taskId);
   }
-  
+
   void addOffer(Offer* offer)
   {
     CHECK(offers.count(offer) == 0);
@@ -433,13 +470,13 @@ struct Framework
       resources -= sr.resources;
     }
   }
-  
+
   bool filters(Slave* slave, Resources resources)
   {
     // TODO: Implement other filters
     return slaveFilter.find(slave) != slaveFilter.end();
   }
-  
+
   void removeExpiredFilters(double now)
   {
     foreachpair (Slave* slave, double removalTime, utils::copy(slaveFilter)) {

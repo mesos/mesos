@@ -49,7 +49,8 @@ public:
   virtual void launchExecutor(const FrameworkID& frameworkId,
                               const FrameworkInfo& frameworkInfo,
                               const ExecutorInfo& executorInfo,
-                              const std::string& directory);
+                              const std::string& directory,
+                              const Resources& resources);
 
   virtual void killExecutor(const FrameworkID& frameworkId,
                             const ExecutorID& executorId);

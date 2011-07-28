@@ -231,7 +231,8 @@ public:
   virtual void launchExecutor(const FrameworkID& frameworkId,
                               const FrameworkInfo& frameworkInfo,
                               const ExecutorInfo& executorInfo,
-                              const std::string& directory)
+                              const std::string& directory,
+                              const Resources& resources)
   {
     if (executors.count(executorInfo.executor_id()) > 0) {
       Executor* executor = executors[executorInfo.executor_id()];

@@ -126,7 +126,7 @@ ifeq ($(OS_NAME),linux)
   SLAVE_OBJ += slave/lxc_isolation_module.o
 endif
 
-PROTOBUF_OBJ = mesos.pb.o messages/messages.pb.o
+PROTOBUF_OBJ = mesos.pb.o messages/messages.pb.o messages/log.pb.o
 
 MASTER_WEBUI_OBJ = master/webui.o
 MASTER_SWIG_WEBUI_OBJ = webui/master/swig/master_wrap.o
@@ -147,7 +147,8 @@ ifeq ($(WITH_ZOOKEEPER),1)
 endif
 
 EXEC_LIB_OBJ = exec/exec.o
-SCHED_LIB_OBJ = sched/sched.o local/local.o
+
+SCHED_LIB_OBJ = sched/sched.o local/local.o log/replica.o log/coordinator.o
 
 BASIC_OBJ = $(MASTER_OBJ) $(SLAVE_OBJ) $(COMMON_OBJ)  \
 	    $(SCHED_LIB_OBJ) $(EXEC_LIB_OBJ)
@@ -246,7 +247,7 @@ DEPLOY_FILES = $(DEPLOYDIR)/deploy-to-slaves             \
 
 # Create rules for building the directories that aren't created
 # automagically by configure.
-OBJ_DIRECTORIES = common configurator detector exec launcher local	\
+OBJ_DIRECTORIES = common configurator detector exec launcher local log	\
                   master messages sched slave
 
 WEBUI_DIRECTORIES = $(BINDIR)/webui/common $(BINDIR)/webui/master	\
@@ -274,9 +275,15 @@ mesos.pb.cc: @top_srcdir@/include/mesos/mesos.proto
 $(INCLUDEDIR)/mesos/mesos.hpp: mesos.pb.cc | $(INCLUDEDIR) $(INCLUDEDIR)/mesos
 	cp mesos.pb.h $(INCLUDEDIR)/mesos/mesos.hpp
 
+# TODO(benh): Clean up how protobuf objects get built.
+
 messages/messages.pb.cc: $(SRCDIR)/messages/messages.proto
 	mkdir -p messages
 	$(PROTOC) -I$(SRCDIR)/messages -I@top_srcdir@/include/mesos --cpp_out=messages $(SRCDIR)/messages/messages.proto
+
+messages/log.pb.cc: $(SRCDIR)/messages/log.proto
+	mkdir -p messages
+	$(PROTOC) -I$(SRCDIR)/messages -I@top_srcdir@/include/mesos --cpp_out=messages $(SRCDIR)/messages/log.proto
 
 common/build.o: $(SRCDIR)/common/build.cpp force | common
 	$(CXX) -c $(CXXFLAGS) -DBUILD_DATE="\"$$(date '+%Y-%m-%d %H:%M:%S')\"" -DBUILD_USER="\"$$USER\"" -DBUILD_FLAGS="\"$(CFLAGS) $(CXXFLAGS)\"" -o $@ $<

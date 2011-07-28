@@ -49,9 +49,7 @@ Promise<T>::Promise(const T& t)
 
 template <typename T>
 Promise<T>::Promise(const Promise<T>& that)
-{
-  f = that.f;
-}
+  : f(that.f) {}
 
 
 template <typename T>

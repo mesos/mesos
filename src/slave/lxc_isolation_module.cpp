@@ -44,13 +44,14 @@ using process::wait; // Necessary on some OS's to disambiguate.
 using std::map;
 using std::max;
 using std::string;
+using std::vector;
 
 
 namespace {
 
 const int32_t CPU_SHARES_PER_CPU = 1024;
 const int32_t MIN_CPU_SHARES = 10;
-const int64_t MIN_RSS_MB = 128 * Megabyte;
+const int64_t MIN_MEMORY_MB = 128 * Megabyte;
 
 
 // TODO(benh): Factor this out into common/utils or possibly into
@@ -73,31 +74,6 @@ int shell(const char* format, ...)
   free(cmd);
   va_end(args);
   return ret;
-}
-
-
-// Attempt to set a resource limit of a container for a given cgroup
-// property (e.g. cpu.shares). Returns true on success.
-bool setResourceLimit(const string& container,
-		      const string& property,
-		      int64_t value)
-{
-  LOG(INFO) << "Setting " << property
-            << " for container " << container
-            << " to " << value;
-
-  int ret = shell("lxc-cgroup -n %s %s %lld",
-                  container.c_str(),
-                  property.c_str(),
-                  value);
-  if (ret != 0) {
-    LOG(ERROR) << "Failed to set " << property
-               << " for container " << container
-               << ": lxc-cgroup returned " << ret;
-    return false;
-  }
-
-  return true;
 }
 
 } // namespace {
@@ -153,7 +129,8 @@ void LxcIsolationModule::launchExecutor(
     const FrameworkID& frameworkId,
     const FrameworkInfo& frameworkInfo,
     const ExecutorInfo& executorInfo,
-    const string& directory)
+    const string& directory,
+    const Resources& resources)
 {
   if (!initialized) {
     LOG(FATAL) << "Cannot launch executors before initialization!";
@@ -167,8 +144,7 @@ void LxcIsolationModule::launchExecutor(
 
   // Create a name for the container.
   std::ostringstream out;
-  out << "mesos.executor-" << executorId
-      << ".framework-" << frameworkId;
+  out << "mesos.executor-" << executorId << ".framework-" << frameworkId;
 
   const string& container = out.str();
 
@@ -241,14 +217,31 @@ void LxcIsolationModule::launchExecutor(
 
     launcher->setupEnvironmentForLauncherMain();
 
-    // Get location of Mesos install in order to find mesos-launcher.
-    string mesosLauncher = conf.get("home", ".") + "/bin/mesos-launcher";
-    
-    // Run lxc-execute.
-    execlp("lxc-execute", "lxc-execute", "-n", container.c_str(),
-           mesosLauncher.c_str(), (char *) NULL);
+    // Construct the initial control group options that specify the
+    // initial resources limits for this executor.
+    const vector<string>& options = getControlGroupOptions(resources);
 
-    // If we get here, the execlp call failed.
+    const char** args = (const char**) new char*[3 + options.size() + 2];
+
+    int i = 0;
+
+    args[i++] = "lxc-execute";
+    args[i++] = "-n";
+    args[i++] = container.c_str();
+
+    for (int j = 0; j < options.size(); j++) {
+      args[i++] = options[j].c_str();
+    }
+
+    // Determine path for mesos-launcher from Mesos home directory.
+    string path = conf.get("home", ".") + "/bin/mesos-launcher";
+    args[i++] = path.c_str();
+    args[i++] = NULL;
+
+    // Run lxc-execute.
+    execvp(args[0], (char* const*) args);
+
+    // If we get here, the execvp call failed.
     LOG(FATAL) << "Could not exec lxc-execute";
   }
 }
@@ -314,26 +307,26 @@ void LxcIsolationModule::resourcesChanged(
   uint64_t value;
 
   double cpu = resources.getScalar("cpu", Resource::Scalar()).value();
-  int32_t cpuShares = max(CPU_SHARES_PER_CPU * (int32_t) cpu, MIN_CPU_SHARES);
+  int32_t cpu_shares = max(CPU_SHARES_PER_CPU * (int32_t) cpu, MIN_CPU_SHARES);
 
   property = "cpu.shares";
-  value = cpuShares;
+  value = cpu_shares;
 
-  if (!setResourceLimit(container, property, value)) {
-    // TODO(benh): Kill the executor, but do it in such a way that
-    // the slave finds out about it exiting.
+  if (!setControlGroupValue(container, property, value)) {
+    // TODO(benh): Kill the executor, but do it in such a way that the
+    // slave finds out about it exiting.
     return;
   }
 
   double mem = resources.getScalar("mem", Resource::Scalar()).value();
-  int64_t rssLimit = max((int64_t) mem, MIN_RSS_MB) * 1024LL * 1024LL;
+  int64_t limit_in_bytes = max((int64_t) mem, MIN_MEMORY_MB) * 1024LL * 1024LL;
 
   property = "memory.limit_in_bytes";
-  value = rssLimit;
+  value = limit_in_bytes;
 
-  if (!setResourceLimit(container, property, value)) {
-    // TODO(benh): Kill the executor, but do it in such a way that
-    // the slave finds out about it exiting.
+  if (!setControlGroupValue(container, property, value)) {
+    // TODO(benh): Kill the executor, but do it in such a way that the
+    // slave finds out about it exiting.
     return;
   }
 }
@@ -357,4 +350,55 @@ void LxcIsolationModule::processExited(pid_t pid, int status)
       }
     }
   }
+}
+
+
+bool LxcIsolationModule::setControlGroupValue(
+    const string& container,
+    const string& property,
+    int64_t value)
+{
+  LOG(INFO) << "Setting " << property
+            << " for container " << container
+            << " to " << value;
+
+  int ret = shell("lxc-cgroup -n %s %s %lld",
+                  container.c_str(),
+                  property.c_str(),
+                  value);
+  if (ret != 0) {
+    LOG(ERROR) << "Failed to set " << property
+               << " for container " << container
+               << ": lxc-cgroup returned " << ret;
+    return false;
+  }
+
+  return true;
+}
+
+
+vector<string> LxcIsolationModule::getControlGroupOptions(
+    const Resources& resources)
+{
+  vector<string> options;
+
+  std::ostringstream out;
+
+  double cpu = resources.getScalar("cpu", Resource::Scalar()).value();
+  int32_t cpu_shares = max(CPU_SHARES_PER_CPU * (int32_t) cpu, MIN_CPU_SHARES);
+
+  options.push_back("-s");
+  out << "lxc.cgroup.cpu.shares=" << cpu_shares;
+  options.push_back(out.str());
+
+  out.str("");
+
+  double mem = resources.getScalar("mem", Resource::Scalar()).value();
+  int64_t limit_in_bytes = max((int64_t) mem, MIN_MEMORY_MB) * 1024LL * 1024LL;
+
+  options.push_back("-s");
+  out << "lxc.cgroup.memory.limit_in_bytes=" << limit_in_bytes;
+  options.push_back(out.str());
+
+  return options;
 }
