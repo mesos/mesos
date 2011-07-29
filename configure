@@ -667,7 +667,6 @@ CPPFLAGS'
 ac_subdirs_all='third_party/libprocess
 third_party/protobuf-2.3.0
 third_party/glog-0.3.1
-third_party/gmock-1.6.0
 third_party/zookeeper-3.3.1/src/c'
 
 # Initialize some variables set by options.
@@ -1868,8 +1867,6 @@ subdirs="$subdirs third_party/libprocess"
 subdirs="$subdirs third_party/protobuf-2.3.0"
 
 subdirs="$subdirs third_party/glog-0.3.1"
-
-subdirs="$subdirs third_party/gmock-1.6.0"
 
 subdirs="$subdirs third_party/zookeeper-3.3.1/src/c"
 
