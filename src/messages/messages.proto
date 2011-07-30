@@ -61,6 +61,18 @@ message ResourceOffer {
 }
 
 
+message SubmitSchedulerRequest
+{
+  required string name = 1;
+}
+
+
+message SubmitSchedulerResponse
+{
+  required bool okay = 1;
+}
+
+
 message ExecutorToFrameworkMessage {
   required SlaveID slave_id = 1;
   required FrameworkID framework_id = 2;

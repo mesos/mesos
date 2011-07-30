@@ -118,6 +118,7 @@ public:
 
   Promise<state::MasterState*> getState();
 
+  void submitScheduler(const std::string& name);
   void newMasterDetected(const UPID& pid);
   void noMasterDetected();
   void masterDetectionFailure();

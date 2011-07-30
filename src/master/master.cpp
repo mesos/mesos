@@ -413,6 +413,10 @@ void Master::initialize()
   startTime = elapsedTime();
 
   // Install handler functions for certain messages.
+  installProtobufHandler<SubmitSchedulerRequest>(
+      &Master::submitScheduler,
+      &SubmitSchedulerRequest::name);
+
   installProtobufHandler<NewMasterDetectedMessage>(
       &Master::newMasterDetected,
       &NewMasterDetectedMessage::pid);
@@ -501,6 +505,15 @@ void Master::initialize()
   installHttpHandler("tasks.json", &Master::http_tasks_json);
   installHttpHandler("stats.json", &Master::http_stats_json);
   installHttpHandler("vars", &Master::http_vars);
+}
+
+
+void Master::submitScheduler(const string& name)
+{
+  LOG(INFO) << "Scheduler submit request for " << name;
+  SubmitSchedulerResponse response;
+  response.set_okay(false);
+  send(from(), response);
 }
 
 

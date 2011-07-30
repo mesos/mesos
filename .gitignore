@@ -143,3 +143,5 @@ third_party/zookeeper-3.3.1/src/c/cli_st
 third_party/zookeeper-3.3.1/src/c/config.h
 third_party/zookeeper-3.3.1/src/c/load_gen
 third_party/zookeeper-3.3.1/src/c/stamp-h1
+third_party/libprocess/third_party/glog-0.3.1/Makefile.in
+third_party/libprocess/third_party/glog-0.3.1/aclocal.m4

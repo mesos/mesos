@@ -111,7 +111,7 @@ ifeq ($(WITH_ZOOKEEPER),1)
   LIBS += -lzookeeper_mt
 endif
 
-MASTER_OBJ = master/master.o master/slaves_manager.o			\
+MASTER_OBJ = master/master.o master/slaves_manager.o master/frameworks_manager.o	\
 	     master/allocator_factory.o master/simple_allocator.o
 
 SLAVE_OBJ = slave/slave.o slave/isolation_module.o			\
@@ -172,9 +172,10 @@ MESOS_LOCAL_EXE = $(BINDIR)/mesos-local
 MESOS_LAUNCHER_EXE = $(BINDIR)/mesos-launcher
 MESOS_GETCONF_EXE = $(BINDIR)/mesos-getconf
 MESOS_PROJD_EXE = $(BINDIR)/mesos-projd
+MESOS_EXE = $(BINDIR)/mesos
 
 MESOS_EXES = $(MESOS_MASTER_EXE) $(MESOS_SLAVE_EXE) $(MESOS_LOCAL_EXE)	\
-             $(MESOS_LAUNCHER_EXE) $(MESOS_GETCONF_EXE)
+             $(MESOS_LAUNCHER_EXE) $(MESOS_GETCONF_EXE) $(MESOS_EXE)
 
 ifeq ($(OS_NAME),solaris)
   MESOS_EXES += $(MESOS_PROJD_EXE)
@@ -347,6 +348,9 @@ $(MESOS_GETCONF_EXE): $(SRCDIR)/configurator/get_conf.cpp $(COMMON_OBJ) $(PROTOB
 	$(CXX) $(CXXFLAGS) -o $@ $< $(COMMON_OBJ) $(PROTOBUF_OBJ) $(LDFLAGS) $(LIBS)
 
 $(MESOS_PROJD_EXE): $(SRCDIR)/slave/projd.cpp $(COMMON_OBJ) $(PROTOBUF_OBJ)
+	$(CXX) $(CXXFLAGS) -o $@ $< $(COMMON_OBJ) $(PROTOBUF_OBJ) $(LDFLAGS) $(LIBS)
+
+$(MESOS_EXE): $(SRCDIR)/mesos/main.cpp $(COMMON_OBJ) $(PROTOBUF_OBJ)
 	$(CXX) $(CXXFLAGS) -o $@ $< $(COMMON_OBJ) $(PROTOBUF_OBJ) $(LDFLAGS) $(LIBS)
 
 java: $(MESOS_JAVA_LIB) $(MESOS_JAVA_JAR)
