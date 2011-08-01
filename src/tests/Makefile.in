@@ -153,7 +153,7 @@ $(GMOCK_LIB): $(GTEST_OBJ) $(GMOCK_OBJ)
 $(TESTS_OBJ): %.o: $(SRCDIR)/%.cpp
 	$(CXX) -c $(CXXFLAGS) -o $@ $<
 
-$(ALLTESTS_EXE): $(GMOCK_LIB) $(TESTS_OBJ) $(SCHED_LIB) $(EXEC_LIB) | $(BINDIR)/tests
+$(ALLTESTS_EXE): $(TESTS_OBJ) $(GMOCK_LIB) $(SCHED_LIB) $(EXEC_LIB) | $(BINDIR)/tests
 	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
 
 $(EXTERNAL_SCRIPTS): | $(BINDIR)/tests/external/LxcIsolation
