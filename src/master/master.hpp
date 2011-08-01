@@ -81,9 +81,6 @@ const double SLAVE_PONG_TIMEOUT = 15.0;
 // Maximum number of timeouts until slave is considered failed.
 const int MAX_SLAVE_TIMEOUTS = 5;
 
-// Time to wait for a framework to failover (TODO(benh): Make configurable)).
-const double FRAMEWORK_FAILOVER_TIMEOUT = 60 * 60 * 24;
-
 
 // Reasons why offers might be returned to the Allocator.
 enum OfferReturnReason
@@ -276,6 +273,9 @@ private:
 
   // Start time used to calculate uptime.
   double startTime;
+
+  // Failover timeout for frameworks, in seconds.
+  int failoverTimeout;
 };
 
 
