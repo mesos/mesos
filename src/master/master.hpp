@@ -472,6 +472,37 @@ struct Framework
     }
   }
 
+  bool hasExecutor(const SlaveID& slaveId,
+		   const ExecutorID& executorId)
+  {
+    return executors.contains(slaveId) &&
+      executors[slaveId].contains(executorId);
+  }
+
+  void addExecutor(const SlaveID& slaveId,
+		   const ExecutorInfo& executorInfo)
+  {
+    CHECK(!hasExecutor(slaveId, executorInfo.executor_id()));
+    executors[slaveId][executorInfo.executor_id()] = executorInfo;
+
+    // Update our resources to reflect running this executor.
+    resources += executorInfo.resources();
+  }
+
+  void removeExecutor(const SlaveID& slaveId,
+		      const ExecutorID& executorId)
+  {
+    if (hasExecutor(slaveId, executorId)) {
+      // Update our resources to reflect removing this executor.
+      resources -= executors[slaveId][executorId].resources();
+
+      executors[slaveId].erase(executorId);
+      if (executors[slaveId].size() == 0) {
+	executors.erase(slaveId);
+      }
+    }
+  }
+
   bool filters(Slave* slave, Resources resources)
   {
     // TODO: Implement other filters
@@ -499,7 +530,8 @@ struct Framework
   hashmap<TaskID, Task*> tasks;
   hashset<Offer*> offers; // Active offers for framework.
 
-  Resources resources; // Total resources owned by framework (tasks + offers)
+  Resources resources; // Total resources we own (tasks + offers + executors)
+  hashmap<SlaveID, hashmap<ExecutorID, ExecutorInfo> > executors;
 
   // Contains a time of unfiltering for each slave we've filtered,
   // or 0 for slaves that we want to keep filtered forever

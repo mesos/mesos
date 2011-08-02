@@ -649,6 +649,12 @@ void Master::reregisterFramework(const FrameworkID& frameworkId,
         foreachvalue (Task* task, slave->tasks) {
           if (framework->id == task->framework_id()) {
             framework->addTask(task);
+            // Also add the task's executor for resource accounting.
+            if (!framework->hasExecutor(slave->id, task->executor_id())) {
+              const ExecutorInfo& executorInfo =
+                slave->executors[framework->id][task->executor_id()];
+              framework->addExecutor(slave->id, executorInfo);
+            }
           }
         }
       }
@@ -1040,6 +1046,7 @@ void Master::exitedExecutor(const SlaveID& slaveId,
 
       // Remove executor from slave.
       slave->removeExecutor(frameworkId, executorId);
+      framework->removeExecutor(slave->id, executorId);
 
       // TODO(benh): Send the framework it's executor's exit
       // status? Or maybe at least have something like
@@ -1350,6 +1357,7 @@ void Master::launchTask(Framework* framework, const TaskDescription& task)
 
   if (!slave->hasExecutor(framework->id, executorInfo.executor_id())) {
     slave->addExecutor(framework->id, executorInfo);
+    framework->addExecutor(slave->id, executorInfo);
   }
 
   slave->addTask(t);
@@ -1520,6 +1528,13 @@ void Master::readdSlave(Slave* slave,
 	if (!slave->hasExecutor(task.framework_id(), task.executor_id())) {
 	  slave->addExecutor(task.framework_id(), executorInfo);
 	}
+        // Also add it to the framework if it has re-registered with us
+        Framework* framework = getFramework(task.framework_id());
+        if (framework != NULL) {
+          if (!framework->hasExecutor(slave->id, task.executor_id())) {
+            framework->addExecutor(slave->id, executorInfo);
+          }
+        }
 	break;
       }
     }
@@ -1596,6 +1611,16 @@ void Master::removeSlave(Slave* slave)
       }
     }
     removeOffer(offer, ORR_SLAVE_LOST, otherSlaveResources);
+  }
+
+  // Remove executors from the slave for proper resource accounting
+  foreachkey (const FrameworkID& fid, slave->executors) {
+    Framework* framework = getFramework(fid);
+    if (framework != NULL) {
+      foreachkey (const ExecutorID& eid, slave->executors[fid]) {
+        framework->removeExecutor(slave->id, eid);
+      }
+    }
   }
   
   // Remove slave from any filters

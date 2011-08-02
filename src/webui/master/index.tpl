@@ -35,15 +35,6 @@ Log:
 %  total_mem += s.mem
 %end
 
-%running_cpus = 0
-%running_mem = 0
-%for framework in master.frameworks:
-%  for task in framework.tasks:
-%    running_cpus += task.cpus
-%    running_mem += task.mem
-%  end
-%end
-
 %offered_cpus = 0
 %offered_mem = 0
 %for f in master.frameworks:
@@ -54,6 +45,16 @@ Log:
 %    end
 %  end
 %end
+
+%running_cpus = 0
+%running_mem = 0
+%for framework in master.frameworks:
+%  running_cpus += framework.cpus
+%  running_mem += framework.mem
+%end
+%running_cpus -= offered_cpus
+%running_mem -= offered_mem
+
 %idle_cpus = total_cpus - (offered_cpus + running_cpus)
 %idle_mem = total_mem - (offered_mem + running_mem)
 
