@@ -1467,6 +1467,16 @@ void Master::removeFramework(Framework* framework)
     removeOffer(offer, ORR_FRAMEWORK_LOST, offer->resources);
   }
 
+  // Remove the framework's executors for correct resource accounting.
+  foreachkey (const SlaveID& sid, framework->executors) {
+    Slave* slave = getSlave(sid);
+    if (slave != NULL) {
+      foreachkey (const ExecutorID& eid, framework->executors[sid]) {
+        slave->removeExecutor(framework->id, eid);
+      }
+    }
+  }
+
   // TODO(benh): Similar code between removeFramework and
   // failoverFramework needs to be shared!
 
