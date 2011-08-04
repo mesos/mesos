@@ -24,6 +24,8 @@
 
 #include <mesos/mesos.hpp>
 
+#include "common/option.hpp"
+
 
 // Resources come in three types: scalar, ranges, and sets. These are
 // represented using protocol buffers. To make manipulation of
@@ -121,7 +123,6 @@ public:
     return *this;
   }
 
-
   // Returns a Resources object with only the allocatable resources.
   Resources allocatable() const
   {
@@ -136,12 +137,10 @@ public:
     return result;
   }
 
-
   size_t size() const
   {
     return resources.size();
   }
-
 
   // Using this operator makes it easy to copy a resources object into
   // a protocol buffer field.
@@ -150,14 +149,14 @@ public:
     return resources;
   }
 
-
   bool operator == (const Resources& that) const
   {
     foreach (const Resource& resource, resources) {
-      if (!that.contains(resource.name(), resource.type())) {
+      Option<Resource> option = that.get(resource);
+      if (option.isNone()) {
         return false;
       } else {
-        if (!(resource == that.get(resource.name(), Resource()))) {
+        if (!(resource == option.get())) {
           return false;
         }
       }
@@ -165,15 +164,15 @@ public:
 
     return true;
   }
-
 
   bool operator <= (const Resources& that) const
   {
     foreach (const Resource& resource, resources) {
-      if (!that.contains(resource.name(), resource.type())) {
+      Option<Resource> option = that.get(resource);
+      if (option.isNone()) {
         return false;
       } else {
-        if (!(resource <= that.get(resource.name(), Resource()))) {
+        if (!(resource <= option.get())) {
           return false;
         }
       }
@@ -181,7 +180,6 @@ public:
 
     return true;
   }
-
 
   Resources operator + (const Resources& that) const
   {
@@ -193,7 +191,6 @@ public:
 
     return result;
   }
-
   
   Resources operator - (const Resources& that) const
   {
@@ -205,7 +202,6 @@ public:
 
     return result;
   }
-
   
   Resources& operator += (const Resources& that)
   {
@@ -216,7 +212,6 @@ public:
     return *this;
   }
 
-
   Resources& operator -= (const Resources& that)
   {
     foreach (const Resource& resource, that.resources) {
@@ -225,7 +220,6 @@ public:
 
     return *this;
   }
-
 
   Resources operator + (const Resource& that) const
   {
@@ -249,7 +243,6 @@ public:
     return result;
   }
 
-
   Resources operator - (const Resource& that) const
   {
     Resources result;
@@ -265,13 +258,11 @@ public:
     return result;
   }
 
-  
   Resources& operator += (const Resource& that)
   {
     *this = *this + that;
     return *this;
   }
-
 
   Resources& operator -= (const Resource& that)
   {
@@ -279,86 +270,35 @@ public:
     return *this;
   }
 
-
-  bool contains(const std::string& name, const Resource::Type& type) const
+  Option<Resource> get(const Resource& r) const
   {
     foreach (const Resource& resource, resources) {
-      if (name == resource.name() && type == resource.type()) {
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-
-  Resource get(const std::string& name, const Resource& resource) const
-  {
-    foreach (const Resource& resource, resources) {
-      if (resource.name() == name) {
+      if (resource.name() == r.name() &&
+          resource.type() == r.type()) {
         return resource;
       }
     }
 
-    return resource;
+    return Option<Resource>::none();
   }
 
-
-  Resource::Scalar getScalar(const std::string& name, const Resource::Scalar& scalar) const
-  {
-    foreach (const Resource& resource, resources) {
-      if (resource.name() == name && resource.type() == Resource::SCALAR) {
-        return resource.scalar();
-      }
-    }
-
-    return scalar;
-  }
-
-
-  Resource::Ranges getRanges(const std::string& name, const Resource::Ranges& ranges) const
-  {
-    foreach (const Resource& resource, resources) {
-      if (resource.name() == name && resource.type() == Resource::RANGES) {
-        return resource.ranges();
-      }
-    }
-
-    return ranges;
-  }
-
-
-  Resource::Set getSet(const std::string& name, const Resource::Set& set) const
-  {
-    foreach (const Resource& resource, resources) {
-      if (resource.name() == name && resource.type() == Resource::SET) {
-        return resource.set();
-      }
-    }
-
-    return set;
-  }
-
+  template <typename T>
+  T get(const std::string& name, const T& t) const;
 
   typedef google::protobuf::RepeatedPtrField<Resource>::iterator
   iterator;
 
-
   typedef google::protobuf::RepeatedPtrField<Resource>::const_iterator
   const_iterator;
-
 
   iterator begin() { return resources.begin(); }
   iterator end() { return resources.end(); }
 
-
   const_iterator begin() const { return resources.begin(); }
   const_iterator end() const { return resources.end(); }
 
-
   static Resource parse(const std::string& name, const std::string& value);
   static Resources parse(const std::string& s);
-
 
   static bool isValid(const Resource& resource)
   {
@@ -379,7 +319,6 @@ public:
 
     return false;
   }
-
 
   static bool isAllocatable(const Resource& resource)
   {
@@ -435,6 +374,54 @@ public:
 private:
   google::protobuf::RepeatedPtrField<Resource> resources;
 };
+
+
+template <>
+inline Resource::Scalar Resources::get(
+    const std::string& name,
+    const Resource::Scalar& scalar) const
+{
+  foreach (const Resource& resource, resources) {
+    if (resource.name() == name &&
+        resource.type() == Resource::SCALAR) {
+      return resource.scalar();
+    }
+  }
+    
+  return scalar;
+}
+
+
+template <>
+inline Resource::Ranges Resources::get(
+    const std::string& name,
+    const Resource::Ranges& ranges) const
+{
+  foreach (const Resource& resource, resources) {
+    if (resource.name() == name &&
+        resource.type() == Resource::RANGES) {
+      return resource.ranges();
+    }
+  }
+    
+  return ranges;
+}
+
+
+template <>
+inline Resource::Set Resources::get(
+    const std::string& name,
+    const Resource::Set& set) const
+{
+  foreach (const Resource& resource, resources) {
+    if (resource.name() == name &&
+        resource.type() == Resource::SET) {
+      return resource.set();
+    }
+  }
+    
+  return set;
+}
 
 
 inline

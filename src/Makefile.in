@@ -27,7 +27,6 @@ DEPLOYDIR = @top_builddir@/deploy
 
 CC = @CC@
 CXX = @CXX@
-SWIG = @SWIG@
 
 PROTOC=@top_builddir@/third_party/protobuf-2.3.0/src/protoc
 
@@ -111,10 +110,11 @@ ifeq ($(WITH_ZOOKEEPER),1)
   LIBS += -lzookeeper_mt
 endif
 
-MASTER_OBJ = master/master.o master/slaves_manager.o master/frameworks_manager.o	\
-	     master/allocator_factory.o master/simple_allocator.o
+MASTER_OBJ = master/master.o master/http.o master/slaves_manager.o	\
+	     master/frameworks_manager.o master/allocator_factory.o	\
+	     master/simple_allocator.o
 
-SLAVE_OBJ = slave/slave.o slave/isolation_module.o			\
+SLAVE_OBJ = slave/slave.o slave/http.o slave/isolation_module.o		\
 	    slave/process_based_isolation_module.o slave/reaper.o	\
 	    launcher/launcher.o
 
@@ -129,13 +129,10 @@ endif
 PROTOBUF_OBJ = mesos.pb.o messages/messages.pb.o messages/log.pb.o
 
 MASTER_WEBUI_OBJ = master/webui.o
-MASTER_SWIG_WEBUI_OBJ = webui/master/swig/master_wrap.o
 
 SLAVE_WEBUI_OBJ = slave/webui.o
-SLAVE_SWIG_WEBUI_OBJ = webui/slave/swig/slave_wrap.o
 
 WEBUI_OBJ = $(MASTER_WEBUI_OBJ) $(SLAVE_WEBUI_OBJ)
-SWIG_WEBUI_OBJ = $(MASTER_SWIG_WEBUI_OBJ) $(SLAVE_SWIG_WEBUI_OBJ)
 
 COMMON_OBJ = common/fatal.o common/lock.o detector/detector.o		\
 	     detector/url_processor.o configurator/configurator.o	\
@@ -153,13 +150,13 @@ SCHED_LIB_OBJ = sched/sched.o local/local.o log/replica.o log/coordinator.o
 BASIC_OBJ = $(MASTER_OBJ) $(SLAVE_OBJ) $(COMMON_OBJ)  \
 	    $(SCHED_LIB_OBJ) $(EXEC_LIB_OBJ)
 
-ALL_OBJ = $(PROTOBUF_OBJ) $(BASIC_OBJ) $(WEBUI_OBJ) $(SWIG_WEBUI_OBJ)
+ALL_OBJ = $(PROTOBUF_OBJ) $(BASIC_OBJ) $(WEBUI_OBJ)
 
-MASTER_EXE_OBJ = $(MASTER_OBJ) $(MASTER_WEBUI_OBJ)			\
-                 $(MASTER_SWIG_WEBUI_OBJ) $(COMMON_OBJ) common/build.o
+MASTER_EXE_OBJ = $(MASTER_OBJ) $(MASTER_WEBUI_OBJ) $(COMMON_OBJ)	\
+                 common/build.o
 
-SLAVE_EXE_OBJ = $(SLAVE_OBJ) $(SLAVE_WEBUI_OBJ)				\
-                $(SLAVE_SWIG_WEBUI_OBJ) $(COMMON_OBJ) common/build.o
+SLAVE_EXE_OBJ = $(SLAVE_OBJ) $(SLAVE_WEBUI_OBJ) $(COMMON_OBJ)	\
+                 common/build.o
 
 LAUNCHER_EXE_OBJ = launcher/launcher.o $(COMMON_OBJ)
 
@@ -199,10 +196,10 @@ MESOS_JAVA_LIB_OBJ = java/jni/convert.o java/jni/construct.o		\
 	             java/jni/org_apache_mesos_MesosSchedulerDriver.o	\
 	             java/jni/org_apache_mesos_MesosExecutorDriver.o
 
-# Java and Python shared libraries which contain the everything in
-# MESOS_LIB as well as the SWIG wrappers (note, Java requires the use
-# of the .dylib suffix on Mac OS X, but at the time Python required
-# the .so suffix even on Mac OS X).
+# Java and Python shared libraries which contain everything in
+# MESOS_LIB (note, Java requires the use of the .dylib suffix on Mac
+# OS X, but at the time Python required the .so suffix even on Mac OS
+# X).
 ifeq ($(OS_NAME),darwin)
   MESOS_JAVA_LIB = $(LIBDIR)/java/libmesos.dylib
 else
@@ -252,9 +249,7 @@ OBJ_DIRECTORIES = common configurator detector exec launcher local log	\
                   master messages sched slave
 
 WEBUI_DIRECTORIES = $(BINDIR)/webui/common $(BINDIR)/webui/master	\
-                    $(BINDIR)/webui/slave $(BINDIR)/webui/static	\
-                    $(BINDIR)/webui/master/swig				\
-                    $(BINDIR)/webui/slave/swig
+                    $(BINDIR)/webui/slave $(BINDIR)/webui/static
 
 DIRECTORIES = $(INCLUDEDIR) $(INCLUDEDIR)/mesos $(BINDIR) $(LIBDIR)	\
               $(LIBDIR)/java $(LIBDIR)/python $(CONFDIR) $(DEPLOYDIR)	\
@@ -298,9 +293,6 @@ $(BASIC_OBJ): %.o: $(SRCDIR)/%.cpp $(PROTOBUF_OBJ) | $(OBJ_DIRECTORIES)
 $(WEBUI_OBJ): %.o: $(SRCDIR)/%.cpp
 	$(CXX) -c $(CXXFLAGS) $(WEBUI_CXXFLAGS) -o $@ $<
 
-$(SWIG_WEBUI_OBJ): %.o: %.cpp
-	$(CXX) -c $(CXXFLAGS) $(WEBUI_CXXFLAGS) -o $@ $<
-
 $(MESOS_LIBS): $(COMMON_OBJ) | $(LIBDIR)
 
 $(MESOS_SCHED_LIB):$(SCHED_LIB_OBJ) $(MASTER_OBJ) $(SLAVE_OBJ) $(PROTOBUF_OBJ) common/build.o
@@ -311,24 +303,6 @@ $(MESOS_EXEC_LIB): $(EXEC_LIB_OBJ) $(PROTOBUF_OBJ) common/build.o
 
 $(MESOS_LIB): $(SCHED_LIB_OBJ) $(MASTER_OBJ) $(SLAVE_OBJ) $(EXEC_LIB_OBJ) $(PROTOBUF_OBJ) common/build.o
 	$(CXX) $(CXXFLAGS) -shared -o $@ $^ $(LDFLAGS) $(LIBS)
-
-webui/master/swig/master_wrap.cpp: $(SRCDIR)/webui/master/swig/master.i $(SRCDIR)/master/state.hpp $(SRCDIR)/master/webui.hpp $(SRCDIR)/master/master.hpp config/config.hpp $(BINDIR)/webui/master/swig
-ifeq ($(WITH_WEBUI),1)
-	mkdir -p webui/master/swig
-	$(SWIG) -c++ -python -outdir webui/master/swig -I$(SRCDIR) -o $@ $<
-	cp -r webui/master/swig/master.py $(BINDIR)/webui/master/swig
-else
-	echo "" > $@
-endif
-
-webui/slave/swig/slave_wrap.cpp: $(SRCDIR)/webui/slave/swig/slave.i $(SRCDIR)/slave/state.hpp $(SRCDIR)/slave/webui.hpp $(SRCDIR)/slave/slave.hpp config/config.hpp $(BINDIR)/webui/slave/swig
-ifeq ($(WITH_WEBUI),1)
-	mkdir -p webui/slave/swig
-	$(SWIG) -c++ -python -outdir webui/slave/swig -I$(SRCDIR) -o $@ $<
-	cp -r webui/slave/swig/slave.py $(BINDIR)/webui/slave/swig
-else
-	echo "" > $@
-endif
 
 $(MESOS_EXES): | $(BINDIR)
 
@@ -436,12 +410,6 @@ clean:
 	rm -rf $(MESOS_JAVA_LIB).dSYM $(MESOS_PYTHON_LIB).dSYM
 	rm -f $(MESOS_JAVA_LIB) $(MESOS_PYTHON_LIB)
 	rm -rf $(WEBUI_FILES)
-	rm -f swig/*/mesos_wrap.cpp
-	rm -f swig/*/mesos_wrap.h
-	rm -f swig/*/*.o
-	rm -f swig/*/*.d
-	rm -f swig/java/mesos/*
-	rm -f swig/python/mesos.py
 	rm -f java/jni/org_apache_mesos_MesosSchedulerDriver.h
 	rm -f java/jni/org_apache_mesos_MesosSchedulerDriver.o
 	rm -f java/jni/org_apache_mesos_MesosSchedulerDriver.d
@@ -450,20 +418,6 @@ clean:
 	rm -f java/jni/org_apache_mesos_MesosExecutorDriver.d
 	rm -f $(LIBDIR)/python/mesos.py
 	rm -f $(LIBDIR)/python/mesos.pyc
-	rm -f webui/master/swig/master_wrap.h
-	rm -f webui/master/swig/master_wrap.cpp
-	rm -f webui/master/swig/master_wrap.o
-	rm -f webui/master/swig/master_wrap.d
-	rm -f webui/master/swig/master.py
-	rm -f $(BINDIR)/webui/master/swig/master.py
-	rm -f $(BINDIR)/webui/master/swig/master.pyc
-	rm -f webui/slave/swig/slave_wrap.h
-	rm -f webui/slave/swig/slave_wrap.cpp
-	rm -f webui/slave/swig/slave_wrap.o
-	rm -f webui/slave/swig/slave_wrap.d
-	rm -f webui/slave/swig/slave.py
-	rm -f $(BINDIR)/webui/master/swig/master.py
-	rm -f $(BINDIR)/webui/master/swig/master.pc
 	rm -f $(DEPLOY_FILES)
 	rm -f $(INCLUDEDIR)/mesos/mesos.hpp
 	rm -f mesos.pb.cc

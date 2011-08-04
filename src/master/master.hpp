@@ -25,8 +25,6 @@
 #include <process/process.hpp>
 #include <process/protobuf.hpp>
 
-#include "state.hpp"
-
 #include "common/foreach.hpp"
 #include "common/hashmap.hpp"
 #include "common/hashset.hpp"
@@ -37,6 +35,9 @@
 #include "common/utils.hpp"
 
 #include "configurator/configurator.hpp"
+
+#include "master/constants.hpp"
+#include "master/http.hpp"
 
 #include "messages/messages.hpp"
 
@@ -54,69 +55,16 @@ struct SlaveResources;
 class SlaveObserver;
 struct Offer;
 
-// TODO(benh): Add units after constants.
-// TODO(benh): Also make configuration options be constants.
-
-// Maximum number of slot offers to have outstanding for each framework.
-const int MAX_OFFERS_PER_FRAMEWORK = 50;
-
-// Default number of seconds until a refused slot is resent to a framework.
-const double DEFAULT_REFUSAL_TIMEOUT = 5;
-
-// Minimum number of cpus / task.
-const int32_t MIN_CPUS = 1;
-
-// Minimum amount of memory / task.
-const int32_t MIN_MEM = 32 * Megabyte;
-
-// Maximum number of CPUs per machine.
-const int32_t MAX_CPUS = 1000 * 1000;
-
-// Maximum amount of memory / machine.
-const int32_t MAX_MEM = 1024 * 1024 * Megabyte;
-
-// Acceptable timeout for slave PONG.
-const double SLAVE_PONG_TIMEOUT = 15.0;
-
-// Maximum number of timeouts until slave is considered failed.
-const int MAX_SLAVE_TIMEOUTS = 5;
-
-// Time to wait for a framework to failover (TODO(benh): Make configurable)).
-const double FRAMEWORK_FAILOVER_TIMEOUT = 60 * 60 * 24;
-
-
-// Reasons why offers might be returned to the Allocator.
-enum OfferReturnReason
-{
-  ORR_FRAMEWORK_REPLIED,
-  ORR_OFFER_RESCINDED,
-  ORR_FRAMEWORK_LOST,
-  ORR_FRAMEWORK_FAILOVER,
-  ORR_SLAVE_LOST
-};
-
-
-// Reasons why tasks might be removed, passed to the Allocator.
-enum TaskRemovalReason
-{
-  TRR_TASK_ENDED,
-  TRR_FRAMEWORK_LOST,
-  TRR_EXECUTOR_LOST,
-  TRR_SLAVE_LOST
-};
-
 
 class Master : public ProtobufProcess<Master>
 {
 public:
   Master();
   Master(const Configuration& conf);
-  
+
   virtual ~Master();
 
   static void registerOptions(Configurator* configurator);
-
-  Promise<state::MasterState*> getState();
 
   void submitScheduler(const std::string& name);
   void newMasterDetected(const UPID& pid);
@@ -160,14 +108,14 @@ public:
   void exited();
 
   // Return connected frameworks that are not in the process of being removed
-  std::vector<Framework*> getActiveFrameworks();
-  
+  std::vector<Framework*> getActiveFrameworks() const;
+
   // Return connected slaves that are not in the process of being removed
-  std::vector<Slave*> getActiveSlaves();
+  std::vector<Slave*> getActiveSlaves() const;
 
   OfferID makeOffer(Framework* framework,
 		    const std::vector<SlaveResources>& resources);
-  
+
 protected:
   virtual void operator () ();
   
@@ -229,31 +177,37 @@ protected:
   SlaveID newSlaveId();
 
 private:
+  // TODO(benh): Remove once SimpleAllocator doesn't use Master::get*.
+  friend class SimpleAllocator;
   friend struct SlaveRegistrar;
   friend struct SlaveReregistrar;
-  // TODO(benh): Remove once SimpleAllocator doesn't use Master::get*.
-  friend class SimpleAllocator; 
 
-  // TODO(benh): Better naming and name scope for these http handlers.
-  Promise<HttpResponse> http_info_json(const HttpRequest& request);
-  Promise<HttpResponse> http_frameworks_json(const HttpRequest& request);
-  Promise<HttpResponse> http_slaves_json(const HttpRequest& request);
-  Promise<HttpResponse> http_tasks_json(const HttpRequest& request);
-  Promise<HttpResponse> http_stats_json(const HttpRequest& request);
-  Promise<HttpResponse> http_vars(const HttpRequest& request);
+  // Http handlers, friends of the master in order to access state,
+  // they get invoked from within the master so there is no need to
+  // use synchronization mechanisms to protect state.
+  friend Promise<HttpResponse> http::vars(
+      const Master& master,
+      const HttpRequest& request);
+
+  friend Promise<HttpResponse> http::json::stats(
+      const Master& master,
+      const HttpRequest& request);
+
+  friend Promise<HttpResponse> http::json::state(
+      const Master& master,
+      const HttpRequest& request);
 
   const Configuration conf;
 
-  bool active;
+  bool elected;
 
   Allocator* allocator;
   SlavesManager* slavesManager;
 
-  // Contains the date the master was launched and
-  // some ephemeral token (e.g. returned from
-  // ZooKeeper). Used in framework and slave IDs
-  // created by this master.
-  std::string masterId;
+  // Contains the date the master was launched and some ephemeral
+  // token (e.g. returned from ZooKeeper). Used in framework and slave
+  // IDs created by this master.
+  std::string id;
 
   multimap<std::string, uint16_t> slaveHostnamePorts;
 

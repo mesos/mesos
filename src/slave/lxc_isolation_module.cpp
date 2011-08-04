@@ -138,9 +138,11 @@ void LxcIsolationModule::launchExecutor(
 
   const ExecutorID& executorId = executorInfo.executor_id();
 
-  LOG(INFO) << "Launching '" << executorInfo.uri()
-            << "' for executor '" << executorId
-            << "' of framework " << frameworkId;
+  LOG(INFO) << "Launching " << executorId
+            << " (" << executorInfo.uri() << ")"
+            << " in " << directory
+            << " with resources " << resources
+            << "' for framework " << frameworkId;
 
   // Create a name for the container.
   std::ostringstream out;
@@ -162,11 +164,14 @@ void LxcIsolationModule::launchExecutor(
   // automatically creates the container and will delete it when finished.
   pid_t pid;
   if ((pid = fork()) == -1) {
-    PLOG(FATAL) << "Failed to fork to launch lxc-execute";
+    PLOG(FATAL) << "Failed to fork to launch new executor";
   }
 
   if (pid) {
     // In parent process.
+    LOG(INFO) << "Forked executor at = " << pid;
+
+    // Record the pid.
     info->pid = pid;
 
     // Tell the slave this executor has started.
@@ -306,7 +311,7 @@ void LxcIsolationModule::resourcesChanged(
   string property;
   uint64_t value;
 
-  double cpu = resources.getScalar("cpu", Resource::Scalar()).value();
+  double cpu = resources.get("cpu", Resource::Scalar()).value();
   int32_t cpu_shares = max(CPU_SHARES_PER_CPU * (int32_t) cpu, MIN_CPU_SHARES);
 
   property = "cpu.shares";
@@ -318,7 +323,7 @@ void LxcIsolationModule::resourcesChanged(
     return;
   }
 
-  double mem = resources.getScalar("mem", Resource::Scalar()).value();
+  double mem = resources.get("mem", Resource::Scalar()).value();
   int64_t limit_in_bytes = max((int64_t) mem, MIN_MEMORY_MB) * 1024LL * 1024LL;
 
   property = "memory.limit_in_bytes";
@@ -384,7 +389,7 @@ vector<string> LxcIsolationModule::getControlGroupOptions(
 
   std::ostringstream out;
 
-  double cpu = resources.getScalar("cpu", Resource::Scalar()).value();
+  double cpu = resources.get("cpu", Resource::Scalar()).value();
   int32_t cpu_shares = max(CPU_SHARES_PER_CPU * (int32_t) cpu, MIN_CPU_SHARES);
 
   options.push_back("-s");
@@ -393,7 +398,7 @@ vector<string> LxcIsolationModule::getControlGroupOptions(
 
   out.str("");
 
-  double mem = resources.getScalar("mem", Resource::Scalar()).value();
+  double mem = resources.get("mem", Resource::Scalar()).value();
   int64_t limit_in_bytes = max((int64_t) mem, MIN_MEMORY_MB) * 1024LL * 1024LL;
 
   options.push_back("-s");
