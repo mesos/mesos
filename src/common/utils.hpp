@@ -21,6 +21,7 @@
 #include <google/protobuf/io/zero_copy_stream_impl.h>
 
 #include <list>
+#include <set>
 
 #include <boost/lexical_cast.hpp>
 

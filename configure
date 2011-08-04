@@ -576,7 +576,6 @@ CXXFLAGS
 CXX
 WITH_INCLUDED_ZOOKEEPER
 WITH_ZOOKEEPER
-SWIG
 WEBUI_LDFLAGS
 WEBUI_CXXFLAGS
 WEBUI_CFLAGS
@@ -646,7 +645,6 @@ with_java_headers
 with_java_home
 with_python_headers
 with_webui
-with_swig
 with_zookeeper
 with_included_zookeeper
 '
@@ -1286,7 +1284,6 @@ Optional Packages:
   --with-python-headers=DIR
                           find Python headers in DIR
   --with-webui            enable web UI (requires Python)
-  --with-swig=PATH        use the SWIG binary at PATH
   --with-zookeeper        use ZooKeeper support
   --with-included-zookeeper
                           build with included ZooKeeper
@@ -2107,19 +2104,6 @@ fi
 
 
 
-
-
-
-SWIG="swig"
-
-# Check whether --with-swig was given.
-if test "${with_swig+set}" = set; then :
-  withval=$with_swig; case "$with_swig" in
-		    yes) as_fn_error $? "
-*** --with-swig requires an argument" "$LINENO" 5 ;;
-		    *) SWIG="$withval" ;;
-	          esac
-fi
 
 
 

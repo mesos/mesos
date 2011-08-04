@@ -86,7 +86,7 @@ int main(int argc, char **argv)
     MasterDetector::create(url, master->self(), true, Logging::isQuiet(conf));
 
 #ifdef MESOS_WEBUI
-  startMasterWebUI(master->self(), conf);
+  webui::start(master->self(), conf);
 #endif
   
   process::wait(master->self());

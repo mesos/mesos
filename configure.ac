@@ -160,18 +160,6 @@ AC_SUBST(WEBUI_CFLAGS)
 AC_SUBST(WEBUI_CXXFLAGS)
 AC_SUBST(WEBUI_LDFLAGS)
 
-SWIG="swig"
-AC_ARG_WITH([swig],
-  AC_HELP_STRING([--with-swig=PATH],
-                 [use the SWIG binary at PATH]),
-	         [case "$with_swig" in
-		    yes) AC_MSG_ERROR([
-*** --with-swig requires an argument]) ;;
-		    *) SWIG="$withval" ;;
-	          esac],
-	         [])
-AC_SUBST(SWIG)
-
 WITH_ZOOKEEPER="0"
 AC_ARG_WITH([zookeeper],
   AC_HELP_STRING([--with-zookeeper],

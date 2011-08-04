@@ -1,25 +1,24 @@
-import os
-import sys
 import bottle
 import commands
 import datetime
+import json
+import os
+import sys
+import urllib
 
 from bottle import abort, route, send_file, template
-from slave import get_slave
-
-start_time = datetime.datetime.now()
 
 
 @route('/')
 def index():
   bottle.TEMPLATES.clear() # For rapid development
-  return template("index", start_time = start_time)
+  return template("index", slave_port = slave_port)
 
 
 @route('/framework/:id#.*#')
 def framework(id):
   bottle.TEMPLATES.clear() # For rapid development
-  return template("framework", framework_id = id)
+  return template("framework", slave_port = slave_port, framework_id = id)
 
 
 @route('/static/:filename#.*#')
@@ -36,12 +35,16 @@ def log_full(level):
 @route('/log/:level#[A-Z]*#/:lines#[0-9]*#')
 def log_tail(level, lines):
   bottle.response.content_type = 'text/plain'
-  return commands.getoutput('tail -%s %s/mesos-slave.%s' % (lines, log_dir, level))
+  command = 'tail -%s %s/mesos-slave.%s' % (lines, log_dir, level)
+  return commands.getoutput(command)
 
 
 @route('/framework-logs/:fid#.*#/:log_type#[a-z]*#')
 def framework_log_full(fid, log_type):
-  sid = get_slave().id
+  url = "http://localhost:" + slave_port + "/slave/state.json"
+  data = urllib.urlopen(url).read()
+  state = json.loads(data)
+  sid = state['id']
   if sid != -1:
     dir = '%s/slave-%s/fw-%s' % (work_dir, sid, fid)
     i = max(os.listdir(dir))
@@ -55,12 +58,16 @@ def framework_log_full(fid, log_type):
 @route('/framework-logs/:fid#.*#/:log_type#[a-z]*#/:lines#[0-9]*#')
 def framework_log_tail(fid, log_type, lines):
   bottle.response.content_type = 'text/plain'
-  sid = get_slave().id
+  url = "http://localhost:" + slave_port + "/slave/state.json"
+  data = urllib.urlopen(url).read()
+  state = json.loads(data)
+  sid = state['id']
   if sid != -1:
     dir = '%s/slave-%s/fw-%s' % (work_dir, sid, fid)
     i = max(os.listdir(dir))
     filename = '%s/slave-%s/fw-%s/%s/%s' % (work_dir, sid, fid, i, log_type)
-    return commands.getoutput('tail -%s %s' % (lines, filename))
+    command = 'tail -%s %s' % (lines, filename)
+    return commands.getoutput(command)
   else:
     abort(403, 'Slave not yet registered with master')
 
@@ -71,9 +78,10 @@ bottle.TEMPLATE_PATH.append('./webui/slave/')
 # expecting have been passed to us, which will give us a better error
 # message when they aren't!
 
-init_port = sys.argv[1]
-log_dir = sys.argv[2]
-work_dir = sys.argv[3]
+slave_port = sys.argv[1]
+webui_port = sys.argv[2]
+log_dir = sys.argv[3]
+work_dir = sys.argv[4]
 
 bottle.debug(True)
-bottle.run(host = '0.0.0.0', port = init_port)
+bottle.run(host = '0.0.0.0', port = webui_port)
