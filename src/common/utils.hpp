@@ -27,6 +27,7 @@
 #include <netdb.h>
 #include <pwd.h>
 #include <stddef.h>
+#include <stdio.h>
 #include <unistd.h>
 
 #include <google/protobuf/message.h>
