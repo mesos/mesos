@@ -109,7 +109,7 @@ private:
   std::set<uint64_t> unlearned;
 
   // Cache of log actions (indexed by position).
-  cache<uint64_t, Action> cache;
+  Cache<uint64_t, Action> cache;
 };
 
 }}} // namespace mesos { namespace internal { namespace log {
