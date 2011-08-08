@@ -99,6 +99,9 @@ public:
   }
 
   virtual int reviveOffers() = 0;
+
+  virtual int requestResources(
+      const std::vector<ResourceRequest>& requests) = 0;
 };
 
 
@@ -186,6 +189,8 @@ public:
   }
 
   virtual int reviveOffers();
+
+  virtual int requestResources(const std::vector<ResourceRequest>& requests);
 
 private:
   // Initialization method used by constructors

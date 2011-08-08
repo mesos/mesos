@@ -258,3 +258,10 @@ void SimpleAllocator::makeNewOffers(const vector<Slave*>& slaves)
     }
   }
 }
+
+
+void SimpleAllocator::request(const FrameworkID& frameworkId,
+		                      const vector<ResourceRequest>& requests)
+{
+  LOG(INFO) << "Received resource request from framework " << frameworkId;
+}

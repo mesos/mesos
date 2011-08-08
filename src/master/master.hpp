@@ -57,6 +57,8 @@ public:
                            const FrameworkInfo& frameworkInfo,
                            int32_t generation);
   void unregisterFramework(const FrameworkID& frameworkId);
+  void resourceRequest(const FrameworkID& frameworkId,
+                       const std::vector<ResourceRequest>& requests);
   void resourceOfferReply(const FrameworkID& frameworkId,
                           const OfferID& offerId,
                           const std::vector<TaskDescription>& tasks,

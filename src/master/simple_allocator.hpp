@@ -43,13 +43,16 @@ public:
                              const std::vector<SlaveResources>& resourcesLeft);
 
   virtual void offersRevived(Framework* framework);
-  
+
+  virtual void request(const FrameworkID& frameworkId,
+		               const std::vector<ResourceRequest>& requests);
+
   virtual void timerTick();
-  
+
 private:
   // Get an ordering to consider frameworks in for launching tasks
   std::vector<Framework*> getAllocationOrdering();
-  
+
   // Look at the full state of the cluster and send out offers
   void makeNewOffers();
 

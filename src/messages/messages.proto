@@ -93,6 +93,12 @@ message UnregisterFrameworkMessage {
 }
 
 
+message ResourceRequestMessage {
+  required FrameworkID framework_id = 1;
+  repeated ResourceRequest requests = 2;
+}
+
+
 message ResourceOfferMessage {
   required OfferID offer_id = 1;
   repeated SlaveOffer offers = 2;

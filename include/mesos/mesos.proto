@@ -148,3 +148,9 @@ message SlaveOffer {
   required string hostname = 2;
   repeated Resource resources = 3;
 }
+
+
+message ResourceRequest {
+  optional SlaveID slave_id = 1;
+  repeated Resource resources = 2;
+}

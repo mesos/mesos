@@ -340,6 +340,11 @@ void Master::initialize()
       &Master::unregisterFramework,
       &UnregisterFrameworkMessage::framework_id);
 
+  installProtobufHandler<ResourceRequestMessage>(
+      &Master::resourceRequest,
+      &ResourceRequestMessage::framework_id,
+      &ResourceRequestMessage::requests);
+
   installProtobufHandler<ResourceOfferReplyMessage>(
       &Master::resourceOfferReply,
       &ResourceOfferReplyMessage::framework_id,
@@ -583,6 +588,13 @@ void Master::unregisterFramework(const FrameworkID& frameworkId)
                    << "expecting " << framework->pid;
     }
   }
+}
+
+
+void Master::resourceRequest(const FrameworkID& frameworkId,
+                             const vector<ResourceRequest>& requests)
+{
+  allocator->request(frameworkId, requests);
 }
 
 

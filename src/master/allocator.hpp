@@ -27,6 +27,9 @@ public:
 
   virtual void offersRevived(Framework *framework) {}
 
+  virtual void request(const FrameworkID& frameworkId,
+		               const std::vector<ResourceRequest>& requests) {}
+
   virtual void timerTick() {}
 };
 

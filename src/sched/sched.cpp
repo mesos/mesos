@@ -283,6 +283,19 @@ protected:
     send(master, message);
   }
 
+  void requestResources(const vector<ResourceRequest>& requests)
+  {
+    if (!active)
+      return;
+
+    ResourceRequestMessage message;
+    message.mutable_framework_id()->MergeFrom(frameworkId);
+    foreach (const ResourceRequest& request, requests) {
+      message.add_requests()->MergeFrom(request);
+    }
+    send(master, message);
+  }
+
   void replyToOffer(const OfferID& offerId,
                     const vector<TaskDescription>& tasks,
                     const map<string, string>& params)
@@ -325,8 +338,8 @@ protected:
   }
 
   void sendFrameworkMessage(const SlaveID& slaveId,
-			    const ExecutorID& executorId,
-			    const string& data)
+			                const ExecutorID& executorId,
+			                const string& data)
   {
     if (!active)
       return;
@@ -681,8 +694,8 @@ int MesosSchedulerDriver::reviveOffers()
 
 
 int MesosSchedulerDriver::sendFrameworkMessage(const SlaveID& slaveId,
-					       const ExecutorID& executorId,
-					       const string& data)
+					                           const ExecutorID& executorId,
+					                           const string& data)
 {
   Lock lock(&mutex);
 
@@ -700,4 +713,20 @@ int MesosSchedulerDriver::sendFrameworkMessage(const SlaveID& slaveId,
 void MesosSchedulerDriver::error(int code, const string& message)
 {
   sched->error(this, code, message);
+}
+
+
+int MesosSchedulerDriver::requestResources(
+    const vector<ResourceRequest>& requests)
+{
+  Lock lock(&mutex);
+
+  if (!running || (process != NULL && !process->active)) {
+    return -1;
+  }
+
+  dispatch(process, &SchedulerProcess::requestResources, requests);
+
+  return 0;
+
 }
