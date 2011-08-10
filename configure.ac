@@ -49,7 +49,6 @@ AC_CONFIG_FILES([Makefile
 AC_CONFIG_SUBDIRS([third_party/libprocess])
 AC_CONFIG_SUBDIRS([third_party/protobuf-2.3.0])
 AC_CONFIG_SUBDIRS([third_party/glog-0.3.1])
-AC_CONFIG_SUBDIRS([third_party/gmock-1.5.0])
 AC_CONFIG_SUBDIRS([third_party/zookeeper-3.3.1/src/c])
 
 AC_CANONICAL_SYSTEM
@@ -176,18 +175,6 @@ AC_SUBST(WITH_WEBUI)
 AC_SUBST(WEBUI_CFLAGS)
 AC_SUBST(WEBUI_CXXFLAGS)
 AC_SUBST(WEBUI_LDFLAGS)
-
-SWIG="swig"
-AC_ARG_WITH([swig],
-  AC_HELP_STRING([--with-swig=PATH],
-                 [use the SWIG binary at PATH]),
-	         [case "$with_swig" in
-		    yes) AC_MSG_ERROR([
-*** --with-swig requires an argument]) ;;
-		    *) SWIG="$withval" ;;
-	          esac],
-	         [])
-AC_SUBST(SWIG)
 
 WITH_ZOOKEEPER="0"
 AC_ARG_WITH([zookeeper],

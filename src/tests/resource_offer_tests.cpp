@@ -87,8 +87,8 @@ TEST(MasterTest, ResourceOfferWithMultipleSlaves)
   EXPECT_GE(10, offers.size());
 
   Resources resources(offers[0].resources());
-  EXPECT_EQ(2, resources.getScalar("cpus", Resource::Scalar()).value());
-  EXPECT_EQ(1024, resources.getScalar("mem", Resource::Scalar()).value());
+  EXPECT_EQ(2, resources.get("cpus", Resource::Scalar()).value());
+  EXPECT_EQ(1024, resources.get("mem", Resource::Scalar()).value());
 
   driver.stop();
   driver.join();

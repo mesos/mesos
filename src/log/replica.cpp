@@ -584,9 +584,7 @@ void ReplicaProcess::recover()
   do {
     Record record;
     result = utils::protobuf::read(fd, &record);
-    if (result.isError()) {
-      LOG(FATAL) << "Failed to read record from the log: " << result.error();
-    } else if (result.isSome()) {
+    if (result.isSome()) {
       if (result.get()) {
         if (record.type() == Record::PROMISE) {
           CHECK(record.has_promise());
@@ -608,14 +606,21 @@ void ReplicaProcess::recover()
           end = std::max(end, record.action().position());
           cache.put(record.action().position(), record.action());
         }
-      } else {
-        // Must have crashed when trying to write this record or this
-        // record got corrupted. Just truncate after this point rather
-        // than doing any fancy heuristical recovery.
-        LOG(WARNING) << "Found a partially written record during recovery";
+      } else if (result.isError()) {
+        // We might have crashed when trying to write a record or a
+        // record got corrupted some other way. Just truncate after
+        // this point rather than doing any fancy heuristical recovery
+        // and assume if this *is* a non-recoverable file error it
+        // will be uncovered when we do the truncate (or possibly
+        // later when we actually do a write).
+        LOG(WARNING) << "Failed to completely recover the log: "
+                     << result.error();
+
         if (ftruncate(fd, lseek(fd, 0, SEEK_CUR)) != 0) {
           LOG(FATAL) << "Failed to truncate during recovery";
         }
+
+        break;
       }
     }
   } while (result.isSome());

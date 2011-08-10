@@ -32,7 +32,7 @@ using testing::Return;
 
 TEST(LogTest, Cache)
 {
-  cache<uint64_t, std::string> cache(10);
+  Cache<uint64_t, std::string> cache(10);
 
   for (int i = 0; i < 10; i++) {
     cache.put(i, utils::stringify(i));

@@ -32,16 +32,20 @@
 #include "common/utils.hpp"
 #include "common/uuid.hpp"
 
-#include "allocator.hpp"
-#include "allocator_factory.hpp"
-#include "master.hpp"
-#include "slaves_manager.hpp"
-#include "webui.hpp"
+#include "master/allocator.hpp"
+#include "master/allocator_factory.hpp"
+#include "master/master.hpp"
+#include "master/slaves_manager.hpp"
+
+namespace params = std::tr1::placeholders;
 
 using std::string;
 using std::vector;
 
 using process::wait; // Necessary on some OS's to disambiguate.
+
+using std::tr1::cref;
+using std::tr1::bind;
 
 
 namespace mesos { namespace internal { namespace master {
@@ -231,92 +235,8 @@ void Master::registerOptions(Configurator* configurator)
 }
 
 
-Promise<state::MasterState*> Master::getState()
-{
-  state::MasterState* state =
-    new state::MasterState(build::DATE, build::USER, self());
-
-  foreachvalue (Slave* s, slaves) {
-    Resources resources(s->info.resources());
-    Resource::Scalar cpus;
-    Resource::Scalar mem;
-    cpus.set_value(0);
-    mem.set_value(0);
-    cpus = resources.getScalar("cpus", cpus);
-    mem = resources.getScalar("mem", mem);
-
-    state::Slave* slave =
-      new state::Slave(s->id.value(), s->info.hostname(),
-                       s->info.public_hostname(), cpus.value(),
-                       mem.value(), s->registeredTime);
-
-    state->slaves.push_back(slave);
-  }
-
-  foreachvalue (Framework* f, frameworks) {
-    Resources resources(f->resources);
-    Resource::Scalar cpus;
-    Resource::Scalar mem;
-    cpus.set_value(0);
-    mem.set_value(0);
-    cpus = resources.getScalar("cpus", cpus);
-    mem = resources.getScalar("mem", mem);
-
-    state::Framework* framework =
-      new state::Framework(f->id.value(), f->info.user(),
-                           f->info.name(), f->info.executor().uri(),
-                           cpus.value(), mem.value(), f->registeredTime);
-
-    state->frameworks.push_back(framework);
-
-    foreachvalue (Task* t, f->tasks) {
-      Resources resources(t->resources());
-      Resource::Scalar cpus;
-      Resource::Scalar mem;
-      cpus.set_value(0);
-      mem.set_value(0);
-      cpus = resources.getScalar("cpus", cpus);
-      mem = resources.getScalar("mem", mem);
-
-      state::Task* task =
-        new state::Task(t->task_id().value(), t->name(),
-                        t->framework_id().value(), t->slave_id().value(),
-                        TaskState_descriptor()->FindValueByNumber(t->state())->name(),
-                        cpus.value(), mem.value());
-
-      framework->tasks.push_back(task);
-    }
-
-    foreach (Offer* o, f->offers) {
-      state::Offer* offer =
-        new state::Offer(o->id.value(), o->frameworkId.value());
-
-      foreach (const SlaveResources& r, o->resources) {
-        Resources resources(r.resources);
-        Resource::Scalar cpus;
-        Resource::Scalar mem;
-        cpus.set_value(0);
-        mem.set_value(0);
-        cpus = resources.getScalar("cpus", cpus);
-        mem = resources.getScalar("mem", mem);
-
-        state::SlaveResources* sr =
-          new state::SlaveResources(r.slave->id.value(),
-                                    cpus.value(), mem.value());
-
-        offer->resources.push_back(sr);
-      }
-
-      framework->offers.push_back(offer);
-    }
-  }
-  
-  return state;
-}
-
-
 // Return connected frameworks that are not in the process of being removed
-vector<Framework*> Master::getActiveFrameworks()
+vector<Framework*> Master::getActiveFrameworks() const
 {
   vector <Framework*> result;
   foreachvalue (Framework* framework, frameworks) {
@@ -329,7 +249,7 @@ vector<Framework*> Master::getActiveFrameworks()
 
 
 // Return connected slaves that are not in the process of being removed
-vector<Slave*> Master::getActiveSlaves()
+vector<Slave*> Master::getActiveSlaves() const
 {
   vector <Slave*> result;
   foreachvalue (Slave* slave, slaves) {
@@ -357,8 +277,8 @@ void Master::operator () ()
   // The master ID is comprised of the current date and some ephemeral
   // token (e.g., determined by ZooKeeper).
 
-  masterId = DateUtils::currentDate() + "-" + message.token();
-  LOG(INFO) << "Master ID: " << masterId;
+  id = DateUtils::currentDate() + "-" + message.token();
+  LOG(INFO) << "Master ID: " << id;
 
   // Setup slave manager.
   slavesManager = new SlavesManager(conf, self());
@@ -395,7 +315,7 @@ void Master::operator () ()
 
 void Master::initialize()
 {
-  active = false;
+  elected = false;
 
   nextFrameworkId = 0;
   nextSlaveId = 0;
@@ -506,12 +426,17 @@ void Master::initialize()
   installMessageHandler(EXITED, &Master::exited);
 
   // Install HTTP request handlers.
-  installHttpHandler("info.json", &Master::http_info_json);
-  installHttpHandler("frameworks.json", &Master::http_frameworks_json);
-  installHttpHandler("slaves.json", &Master::http_slaves_json);
-  installHttpHandler("tasks.json", &Master::http_tasks_json);
-  installHttpHandler("stats.json", &Master::http_stats_json);
-  installHttpHandler("vars", &Master::http_vars);
+  installHttpHandler(
+      "vars",
+      bind(&http::vars, cref(*this), params::_1));
+
+  installHttpHandler(
+      "stats.json",
+      bind(&http::json::stats, cref(*this), params::_1));
+
+  installHttpHandler(
+      "state.json",
+      bind(&http::json::state, cref(*this), params::_1));
 }
 
 
@@ -526,20 +451,20 @@ void Master::submitScheduler(const string& name)
 
 void Master::newMasterDetected(const UPID& pid)
 {
-  // Check and see if we are (1) still waiting to be the active
-  // master, (2) newly active master, (3) no longer active master,
-  // or (4) still active master.
+  // Check and see if we are (1) still waiting to be the elected
+  // master, (2) newly elected master, (3) no longer elected master,
+  // or (4) still elected master.
 
   UPID master = pid;
 
-  if (master != self() && !active) {
+  if (master != self() && !elected) {
     LOG(INFO) << "Waiting to be master!";
-  } else if (master == self() && !active) {
-    LOG(INFO) << "Acting as master!";
-    active = true;
-  } else if (master != self() && active) {
-    LOG(FATAL) << "No longer active master ... committing suicide!";
-  } else if (master == self() && active) {
+  } else if (master == self() && !elected) {
+    LOG(INFO) << "Elected as master!";
+    elected = true;
+  } else if (master != self() && elected) {
+    LOG(FATAL) << "No longer elected master ... committing suicide!";
+  } else if (master == self() && elected) {
     LOG(INFO) << "Still acting as master!";
   }
 }
@@ -547,8 +472,8 @@ void Master::newMasterDetected(const UPID& pid)
 
 void Master::noMasterDetected()
 {
-  if (active) {
-    LOG(FATAL) << "No longer active master ... committing suicide!";
+  if (elected) {
+    LOG(FATAL) << "No longer elected master ... committing suicide!";
   } else {
     LOG(FATAL) << "No master detected (?) ... committing suicide!";
   }
@@ -1040,6 +965,8 @@ void Master::exitedExecutor(const SlaveID& slaveId,
                     << " of framework " << frameworkId
                     << " because of lost executor";
 
+          stats.tasks[TASK_LOST]++;
+
           removeTask(framework, slave, task, TRR_EXECUTOR_LOST);
         }
       }
@@ -1048,9 +975,9 @@ void Master::exitedExecutor(const SlaveID& slaveId,
       slave->removeExecutor(frameworkId, executorId);
       framework->removeExecutor(slave->id, executorId);
 
-      // TODO(benh): Send the framework it's executor's exit
-      // status? Or maybe at least have something like
-      // M2F_EXECUTOR_LOST?
+      // TODO(benh): Send the framework it's executor's exit status?
+      // Or maybe at least have something like
+      // Scheduler::executorLost?
     }
   }
 }
@@ -1373,6 +1300,10 @@ void Master::launchTask(Framework* framework, const TaskDescription& task)
   message.mutable_task()->MergeFrom(task);
   send(slave->pid, message);
 
+  // TODO(benh): This is a double count if the executor decides to
+  // send a status update for TASK_STARTING itself. Currently we don't
+  // disallow this although we really should have a state machine that
+  // makes sure transitions are valid.
   stats.tasks[TASK_STARTING]++;
 }
 
@@ -1749,7 +1680,7 @@ FrameworkID Master::newFrameworkId()
 {
   std::ostringstream out;
 
-  out << masterId << "-" << std::setw(4)
+  out << id << "-" << std::setw(4)
       << std::setfill('0') << nextFrameworkId++;
 
   FrameworkID frameworkId;
@@ -1762,7 +1693,7 @@ FrameworkID Master::newFrameworkId()
 OfferID Master::newOfferId()
 {
   OfferID offerId;
-  offerId.set_value(masterId + "-" + utils::stringify(nextOfferId++));
+  offerId.set_value(id + "-" + utils::stringify(nextOfferId++));
   return offerId;
 }
 
@@ -1770,220 +1701,9 @@ OfferID Master::newOfferId()
 SlaveID Master::newSlaveId()
 {
   SlaveID slaveId;
-  slaveId.set_value(masterId + "-" + utils::stringify(nextSlaveId++));
+  slaveId.set_value(id + "-" + utils::stringify(nextSlaveId++));
   return slaveId;
 }
 
-
-Promise<HttpResponse> Master::http_info_json(const HttpRequest& request)
-{
-  LOG(INFO) << "HTTP request for '/master/info.json'";
-
-  std::ostringstream out;
-
-  out <<
-    "{" <<
-    "\"built_date\":\"" << build::DATE << "\"," <<
-    "\"build_user\":\"" << build::USER << "\"," <<
-    "\"start_time\":\"" << startTime << "\"," <<
-    "\"pid\":\"" << self() << "\"" <<
-    "}";
-
-  HttpOKResponse response;
-  response.headers["Content-Type"] = "text/x-json;charset=UTF-8";
-  response.headers["Content-Length"] = utils::stringify(out.str().size());
-  response.body = out.str().data();
-  return response;
-}
-
-
-Promise<HttpResponse> Master::http_frameworks_json(const HttpRequest& request)
-{
-  LOG(INFO) << "HTTP request for '/master/frameworks.json'";
-
-  std::ostringstream out;
-
-  out << "[";
-
-  foreachvalue (Framework* framework, frameworks) {
-    out <<
-      "{" <<
-      "\"id\":\"" << framework->id << "\"," <<
-      "\"name\":\"" << framework->info.name() << "\"," <<
-      "\"user\":\"" << framework->info.user() << "\""
-      "},";
-  }
-
-  // Backup the put pointer to overwrite the last comma (hack).
-  if (frameworks.size() > 0) {
-    long pos = out.tellp();
-    out.seekp(pos - 1);
-  }
-
-  out << "]";
-
-  HttpOKResponse response;
-  response.headers["Content-Type"] = "text/x-json;charset=UTF-8";
-  response.headers["Content-Length"] = utils::stringify(out.str().size());
-  response.body = out.str().data();
-  return response;
-}
-
-
-Promise<HttpResponse> Master::http_slaves_json(const HttpRequest& request)
-{
-  LOG(INFO) << "HTTP request for '/master/slaves.json'";
-
-  std::ostringstream out;
-
-  out << "[";
-
-  foreachvalue (Slave* slave, slaves) {
-    // TODO(benh): Send all of the resources (as JSON).
-    Resources resources(slave->info.resources());
-    Resource::Scalar cpus = resources.getScalar("cpus", Resource::Scalar());
-    Resource::Scalar mem = resources.getScalar("mem", Resource::Scalar());
-    out <<
-      "{" <<
-      "\"id\":\"" << slave->id << "\"," <<
-      "\"hostname\":\"" << slave->info.hostname() << "\"," <<
-      "\"cpus\":" << cpus.value() << "," <<
-      "\"mem\":" << mem.value() <<
-      "},";
-  }
-
-  // Backup the put pointer to overwrite the last comma (hack).
-  if (slaves.size() > 0) {
-    long pos = out.tellp();
-    out.seekp(pos - 1);
-  }
-
-  out << "]";
-
-  HttpOKResponse response;
-  response.headers["Content-Type"] = "text/x-json;charset=UTF-8";
-  response.headers["Content-Length"] = utils::stringify(out.str().size());
-  response.body = out.str().data();
-  return response;
-}
-
-
-Promise<HttpResponse> Master::http_tasks_json(const HttpRequest& request)
-{
-  LOG(INFO) << "HTTP request for '/master/tasks.json'";
-
-  std::ostringstream out;
-
-  out << "[";
-
-  foreachvalue (Framework* framework, frameworks) {
-    foreachvalue (Task* task, framework->tasks) {
-      // TODO(benh): Send all of the resources (as JSON).
-      Resources resources(task->resources());
-      Resource::Scalar cpus = resources.getScalar("cpus", Resource::Scalar());
-      Resource::Scalar mem = resources.getScalar("mem", Resource::Scalar());
-      out <<
-        "{" <<
-        "\"task_id\":\"" << task->task_id() << "\"," <<
-        "\"framework_id\":\"" << task->framework_id() << "\"," <<
-        "\"slave_id\":\"" << task->slave_id() << "\"," <<
-        "\"name\":\"" << task->name() << "\"," <<
-        "\"state\":\"" << task->state() << "\"," <<
-        "\"cpus\":" << cpus.value() << "," <<
-        "\"mem\":" << mem.value() <<
-        "},";
-    }
-  }
-
-  // Backup the put pointer to overwrite the last comma (hack).
-  if (frameworks.size() > 0) {
-    long pos = out.tellp();
-    out.seekp(pos - 1);
-  }
-
-  out << "]";
-
-  HttpOKResponse response;
-  response.headers["Content-Type"] = "text/x-json;charset=UTF-8";
-  response.headers["Content-Length"] = utils::stringify(out.str().size());
-  response.body = out.str().data();
-  return response;
-}
-
-
-Promise<HttpResponse> Master::http_stats_json(const HttpRequest& request)
-{
-  LOG(INFO) << "Http request for '/master/stats.json'";
-
-  std::ostringstream out;
-
-  out << std::setprecision(10);
-
-  out <<
-    "{" <<
-    "\"uptime\":" << elapsedTime() - startTime << "," <<
-    "\"total_schedulers\":" << frameworks.size() << "," <<
-    "\"active_schedulers\":" << getActiveFrameworks().size() << "," <<
-    "\"activated_slaves\":" << slaveHostnamePorts.size() << "," <<
-    "\"connected_slaves\":" << slaves.size() << "," <<
-    "\"started_tasks\":" << stats.tasks[TASK_STARTING] << "," <<
-    "\"finished_tasks\":" << stats.tasks[TASK_FINISHED] << "," <<
-    "\"killed_tasks\":" << stats.tasks[TASK_KILLED] << "," <<
-    "\"failed_tasks\":" << stats.tasks[TASK_FAILED] << "," <<
-    "\"lost_tasks\":" << stats.tasks[TASK_LOST] << "," <<
-    "\"valid_status_updates\":" << stats.validStatusUpdates << "," <<
-    "\"invalid_status_updates\":" << stats.invalidStatusUpdates << "," <<
-    "\"valid_framework_messages\":" << stats.validFrameworkMessages << "," <<
-    "\"invalid_framework_messages\":" << stats.invalidFrameworkMessages <<
-    "}";
-
-  HttpOKResponse response;
-  response.headers["Content-Type"] = "text/x-json;charset=UTF-8";
-  response.headers["Content-Length"] = utils::stringify(out.str().size());
-  response.body = out.str().data();
-  return response;
-}
-
-
-Promise<HttpResponse> Master::http_vars(const HttpRequest& request)
-{
-  LOG(INFO) << "HTTP request for '/master/vars'";
-
-  std::ostringstream out;
-
-  out <<
-    "build_date " << build::DATE << "\n" <<
-    "build_user " << build::USER << "\n" <<
-    "build_flags " << build::FLAGS << "\n";
-
-  // Also add the configuration values.
-  foreachpair (const string& key, const string& value, conf.getMap()) {
-    out << key << " " << value << "\n";
-  }
-
-  out << std::setprecision(10);
-
-  out <<
-    "uptime " << elapsedTime() - startTime << "\n" <<
-    "total_schedulers " << frameworks.size() << "\n" <<
-    "active_schedulers " << getActiveFrameworks().size() << "\n" <<
-    "activated_slaves " << slaveHostnamePorts.size() << "\n" <<
-    "connected_slaves " << slaves.size() << "\n" <<
-    "started_tasks " << stats.tasks[TASK_STARTING] << "\n" <<
-    "finished_tasks " << stats.tasks[TASK_FINISHED] << "\n" <<
-    "killed_tasks " << stats.tasks[TASK_KILLED] << "\n" <<
-    "failed_tasks " << stats.tasks[TASK_FAILED] << "\n" <<
-    "lost_tasks " << stats.tasks[TASK_LOST] << "\n" <<
-    "valid_status_updates " << stats.validStatusUpdates << "\n" <<
-    "invalid_status_updates " << stats.invalidStatusUpdates << "\n" <<
-    "valid_framework_messages " << stats.validFrameworkMessages << "\n" <<
-    "invalid_framework_messages " << stats.invalidFrameworkMessages << "\n";
-
-  HttpOKResponse response;
-  response.headers["Content-Type"] = "text/plain";
-  response.headers["Content-Length"] = utils::stringify(out.str().size());
-  response.body = out.str().data();
-  return response;
-}
 
 }}} // namespace mesos { namespace master { namespace internal {

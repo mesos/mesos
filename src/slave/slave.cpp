@@ -23,167 +23,23 @@
 
 #include <process/timer.hpp>
 
-#include "slave.hpp"
-
 #include "common/build.hpp"
 #include "common/type_utils.hpp"
 #include "common/utils.hpp"
 
-using namespace process;
+#include "slave/slave.hpp"
+
+namespace params = std::tr1::placeholders;
 
 using std::string;
 
 using process::wait; // Necessary on some OS's to disambiguate.
 
+using std::tr1::cref;
+using std::tr1::bind;
+
 
 namespace mesos { namespace internal { namespace slave {
-
-// Information describing an executor (goes away if executor crashes).
-struct Executor
-{
-  Executor(const FrameworkID& _frameworkId,
-           const ExecutorInfo& _info,
-           const string& _directory)
-    : frameworkId(_frameworkId),
-      info(_info),
-      directory(_directory),
-      id(_info.executor_id()),
-      uuid(UUID::random()),
-      pid(UPID()),
-      shutdown(false),
-      resources(_info.resources()) {}
-
-  ~Executor()
-  {
-    // Delete the tasks.
-    foreachvalue (Task* task, launchedTasks) {
-      delete task;
-    }
-  }
-
-  Task* addTask(const TaskDescription& task)
-  {
-    // The master should enforce unique task IDs, but just in case
-    // maybe we shouldn't make this a fatal error.
-    CHECK(!launchedTasks.contains(task.task_id()));
-
-    Task *t = new Task();
-    t->mutable_framework_id()->MergeFrom(frameworkId);
-    t->mutable_executor_id()->MergeFrom(id);
-    t->set_state(TASK_STARTING);
-    t->set_name(task.name());
-    t->mutable_task_id()->MergeFrom(task.task_id());
-    t->mutable_slave_id()->MergeFrom(task.slave_id());
-    t->mutable_resources()->MergeFrom(task.resources());
-
-    launchedTasks[task.task_id()] = t;
-    resources += task.resources();
-  }
-
-  void removeTask(const TaskID& taskId)
-  {
-    // Remove the task if it's queued.
-    queuedTasks.erase(taskId);
-
-    // Update the resources if it's been launched.
-    if (launchedTasks.contains(taskId)) {
-      Task* task = launchedTasks[taskId];
-      foreach (const Resource& resource, task->resources()) {
-        resources -= resource;
-      }
-      launchedTasks.erase(taskId);
-      delete task;
-    }
-  }
-
-  void updateTaskState(const TaskID& taskId, TaskState state)
-  {
-    if (launchedTasks.contains(taskId)) {
-      launchedTasks[taskId]->set_state(state);
-    }
-  }
-
-  const ExecutorID id;
-  const ExecutorInfo info;
-
-  const FrameworkID frameworkId;
-
-  const string directory;
-
-  const UUID uuid; // Distinguishes executor instances with same ExecutorID.
-
-  UPID pid;
-
-  bool shutdown; // Indicates if executor is being shut down.
-
-  Resources resources; // Currently consumed resources.
-
-  hashmap<TaskID, TaskDescription> queuedTasks;
-  hashmap<TaskID, Task*> launchedTasks;
-};
-
-
-// Information about a framework.
-struct Framework
-{
-  Framework(const FrameworkID& _id,
-            const FrameworkInfo& _info,
-            const UPID& _pid)
-    : id(_id), info(_info), pid(_pid) {}
-
-  ~Framework() {}
-
-  Executor* createExecutor(const ExecutorInfo& executorInfo,
-                           const string& directory)
-  {
-    Executor* executor = new Executor(id, executorInfo, directory);
-    CHECK(!executors.contains(executorInfo.executor_id()));
-    executors[executorInfo.executor_id()] = executor;
-    return executor;
-  }
-
-  void destroyExecutor(const ExecutorID& executorId)
-  {
-    if (executors.contains(executorId)) {
-      Executor* executor = executors[executorId];
-      executors.erase(executorId);
-      delete executor;
-    }
-  }
-
-  Executor* getExecutor(const ExecutorID& executorId)
-  {
-    if (executors.contains(executorId)) {
-      return executors[executorId];
-    }
-
-    return NULL;
-  }
-
-  Executor* getExecutor(const TaskID& taskId)
-  {
-    foreachvalue (Executor* executor, executors) {
-      if (executor->queuedTasks.contains(taskId) ||
-          executor->launchedTasks.contains(taskId)) {
-        return executor;
-      }
-    }
-
-    return NULL;
-  }
-
-  const FrameworkID id;
-  const FrameworkInfo info;
-
-  UPID pid;
-
-  // Current running executors.
-  hashmap<ExecutorID, Executor*> executors;
-
-  // Status updates keyed by uuid.
-  hashmap<UUID, StatusUpdate> updates;
-};
-
 
 // // Represents a pending status update that has been sent and we are
 // // waiting for an acknowledgement. In pa
@@ -212,6 +68,18 @@ struct Framework
 // };
 
 
+Slave::Slave(const Resources& _resources,
+             bool _local,
+             IsolationModule* _isolationModule)
+  : ProcessBase("slave"),
+    resources(_resources),
+    local(_local),
+    isolationModule(_isolationModule)
+{
+  initialize();
+}
+
+
 Slave::Slave(const Configuration& _conf,
              bool _local,
              IsolationModule* _isolationModule)
@@ -223,18 +91,6 @@ Slave::Slave(const Configuration& _conf,
   resources =
     Resources::parse(conf.get<string>("resources", "cpus:1;mem:1024"));
 
-  initialize();
-}
-
-
-Slave::Slave(const Resources& _resources,
-             bool _local,
-             IsolationModule *_isolationModule)
-  : ProcessBase("slave"),
-    resources(_resources),
-    local(_local),
-    isolationModule(_isolationModule)
-{
   initialize();
 }
 
@@ -287,70 +143,6 @@ void Slave::registerOptions(Configurator* configurator)
       "executor_shutdown_timeout_seconds",
       "Amount of time (in seconds) to wait for an executor to shut down\n",
       EXECUTOR_SHUTDOWN_TIMEOUT_SECONDS);
-}
-
-
-Promise<state::SlaveState*> Slave::getState()
-{
-  Resources resources(this->resources);
-  Resource::Scalar cpus;
-  Resource::Scalar mem;
-  cpus.set_value(0);
-  mem.set_value(0);
-  cpus = resources.getScalar("cpus", cpus);
-  mem = resources.getScalar("mem", mem);
-
-  state::SlaveState* state = new state::SlaveState(
-      build::DATE, build::USER, id.value(),
-      cpus.value(), mem.value(), self(), master);
-
-  foreachvalue (Framework* f, frameworks) {
-    foreachvalue (Executor* e, f->executors) {
-      Resources resources(e->resources);
-      Resource::Scalar cpus;
-      Resource::Scalar mem;
-      cpus.set_value(0);
-      mem.set_value(0);
-      cpus = resources.getScalar("cpus", cpus);
-      mem = resources.getScalar("mem", mem);
-
-      // TOOD(benh): For now, we will add a state::Framework object
-      // for each executor that the framework has. Therefore, we tweak
-      // the framework ID to also include the associated executor ID
-      // to differentiate them. This is so we don't have to make very
-      // many changes to the webui right now. Note that this ID
-      // construction must be identical to what we do for directory
-      // suffix returned from Slave::getUniqueWorkDirectory.
-
-      string id = f->id.value() + "-" + e->id.value();
-
-      state::Framework* framework = new state::Framework(
-          id, f->info.name(),
-          e->info.uri(), "",
-          cpus.value(), mem.value());
-
-      state->frameworks.push_back(framework);
-
-      foreachvalue (Task* t, e->launchedTasks) {
-        Resources resources(t->resources());
-        Resource::Scalar cpus;
-        Resource::Scalar mem;
-        cpus.set_value(0);
-        mem.set_value(0);
-        cpus = resources.getScalar("cpus", cpus);
-        mem = resources.getScalar("mem", mem);
-
-        state::Task* task = new state::Task(
-            t->task_id().value(), t->name(),
-            TaskState_Name(t->state()),
-            cpus.value(), mem.value());
-
-        framework->tasks.push_back(task);
-      }
-    }
-  }
-
-  return state;
 }
 
 
@@ -444,11 +236,17 @@ void Slave::initialize()
   installMessageHandler("PING", &Slave::ping);
 
   // Install some HTTP handlers.
-  installHttpHandler("info.json", &Slave::http_info_json);
-  installHttpHandler("frameworks.json", &Slave::http_frameworks_json);
-  installHttpHandler("tasks.json", &Slave::http_tasks_json);
-  installHttpHandler("stats.json", &Slave::http_stats_json);
-  installHttpHandler("vars", &Slave::http_vars);
+  installHttpHandler(
+      "vars",
+      bind(&http::vars, cref(*this), params::_1));
+
+  installHttpHandler(
+      "stats.json",
+      bind(&http::json::stats, cref(*this), params::_1));
+
+  installHttpHandler(
+      "state.json",
+      bind(&http::json::state, cref(*this), params::_1));
 }
 
 
@@ -1231,176 +1029,6 @@ void Slave::exited()
                  << " Waiting for a new master to be elected.";
     // TODO(benh): After so long waiting for a master, commit suicide.
   }
-}
-
-
-Promise<HttpResponse> Slave::http_info_json(const HttpRequest& request)
-{
-  LOG(INFO) << "HTTP request for '/slave/info.json'";
-
-  std::ostringstream out;
-
-  out <<
-    "{" <<
-    "\"built_date\":\"" << build::DATE << "\"," <<
-    "\"build_user\":\"" << build::USER << "\"," <<
-    "\"start_time\":\"" << startTime << "\"," <<
-    "\"pid\":\"" << self() << "\"" <<
-    "}";
-
-  HttpOKResponse response;
-  response.headers["Content-Type"] = "text/x-json;charset=UTF-8";
-  response.headers["Content-Length"] = utils::stringify(out.str().size());
-  response.body = out.str().data();
-  return response;
-}
-
-
-Promise<HttpResponse> Slave::http_frameworks_json(const HttpRequest& request)
-{
-  LOG(INFO) << "HTTP request for '/slave/frameworks.json'";
-
-  std::ostringstream out;
-
-  out << "[";
-
-  foreachvalue (Framework* framework, frameworks) {
-    out <<
-      "{" <<
-      "\"id\":\"" << framework->id << "\"," <<
-      "\"name\":\"" << framework->info.name() << "\"," <<
-      "\"user\":\"" << framework->info.user() << "\""
-      "},";
-  }
-
-  // Backup the put pointer to overwrite the last comma (hack).
-  if (frameworks.size() > 0) {
-    long pos = out.tellp();
-    out.seekp(pos - 1);
-  }
-
-  out << "]";
-
-  HttpOKResponse response;
-  response.headers["Content-Type"] = "text/x-json;charset=UTF-8";
-  response.headers["Content-Length"] = utils::stringify(out.str().size());
-  response.body = out.str().data();
-  return response;
-}
-
-
-Promise<HttpResponse> Slave::http_tasks_json(const HttpRequest& request)
-{
-  LOG(INFO) << "HTTP request for '/slave/tasks.json'";
-
-  std::ostringstream out;
-
-  out << "[";
-
-  foreachvalue (Framework* framework, frameworks) {
-    foreachvalue (Executor* executor, framework->executors) {
-      foreachvalue (Task* task, executor->launchedTasks) {
-        // TODO(benh): Send all of the resources (as JSON).
-        Resources resources(task->resources());
-        Resource::Scalar cpus = resources.getScalar("cpus", Resource::Scalar());
-        Resource::Scalar mem = resources.getScalar("mem", Resource::Scalar());
-        out <<
-          "{" <<
-          "\"task_id\":\"" << task->task_id() << "\"," <<
-          "\"framework_id\":\"" << task->framework_id() << "\"," <<
-          "\"slave_id\":\"" << task->slave_id() << "\"," <<
-          "\"name\":\"" << task->name() << "\"," <<
-          "\"state\":\"" << task->state() << "\"," <<
-          "\"cpus\":" << cpus.value() << "," <<
-          "\"mem\":" << mem.value() <<
-          "},";
-      }
-    }
-  }
-
-  // Backup the put pointer to overwrite the last comma (hack).
-  if (frameworks.size() > 0) {
-    long pos = out.tellp();
-    out.seekp(pos - 1);
-  }
-
-  out << "]";
-
-  HttpOKResponse response;
-  response.headers["Content-Type"] = "text/x-json;charset=UTF-8";
-  response.headers["Content-Length"] = utils::stringify(out.str().size());
-  response.body = out.str().data();
-  return response;
-}
-
-
-Promise<HttpResponse> Slave::http_stats_json(const HttpRequest& request)
-{
-  LOG(INFO) << "Http request for '/slave/stats.json'";
-
-  std::ostringstream out;
-
-  out << std::setprecision(10);
-
-  out <<
-    "{" <<
-    "\"uptime\":" << elapsedTime() - startTime << "," <<
-    "\"total_frameworks\":" << frameworks.size() << "," <<
-    "\"started_tasks\":" << stats.tasks[TASK_STARTING] << "," <<
-    "\"finished_tasks\":" << stats.tasks[TASK_FINISHED] << "," <<
-    "\"killed_tasks\":" << stats.tasks[TASK_KILLED] << "," <<
-    "\"failed_tasks\":" << stats.tasks[TASK_FAILED] << "," <<
-    "\"lost_tasks\":" << stats.tasks[TASK_LOST] << "," <<
-    "\"valid_status_updates\":" << stats.validStatusUpdates << "," <<
-    "\"invalid_status_updates\":" << stats.invalidStatusUpdates << "," <<
-    "\"valid_framework_messages\":" << stats.validFrameworkMessages << "," <<
-    "\"invalid_framework_messages\":" << stats.invalidFrameworkMessages <<
-    "}";
-
-  HttpOKResponse response;
-  response.headers["Content-Type"] = "text/x-json;charset=UTF-8";
-  response.headers["Content-Length"] = utils::stringify(out.str().size());
-  response.body = out.str().data();
-  return response;
-}
-
-
-Promise<HttpResponse> Slave::http_vars(const HttpRequest& request)
-{
-  LOG(INFO) << "HTTP request for '/slave/vars'";
-
-  std::ostringstream out;
-
-  out <<
-    "build_date " << build::DATE << "\n" <<
-    "build_user " << build::USER << "\n" <<
-    "build_flags " << build::FLAGS << "\n";
-
-  // Also add the configuration values.
-  foreachpair (const string& key, const string& value, conf.getMap()) {
-    out << key << " " << value << "\n";
-  }
-
-  out << std::setprecision(10);
-
-  out <<
-    "uptime " << elapsedTime() - startTime << "\n" <<
-    "total_frameworks " << frameworks.size() << "\n" <<
-    "started_tasks " << stats.tasks[TASK_STARTING] << "\n" <<
-    "finished_tasks " << stats.tasks[TASK_FINISHED] << "\n" <<
-    "killed_tasks " << stats.tasks[TASK_KILLED] << "\n" <<
-    "failed_tasks " << stats.tasks[TASK_FAILED] << "\n" <<
-    "lost_tasks " << stats.tasks[TASK_LOST] << "\n" <<
-    "valid_status_updates " << stats.validStatusUpdates << "\n" <<
-    "invalid_status_updates " << stats.invalidStatusUpdates << "\n" <<
-    "valid_framework_messages " << stats.validFrameworkMessages << "\n" <<
-    "invalid_framework_messages " << stats.invalidFrameworkMessages << "\n";
-
-  HttpOKResponse response;
-  response.headers["Content-Type"] = "text/plain";
-  response.headers["Content-Length"] = utils::stringify(out.str().size());
-  response.body = out.str().data();
-  return response;
 }
 
 
