@@ -8,8 +8,10 @@
 
 #include "detector/detector.hpp"
 
-#include "master.hpp"
-#include "webui.hpp"
+#include "master/allocator.hpp"
+#include "master/simple_allocator.hpp"
+#include "master/master.hpp"
+#include "master/webui.hpp"
 
 using namespace mesos::internal;
 using namespace mesos::internal::master;
@@ -79,7 +81,9 @@ int main(int argc, char **argv)
     fatalerror("Could not chdir into %s", dirname(argv[0]));
   }
 
-  Master* master = new Master(conf);
+  Allocator* allocator = new SimpleAllocator();
+
+  Master* master = new Master(allocator, conf);
   process::spawn(master);
 
   MasterDetector* detector =
@@ -88,9 +92,10 @@ int main(int argc, char **argv)
 #ifdef MESOS_WEBUI
   webui::start(master->self(), conf);
 #endif
-  
+
   process::wait(master->self());
   delete master;
+  delete allocator;
 
   MasterDetector::destroy(detector);
 

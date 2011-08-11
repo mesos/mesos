@@ -14,13 +14,16 @@
 #include "detector/detector.hpp"
 
 #include "master/master.hpp"
+#include "master/simple_allocator.hpp"
 
 #include "slave/process_based_isolation_module.hpp"
 #include "slave/slave.hpp"
 
 using namespace mesos::internal;
 
+using mesos::internal::master::Allocator;
 using mesos::internal::master::Master;
+using mesos::internal::master::SimpleAllocator;
 
 using mesos::internal::slave::Slave;
 using mesos::internal::slave::IsolationModule;
@@ -30,6 +33,7 @@ using process::PID;
 using process::UPID;
 
 using std::map;
+using std::string;
 using std::stringstream;
 using std::vector;
 
@@ -48,6 +52,7 @@ void initialize_glog() {
 
 namespace mesos { namespace internal { namespace local {
 
+static Allocator* allocator = NULL;
 static Master* master = NULL;
 static map<IsolationModule*, Slave*> slaves;
 static MasterDetector* detector = NULL;
@@ -100,7 +105,9 @@ PID<Master> launch(const Configuration& conf,
     }
   }
 
-  master = new Master(conf);
+  allocator = new SimpleAllocator();
+
+  master = new Master(allocator, conf);
 
   PID<Master> pid = process::spawn(master);
 
@@ -127,6 +134,7 @@ void shutdown()
     process::post(master->self(), process::TERMINATE);
     process::wait(master->self());
     delete master;
+    delete allocator;
     master = NULL;
 
     // TODO(benh): Ugh! Because the isolation module calls back into the

@@ -8,17 +8,19 @@ namespace mesos { namespace internal { namespace master {
 class Allocator {
 public:
   virtual ~Allocator() {}
-  
+
+  virtual void initialize(Master* _master) {}
+
   virtual void frameworkAdded(Framework *framework) {}
-  
+
   virtual void frameworkRemoved(Framework *framework) {}
-  
+
   virtual void slaveAdded(Slave *slave) {}
-  
+
   virtual void slaveRemoved(Slave *slave) {}
-  
+
   virtual void taskAdded(Task *task) {}
-  
+
   virtual void taskRemoved(Task *task, TaskRemovalReason reason) {}
 
   virtual void offerReturned(Offer* offer,

@@ -9,6 +9,7 @@
 
 #include "master/frameworks_manager.hpp"
 #include "master/master.hpp"
+#include "master/simple_allocator.hpp"
 
 #include <process/dispatch.hpp>
 #include <process/future.hpp>
@@ -25,6 +26,7 @@ using mesos::internal::master::FrameworksManager;
 using mesos::internal::master::FrameworksStorage;
 
 using mesos::internal::master::Master;
+using mesos::internal::master::SimpleAllocator;
 
 using mesos::internal::slave::Slave;
 
@@ -48,7 +50,8 @@ TEST(MasterTest, TaskRunning)
 {
   ASSERT_TRUE(GTEST_IS_THREADSAFE);
 
-  Master m;
+  SimpleAllocator a;
+  Master m(&a);
   PID<Master> master = process::spawn(&m);
 
   MockExecutor exec;
@@ -136,7 +139,8 @@ TEST(MasterTest, KillTask)
 {
   ASSERT_TRUE(GTEST_IS_THREADSAFE);
 
-  Master m;
+  SimpleAllocator a;
+  Master m(&a);
   PID<Master> master = process::spawn(&m);
 
   MockExecutor exec;
@@ -236,7 +240,8 @@ TEST(MasterTest, FrameworkMessage)
 {
   ASSERT_TRUE(GTEST_IS_THREADSAFE);
 
-  Master m;
+  SimpleAllocator a;
+  Master m(&a);
   PID<Master> master = process::spawn(&m);
 
   MockExecutor exec;
@@ -360,7 +365,8 @@ TEST(MasterTest, MultipleExecutors)
 {
   ASSERT_TRUE(GTEST_IS_THREADSAFE);
 
-  Master m;
+  SimpleAllocator a;
+  Master m(&a);
   PID<Master> master = process::spawn(&m);
 
   MockExecutor exec1;

@@ -5,6 +5,7 @@
 
 #include "configurator/configurator.hpp"
 
+#include "master/allocator.hpp"
 #include "master/master.hpp"
 
 

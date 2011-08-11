@@ -64,9 +64,7 @@ void ProcessBasedIsolationModule::launchExecutor(
     const string& directory,
     const Resources& resources)
 {
-  if (!initialized) {
-    LOG(FATAL) << "Cannot launch executors before initialization!";
-  }
+  CHECK(initialized) << "Cannot launch executors before initialization!";
 
   const ExecutorID& executorId = executorInfo.executor_id();
 
@@ -110,6 +108,7 @@ void ProcessBasedIsolationModule::killExecutor(
     const FrameworkID& frameworkId,
     const ExecutorID& executorId)
 {
+  CHECK(initialized) << "Cannot kill executors before initialization!";
   if (!pgids.contains(frameworkId) ||
       !pgids[frameworkId].contains(executorId)) {
     LOG(ERROR) << "ERROR! Asked to kill an unknown executor!";
@@ -150,6 +149,7 @@ void ProcessBasedIsolationModule::resourcesChanged(
     const ExecutorID& executorId,
     const Resources& resources)
 {
+  CHECK(initialized) << "Cannot do resourcesChanged before initialization!";
   // Do nothing; subclasses may override this.
 }
 

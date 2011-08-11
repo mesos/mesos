@@ -157,15 +157,17 @@ struct SlaveReregistrar
 };
 
 
-Master::Master()
-  : ProcessBase("master")
+Master::Master(Allocator* _allocator)
+  : ProcessBase("master"),
+    allocator(_allocator)
 {
   initialize();
 }
 
 
-Master::Master(const Configuration& conf)
+Master::Master(Allocator* _allocator, const Configuration& conf)
   : ProcessBase("master"),
+    allocator(_allocator),
     conf(conf)
 {
   initialize();
@@ -190,20 +192,12 @@ Master::~Master()
   wait(slavesManager);
 
   delete slavesManager;
-
-  delete allocator;
 }
 
 
 void Master::registerOptions(Configurator* configurator)
 {
   SlavesManager::registerOptions(configurator);
-
-  configurator->addOption<string>(
-      "allocator",
-      'a',
-      "Allocation module name",
-      "simple");
 
   configurator->addOption<bool>(
       "root_submissions",
@@ -261,15 +255,7 @@ void Master::operator () ()
   slavesManager = new SlavesManager(conf, self());
   spawn(slavesManager);
 
-  // Create the allocator (we do this after the constructor because it
-  // leaks 'this').
-  string type = conf.get("allocator", "simple");
-  LOG(INFO) << "Creating \"" << type << "\" allocator";
-  allocator = AllocatorFactory::instantiate(type, this);
-
-  if (!allocator) {
-    LOG(FATAL) << "Unrecognized allocator type: " << type;
-  }
+  allocator->initialize(this);
 
   // Start our timer ticks.
   delay(1.0, self(), &Master::timerTick);

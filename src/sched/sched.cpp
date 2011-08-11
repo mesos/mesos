@@ -728,5 +728,4 @@ int MesosSchedulerDriver::requestResources(
   dispatch(process, &SchedulerProcess::requestResources, requests);
 
   return 0;
-
 }

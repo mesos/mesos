@@ -41,8 +41,8 @@ struct Offer;
 class Master : public ProtobufProcess<Master>
 {
 public:
-  Master();
-  Master(const Configuration& conf);
+  Master(Allocator* _allocator);
+  Master(Allocator* _allocator, const Configuration& conf);
 
   virtual ~Master();
 

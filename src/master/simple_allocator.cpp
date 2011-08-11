@@ -16,8 +16,16 @@ using std::sort;
 using std::vector;
 
 
+void SimpleAllocator::initialize(Master* _master)
+{
+  master = _master;
+  initialized = true;
+}
+
+
 void SimpleAllocator::frameworkAdded(Framework* framework)
 {
+  CHECK(initialized) << "Cannot add framework before being initialized!";
   LOG(INFO) << "Added " << framework;
   makeNewOffers();
 }
@@ -25,6 +33,7 @@ void SimpleAllocator::frameworkAdded(Framework* framework)
 
 void SimpleAllocator::frameworkRemoved(Framework* framework)
 {
+  CHECK(initialized) << "Cannot remove framework before initialization!";
   LOG(INFO) << "Removed " << framework;
   foreachpair (Slave* s, unordered_set<Framework*>& refs, refusers)
     refs.erase(framework);
@@ -36,6 +45,7 @@ void SimpleAllocator::frameworkRemoved(Framework* framework)
 
 void SimpleAllocator::slaveAdded(Slave* slave)
 {
+  CHECK(initialized) << "Cannot add slave before initialization!";
   LOG(INFO) << "Added " << slave << " with "
             << Resources(slave->info.resources());
   refusers[slave] = unordered_set<Framework*>();
@@ -46,6 +56,7 @@ void SimpleAllocator::slaveAdded(Slave* slave)
 
 void SimpleAllocator::slaveRemoved(Slave* slave)
 {
+  CHECK(initialized) << "Cannot remove slave before initialization!";
   LOG(INFO) << "Removed " << slave;
   totalResources -= slave->info.resources();
   refusers.erase(slave);
@@ -54,6 +65,7 @@ void SimpleAllocator::slaveRemoved(Slave* slave)
 
 void SimpleAllocator::taskRemoved(Task* task, TaskRemovalReason reason)
 {
+  CHECK(initialized) << "Cannot remove task before initialization!";
   LOG(INFO) << "Removed " << task;
   // Remove all refusers from this slave since it has more resources free
   Slave* slave = master->getSlave(task->slave_id());
@@ -70,6 +82,7 @@ void SimpleAllocator::offerReturned(Offer* offer,
                                     OfferReturnReason reason,
                                     const vector<SlaveResources>& resLeft)
 {
+  CHECK(initialized) << "Cannot return offer before initialization!";
   LOG(INFO) << "Offer returned: " << offer << ", reason = " << reason;
 
   // If this offer returned due to the framework replying, add it to refusers.
@@ -102,6 +115,7 @@ void SimpleAllocator::offerReturned(Offer* offer,
 
 void SimpleAllocator::offersRevived(Framework* framework)
 {
+  CHECK(initialized) << "Cannot remove filters before initialization!";
   LOG(INFO) << "Filters removed for " << framework;
   makeNewOffers();
 }
@@ -109,6 +123,7 @@ void SimpleAllocator::offersRevived(Framework* framework)
 
 void SimpleAllocator::timerTick()
 {
+  CHECK(initialized) << "Cannot run timer tick before initialization!";
   // TODO: Is this necessary?
   makeNewOffers();
 }
@@ -161,6 +176,7 @@ struct DominantShareComparator
 
 vector<Framework*> SimpleAllocator::getAllocationOrdering()
 {
+  CHECK(initialized) << "Cannot get allocation ordering before initialization!";
   vector<Framework*> frameworks = master->getActiveFrameworks();
   DominantShareComparator comp(totalResources);
   sort(frameworks.begin(), frameworks.end(), comp);
@@ -171,6 +187,7 @@ vector<Framework*> SimpleAllocator::getAllocationOrdering()
 void SimpleAllocator::makeNewOffers()
 {
   // TODO: Create a method in master so that we don't return the whole list of slaves
+  CHECK(initialized) << "Cannot make new offers before initialization!";
   vector<Slave*> slaves = master->getActiveSlaves();
   makeNewOffers(slaves);
 }
@@ -178,6 +195,7 @@ void SimpleAllocator::makeNewOffers()
 
 void SimpleAllocator::makeNewOffers(Slave* slave)
 {
+  CHECK(initialized) << "Cannot make new offers before initialization!";
   vector<Slave*> slaves;
   slaves.push_back(slave);
   makeNewOffers(slaves);
@@ -186,6 +204,7 @@ void SimpleAllocator::makeNewOffers(Slave* slave)
 
 void SimpleAllocator::makeNewOffers(const vector<Slave*>& slaves)
 {
+  CHECK(initialized) << "Cannot make new offers before initialization!";
   // Get an ordering of frameworks to send offers to
   vector<Framework*> ordering = getAllocationOrdering();
   if (ordering.size() == 0) {
@@ -263,5 +282,6 @@ void SimpleAllocator::makeNewOffers(const vector<Slave*>& slaves)
 void SimpleAllocator::request(const FrameworkID& frameworkId,
 		                      const vector<ResourceRequest>& requests)
 {
+  CHECK(initialized) << "Cannot request resources before initialization!";
   LOG(INFO) << "Received resource request from framework " << frameworkId;
 }

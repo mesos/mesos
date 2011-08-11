@@ -18,24 +18,28 @@ class SimpleAllocator : public Allocator
   Master* master;
 
   Resources totalResources;
-  
+
   // Remember which frameworks refused each slave "recently"; this is cleared
   // when the slave's free resources go up or when everyone has refused it
   boost::unordered_map<Slave*, boost::unordered_set<Framework*> > refusers;
-  
+
+  bool initialized;
+
 public:
-  SimpleAllocator(Master* _master): master(_master) {}
-  
+  SimpleAllocator(): initialized(false) {}
+
   ~SimpleAllocator() {}
-  
+
+  virtual void initialize(Master* _master);
+
   virtual void frameworkAdded(Framework* framework);
-  
+
   virtual void frameworkRemoved(Framework* framework);
-  
+
   virtual void slaveAdded(Slave* slave);
-  
+
   virtual void slaveRemoved(Slave* slave);
-  
+
   virtual void taskRemoved(Task* task, TaskRemovalReason reason);
 
   virtual void offerReturned(Offer* offer,

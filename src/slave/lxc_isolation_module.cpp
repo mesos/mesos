@@ -114,9 +114,7 @@ void LxcIsolationModule::launchExecutor(
     const string& directory,
     const Resources& resources)
 {
-  if (!initialized) {
-    LOG(FATAL) << "Cannot launch executors before initialization!";
-  }
+  CHECK(initialized) << "Cannot launch executors before initialization!";
 
   const ExecutorID& executorId = executorInfo.executor_id();
 
@@ -238,6 +236,7 @@ void LxcIsolationModule::killExecutor(
     const FrameworkID& frameworkId,
     const ExecutorID& executorId)
 {
+  CHECK(initialized) << "Cannot kill executors before initialization!";
   if (!infos.contains(frameworkId) ||
       !infos[frameworkId].contains(executorId)) {
     LOG(ERROR) << "ERROR! Asked to kill an unknown executor!";
@@ -273,6 +272,7 @@ void LxcIsolationModule::resourcesChanged(
     const ExecutorID& executorId,
     const Resources& resources)
 {
+  CHECK(initialized) << "Cannot change resources before initialization!";
   if (!infos.contains(frameworkId) ||
       !infos[frameworkId].contains(executorId)) {
     LOG(ERROR) << "ERROR! Asked to update resources for an unknown executor!";
