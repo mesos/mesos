@@ -244,3 +244,141 @@ TEST(MasterTest, ResourcesReofferedAfterBadResponse)
 
   local::shutdown();
 }
+
+
+TEST(MasterTest, InitialResourceRequestByScheduler)
+{
+  ASSERT_TRUE(GTEST_IS_THREADSAFE);
+
+  MockScheduler sched;
+  MockAllocator allocator;
+
+  EXPECT_CALL(allocator, initialize(_))
+    .WillOnce(Return());
+
+  EXPECT_CALL(allocator, timerTick())
+    .WillRepeatedly(Return());
+
+  EXPECT_CALL(allocator, frameworkAdded(_))
+    .WillOnce(Return());
+
+  EXPECT_CALL(allocator, frameworkRemoved(_))
+    .WillOnce(Return());
+
+  EXPECT_CALL(allocator, slaveAdded(_))
+      .WillOnce(Return());
+
+  EXPECT_CALL(allocator, slaveRemoved(_))
+    .WillOnce(Return());
+
+  PID<Master> master =
+      local::launch(1, 2, 1 * Gigabyte, false, false, &allocator);
+
+  MesosSchedulerDriver driver(&sched, master);
+
+  trigger registeredCall;
+  trigger requestResourceCall;
+
+  EXPECT_CALL(sched, getFrameworkName(&driver))
+    .WillOnce(Return(""));
+
+  EXPECT_CALL(sched, getExecutorInfo(&driver))
+    .WillOnce(Return(DEFAULT_EXECUTOR_INFO));
+
+  EXPECT_CALL(sched, registered(&driver, _))
+    .WillOnce(Trigger(&registeredCall));
+
+  driver.start();
+
+  WAIT_UNTIL(registeredCall);
+
+  vector<ResourceRequest> requestsSent;
+  vector<ResourceRequest> requestsReceived;
+  ResourceRequest request;
+  request.mutable_slave_id()->set_value("test");
+  requestsSent.push_back(request);
+
+  EXPECT_CALL(allocator, request(_, _))
+    .WillOnce(DoAll(SaveArg<1>(&requestsReceived),
+                    Trigger(&requestResourceCall)));
+
+  driver.requestResources(requestsSent);
+
+  WAIT_UNTIL(requestResourceCall);
+
+  EXPECT_EQ(requestsSent.size(), requestsReceived.size());
+  EXPECT_NE(0, requestsReceived.size());
+  EXPECT_EQ(request.slave_id(), requestsReceived[0].slave_id());
+
+  driver.stop();
+  driver.join();
+
+  local::shutdown();
+}
+
+
+TEST(MasterTest, EmptyResourceRequestByScheduler)
+{
+  ASSERT_TRUE(GTEST_IS_THREADSAFE);
+
+  MockScheduler sched;
+  MockAllocator allocator;
+
+  EXPECT_CALL(allocator, initialize(_))
+    .WillOnce(Return());
+
+  EXPECT_CALL(allocator, timerTick())
+    .WillRepeatedly(Return());
+
+  EXPECT_CALL(allocator, frameworkAdded(_))
+    .WillOnce(Return());
+
+  EXPECT_CALL(allocator, frameworkRemoved(_))
+    .WillOnce(Return());
+
+  EXPECT_CALL(allocator, slaveAdded(_))
+      .WillOnce(Return());
+
+  EXPECT_CALL(allocator, slaveRemoved(_))
+    .WillOnce(Return());
+
+  PID<Master> master =
+      local::launch(1, 2, 1 * Gigabyte, false, false, &allocator);
+
+  MesosSchedulerDriver driver(&sched, master);
+
+  trigger registeredCall;
+  trigger requestResourceCall;
+
+  EXPECT_CALL(sched, getFrameworkName(&driver))
+    .WillOnce(Return(""));
+
+  EXPECT_CALL(sched, getExecutorInfo(&driver))
+    .WillOnce(Return(DEFAULT_EXECUTOR_INFO));
+
+  EXPECT_CALL(sched, registered(&driver, _))
+    .WillOnce(Trigger(&registeredCall));
+
+  driver.start();
+
+  WAIT_UNTIL(registeredCall);
+
+  vector<ResourceRequest> requestsReceived;
+
+  EXPECT_CALL(allocator, request(_, _))
+    .WillOnce(DoAll(SaveArg<1>(&requestsReceived),
+                    Trigger(&requestResourceCall)));
+
+  driver.requestResources(vector<ResourceRequest>());
+
+  WAIT_UNTIL(requestResourceCall);
+
+  EXPECT_EQ(0, requestsReceived.size());
+
+  driver.stop();
+  driver.join();
+
+  local::shutdown();
+}
+
+

@@ -73,7 +73,8 @@ PID<Master> launch(int numSlaves,
                    int32_t cpus,
                    int64_t mem,
                    bool initLogging,
-                   bool quiet)
+                   bool quiet,
+                   Allocator* _allocator)
 {
   Configuration conf;
   conf.set("slaves", "*");
@@ -84,12 +85,13 @@ PID<Master> launch(int numSlaves,
   out << "cpus:" << cpus << ";" << "mem:" << mem;
   conf.set("resources", out.str());
 
-  return launch(conf, initLogging);
+  return launch(conf, initLogging, _allocator);
 }
 
 
 PID<Master> launch(const Configuration& conf,
-                   bool initLogging)
+                   bool initLogging,
+                   Allocator* _allocator)
 {
   int numSlaves = conf.get<int>("num_slaves", 1);
   bool quiet = conf.get<bool>("quiet", false);
@@ -105,9 +107,17 @@ PID<Master> launch(const Configuration& conf,
     }
   }
 
-  allocator = new SimpleAllocator();
+  if(_allocator == NULL) {
+    // Create default allocator, save it for deleting later.
+    _allocator = allocator = new SimpleAllocator();
+  }
+  else {
+    // TODO(benh): Figure out the behavior of allocator pointer and remove the
+    // else block.
+    allocator = NULL;
+  }
 
-  master = new Master(allocator, conf);
+  master = new Master(_allocator, conf);
 
   PID<Master> pid = process::spawn(master);
 

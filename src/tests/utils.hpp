@@ -6,6 +6,8 @@
 #include <map>
 #include <string>
 
+#include <master/allocator.hpp>
+#include <master/master.hpp>
 #include <mesos/executor.hpp>
 #include <mesos/scheduler.hpp>
 
@@ -107,6 +109,26 @@ public:
   MOCK_METHOD2(frameworkMessage, void(ExecutorDriver*, const std::string&));
   MOCK_METHOD1(shutdown, void(ExecutorDriver*));
   MOCK_METHOD3(error, void(ExecutorDriver*, int, const std::string&));
+};
+
+
+class MockAllocator : public master::Allocator
+{
+public:
+  MOCK_METHOD1(initialize, void(master::Master*));
+  MOCK_METHOD1(frameworkAdded, void(master::Framework*));
+  MOCK_METHOD1(frameworkRemoved, void(master::Framework*));
+  MOCK_METHOD1(slaveAdded, void(master::Slave*));
+  MOCK_METHOD1(slaveRemoved, void(master::Slave*));
+  MOCK_METHOD1(taskAdded, void(Task*));
+  MOCK_METHOD2(taskRemoved, void(Task*, master::TaskRemovalReason));
+  MOCK_METHOD3(offerReturned, void(master::Offer*,
+                                   master::OfferReturnReason,
+                                   const std::vector<master::SlaveResources>&));
+  MOCK_METHOD1(offersRevived, void(master::Framework*));
+  MOCK_METHOD2(request, void(const FrameworkID&,
+                             const std::vector<ResourceRequest>&));
+  MOCK_METHOD0(timerTick, void());
 };
 
 
