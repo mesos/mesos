@@ -1,5 +1,7 @@
 # Makefile.
 
+TOP := $(realpath $(dir $(lastword $(MAKEFILE_LIST))))
+
 SHELL = '/bin/sh'
 
 SRCDIR = @srcdir@
@@ -109,7 +111,7 @@ TESTS_OBJ = main.o utils.o master_tests.o resource_offer_tests.o	\
 	    log_tests.o resources_tests.o uuid_tests.o			\
 	    external_tests.o sample_frameworks_tests.o			\
 	    configurator_tests.o string_utils_tests.o multimap_tests.o	\
-	    protobuf_io_tests.o lxc_isolation_tests.o
+	    protobuf_io_tests.o lxc_isolation_tests.o utils_tests.o
 
 ALLTESTS_EXE = $(BINDIR)/tests/all-tests
 
@@ -151,7 +153,10 @@ $(GMOCK_LIB): $(GTEST_OBJ) $(GMOCK_OBJ)
 	$(AR) rcs $@ $^
 
 $(TESTS_OBJ): %.o: $(SRCDIR)/%.cpp
-	$(CXX) -c $(CXXFLAGS) -o $@ $<
+	$(CXX) -c $(CXXFLAGS) \
+	  -DROOT_DIR=\"$(TOP)/@top_srcdir@\" \
+	  -DBUILD_DIR=\"$(TOP)/@top_builddir@\" \
+	  -o $@ $<
 
 $(ALLTESTS_EXE): $(TESTS_OBJ) $(GMOCK_LIB) $(SCHED_LIB) $(EXEC_LIB) | $(BINDIR)/tests
 	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)

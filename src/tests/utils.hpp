@@ -25,9 +25,15 @@
 namespace mesos { namespace internal { namespace test {
 
 /**
+ * The location of the Mesos project root directory.  Used by tests to locate
+ * various frameworks and binaries.  Initialized in main.cpp.
+ */
+extern std::string mesosRoot;
+
+
+/**
  * The location where Mesos is installed, used by tests to locate various
- * frameworks and binaries. For now it points to the src directory, until
- * we clean up our directory structure a little. Initialized in main.cpp.
+ * frameworks and binaries.  Initialized in main.cpp.
  */
 extern std::string mesosHome;
 

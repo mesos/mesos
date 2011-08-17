@@ -293,6 +293,10 @@ inline bool mkdir(const std::string& directory)
 }
 
 
+// Recursively deletes a directory akin to: 'rm -r'.
+bool rmdir(const std::string& directory);
+
+
 // Changes the specified file's user and group ownership to that of
 // the specified user..
 inline bool chown(const std::string& user, const std::string& file)
