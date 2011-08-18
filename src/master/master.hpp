@@ -487,7 +487,7 @@ struct Framework
   hashmap<TaskID, Task*> tasks;
   hashset<Offer*> offers; // Active offers for framework.
 
-  Resources resources; // Total resources we own (tasks + offers + executors)
+  Resources resources; // Total resources we own (tasks + offers + executors).
   hashmap<SlaveID, hashmap<ExecutorID, ExecutorInfo> > executors;
 
   // Contains a time of unfiltering for each slave we've filtered,

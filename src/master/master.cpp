@@ -576,6 +576,7 @@ void Master::reregisterFramework(const FrameworkID& frameworkId,
             framework->addTask(task);
             // Also add the task's executor for resource accounting.
             if (!framework->hasExecutor(slave->id, task->executor_id())) {
+              CHECK(slave->hasExecutor(framework->id, task->executor_id()));
               const ExecutorInfo& executorInfo =
                 slave->executors[framework->id][task->executor_id()];
               framework->addExecutor(slave->id, executorInfo);
@@ -1284,6 +1285,7 @@ void Master::launchTask(Framework* framework, const TaskDescription& task)
 
   if (!slave->hasExecutor(framework->id, executorInfo.executor_id())) {
     slave->addExecutor(framework->id, executorInfo);
+    CHECK(!framework->hasExecutor(slave->id, executorInfo.executor_id()));
     framework->addExecutor(slave->id, executorInfo);
   }
 
@@ -1399,11 +1401,11 @@ void Master::removeFramework(Framework* framework)
   }
 
   // Remove the framework's executors for correct resource accounting.
-  foreachkey (const SlaveID& sid, framework->executors) {
-    Slave* slave = getSlave(sid);
+  foreachkey (const SlaveID& slaveId, framework->executors) {
+    Slave* slave = getSlave(slaveId);
     if (slave != NULL) {
-      foreachkey (const ExecutorID& eid, framework->executors[sid]) {
-        slave->removeExecutor(framework->id, eid);
+      foreachkey (const ExecutorID& executorId, framework->executors[slaveId]) {
+        slave->removeExecutor(framework->id, executorId);
       }
     }
   }
@@ -1469,12 +1471,11 @@ void Master::readdSlave(Slave* slave,
 	if (!slave->hasExecutor(task.framework_id(), task.executor_id())) {
 	  slave->addExecutor(task.framework_id(), executorInfo);
 	}
-        // Also add it to the framework if it has re-registered with us
+        // Also add it to the framework if it has re-registered with us.
         Framework* framework = getFramework(task.framework_id());
         if (framework != NULL) {
-          if (!framework->hasExecutor(slave->id, task.executor_id())) {
-            framework->addExecutor(slave->id, executorInfo);
-          }
+          CHECK(!framework->hasExecutor(slave->id, task.executor_id()));
+          framework->addExecutor(slave->id, executorInfo);
         }
 	break;
       }
@@ -1554,12 +1555,12 @@ void Master::removeSlave(Slave* slave)
     removeOffer(offer, ORR_SLAVE_LOST, otherSlaveResources);
   }
 
-  // Remove executors from the slave for proper resource accounting
-  foreachkey (const FrameworkID& fid, slave->executors) {
-    Framework* framework = getFramework(fid);
+  // Remove executors from the slave for proper resource accounting.
+  foreachkey (const FrameworkID& frameworkId, slave->executors) {
+    Framework* framework = getFramework(frameworkId);
     if (framework != NULL) {
-      foreachkey (const ExecutorID& eid, slave->executors[fid]) {
-        framework->removeExecutor(slave->id, eid);
+      foreachkey (const ExecutorID& executorId, slave->executors[frameworkId]) {
+        framework->removeExecutor(slave->id, executorId);
       }
     }
   }
