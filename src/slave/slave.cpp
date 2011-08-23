@@ -262,6 +262,8 @@ void Slave::operator () ()
   info.mutable_resources()->MergeFrom(resources);
 
   // Spawn and initialize the isolation module.
+  // TODO(benh): Seems like the isolation module should really be
+  // spawned before being passed to the slave.
   spawn(isolationModule);
   dispatch(isolationModule,
            &IsolationModule::initialize,

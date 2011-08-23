@@ -10,7 +10,7 @@ class Timeout
 public:
   Timeout(double seconds)
   {
-    timeout = Clock::elapsed() + seconds;
+    timeout = Clock::now() + seconds;
   }
 
   Timeout(const Timeout& that)
@@ -29,14 +29,14 @@ public:
 
   Timeout& operator = (double seconds)
   {
-    timeout = Clock::elapsed() + seconds;
+    timeout = Clock::now() + seconds;
     return *this;
   }
 
   // Returns the number of seconds reamining.
   double remaining() const
   {
-    double seconds = timeout - Clock::elapsed();
+    double seconds = timeout - Clock::now();
     return seconds > 0 ? seconds : 0;
   }
 

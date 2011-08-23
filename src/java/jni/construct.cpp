@@ -1,5 +1,7 @@
 #include <jni.h>
 
+#include <glog/logging.h>
+
 #include <google/protobuf/io/zero_copy_stream_impl.h>
 
 #include <string>
@@ -24,7 +26,8 @@ T parse(const void* data, int size)
   // will not have this luxury.
   google::protobuf::io::ArrayInputStream stream(data, size);
   T t;
-  t.ParseFromZeroCopyStream(&stream);
+  bool parsed = t.ParseFromZeroCopyStream(&stream);
+  CHECK(parsed) << "Unexpected failure while parsing protobuf";
   return t;
 }
 
@@ -89,25 +92,25 @@ map<string, string> construct(JNIEnv *env, jobject jobj)
 }
 
 
-// template <>
-// Params construct(JNIEnv* env, jobject jobj)
-// {
-//   jclass clazz = env->GetObjectClass(jobj);
+template <>
+Filters construct(JNIEnv* env, jobject jobj)
+{
+  jclass clazz = env->GetObjectClass(jobj);
 
-//   // byte[] data = obj.toByteArray();
-//   jmethodID toByteArray = env->GetMethodID(clazz, "toByteArray", "()[B");
+  // byte[] data = obj.toByteArray();
+  jmethodID toByteArray = env->GetMethodID(clazz, "toByteArray", "()[B");
 
-//   jbyteArray jdata = (jbyteArray) env->CallObjectMethod(jobj, toByteArray);
+  jbyteArray jdata = (jbyteArray) env->CallObjectMethod(jobj, toByteArray);
 
-//   jbyte* data = env->GetByteArrayElements(jdata, NULL);
-//   jsize length = env->GetArrayLength(jdata);
+  jbyte* data = env->GetByteArrayElements(jdata, NULL);
+  jsize length = env->GetArrayLength(jdata);
 
-//   const Params& params = parse<Params>(data, length);
+  const Filters& filters = parse<Filters>(data, length);
 
-//   env->ReleaseByteArrayElements(jdata, data, 0);
+  env->ReleaseByteArrayElements(jdata, data, 0);
 
-//   return params;
-// }
+  return filters;
+}
 
 
 template <>

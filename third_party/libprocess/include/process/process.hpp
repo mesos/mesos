@@ -38,7 +38,7 @@ struct Message {
 
 class Clock {
 public:
-  static double elapsed();
+  static double now();
   static void pause();
   static void resume();
   static void advance(double secs);

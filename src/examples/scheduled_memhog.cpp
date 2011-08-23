@@ -91,16 +91,15 @@ public:
     startTime = time(0);
   }
 
-  virtual void resourceOffer(SchedulerDriver* driver,
-                             const OfferID& offerId,
-                             const vector<SlaveOffer>& offers)
+  virtual void resourceOffers(SchedulerDriver* driver,
+                              const vector<Offer>& offers)
   {
     time_t now = time(0);
     double curTime = difftime(now, startTime);
-    vector<TaskDescription> toLaunch;
-    vector<SlaveOffer>::const_iterator iterator = offers.begin();
+    vector<Offer>::const_iterator iterator = offers.begin();
     for (; iterator != offers.end(); ++iterator) {
-      const SlaveOffer& offer = *iterator;
+      const Offer& offer = *iterator;
+
       // Lookup resources we care about.
       // TODO(benh): It would be nice to ultimately have some helper
       // functions for looking up resources.
@@ -119,6 +118,7 @@ public:
       }
 
       // Launch tasks.
+      vector<TaskDescription> toLaunch;
       if (tasksLaunched < tasks.size() &&
           cpus >= 1 &&
           curTime >= tasks[tasksLaunched].launchTime &&
@@ -153,9 +153,9 @@ public:
 
         toLaunch.push_back(task);
       }
-    }
 
-    driver->replyToOffer(offerId, toLaunch);
+      driver->replyToOffer(offer.id(), toLaunch);
+    }
   }
 
   virtual void offerRescinded(SchedulerDriver* driver,

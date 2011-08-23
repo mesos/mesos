@@ -30,9 +30,8 @@ public class TestExceptionFramework {
     public void registered(SchedulerDriver driver, FrameworkID frameworkId) {}
 
     @Override
-    public void resourceOffer(SchedulerDriver driver,
-                              OfferID offerId,
-                              List<SlaveOffer> offers) {}
+    public void resourceOffers(SchedulerDriver driver,
+                               List<Offer> offers) {}
 
     @Override
     public void offerRescinded(SchedulerDriver driver, OfferID offerId) {}

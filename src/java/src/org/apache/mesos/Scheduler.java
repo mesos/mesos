@@ -12,7 +12,7 @@ public interface Scheduler {
   public String getFrameworkName(SchedulerDriver driver);
   public ExecutorInfo getExecutorInfo(SchedulerDriver driver);
   public void registered(SchedulerDriver driver, FrameworkID frameworkId);
-  public void resourceOffer(SchedulerDriver driver, OfferID offerId, List<SlaveOffer> offers);
+  public void resourceOffers(SchedulerDriver driver, List<Offer> offers);
   public void offerRescinded(SchedulerDriver driver, OfferID offerId);
   public void statusUpdate(SchedulerDriver driver, TaskStatus status);
   public void frameworkMessage(SchedulerDriver driver, SlaveID slaveId, ExecutorID executorId, byte[] data);

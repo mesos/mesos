@@ -80,11 +80,10 @@ TEST(MasterTest, TaskRunning)
   MockScheduler sched;
   MesosSchedulerDriver driver(&sched, master);
 
-  OfferID offerId;
-  vector<SlaveOffer> offers;
+  vector<Offer> offers;
   TaskStatus status;
 
-  trigger resourceOfferCall, statusUpdateCall;
+  trigger resourceOffersCall, statusUpdateCall;
 
   EXPECT_CALL(sched, getFrameworkName(&driver))
     .WillOnce(Return(""));
@@ -95,9 +94,9 @@ TEST(MasterTest, TaskRunning)
   EXPECT_CALL(sched, registered(&driver, _))
     .Times(1);
 
-  EXPECT_CALL(sched, resourceOffer(&driver, _, _))
-    .WillOnce(DoAll(SaveArg<1>(&offerId), SaveArg<2>(&offers),
-                    Trigger(&resourceOfferCall)))
+  EXPECT_CALL(sched, resourceOffers(&driver, _))
+    .WillOnce(DoAll(SaveArg<1>(&offers),
+                    Trigger(&resourceOffersCall)))
     .WillRepeatedly(Return());
 
   EXPECT_CALL(sched, statusUpdate(&driver, _))
@@ -105,7 +104,7 @@ TEST(MasterTest, TaskRunning)
 
   driver.start();
 
-  WAIT_UNTIL(resourceOfferCall);
+  WAIT_UNTIL(resourceOffersCall);
 
   EXPECT_NE(0, offers.size());
 
@@ -118,7 +117,7 @@ TEST(MasterTest, TaskRunning)
   vector<TaskDescription> tasks;
   tasks.push_back(task);
 
-  driver.replyToOffer(offerId, tasks);
+  driver.replyToOffer(offers[0].id(), tasks);
 
   WAIT_UNTIL(statusUpdateCall);
 
@@ -174,11 +173,10 @@ TEST(MasterTest, KillTask)
   MockScheduler sched;
   MesosSchedulerDriver driver(&sched, master);
 
-  OfferID offerId;
-  vector<SlaveOffer> offers;
+  vector<Offer> offers;
   TaskStatus status;
 
-  trigger resourceOfferCall, statusUpdateCall;
+  trigger resourceOffersCall, statusUpdateCall;
 
   EXPECT_CALL(sched, getFrameworkName(&driver))
     .WillOnce(Return(""));
@@ -189,9 +187,9 @@ TEST(MasterTest, KillTask)
   EXPECT_CALL(sched, registered(&driver, _))
     .Times(1);
 
-  EXPECT_CALL(sched, resourceOffer(&driver, _, _))
-    .WillOnce(DoAll(SaveArg<1>(&offerId), SaveArg<2>(&offers),
-                    Trigger(&resourceOfferCall)))
+  EXPECT_CALL(sched, resourceOffers(&driver, _))
+    .WillOnce(DoAll(SaveArg<1>(&offers),
+                    Trigger(&resourceOffersCall)))
     .WillRepeatedly(Return());
 
   EXPECT_CALL(sched, statusUpdate(&driver, _))
@@ -199,7 +197,7 @@ TEST(MasterTest, KillTask)
 
   driver.start();
 
-  WAIT_UNTIL(resourceOfferCall);
+  WAIT_UNTIL(resourceOffersCall);
 
   EXPECT_NE(0, offers.size());
 
@@ -215,7 +213,7 @@ TEST(MasterTest, KillTask)
   vector<TaskDescription> tasks;
   tasks.push_back(task);
 
-  driver.replyToOffer(offerId, tasks);
+  driver.replyToOffer(offers[0].id(), tasks);
 
   WAIT_UNTIL(statusUpdateCall);
 
@@ -283,12 +281,11 @@ TEST(MasterTest, FrameworkMessage)
   MockScheduler sched;
   MesosSchedulerDriver schedDriver(&sched, master);
 
-  OfferID offerId;
-  vector<SlaveOffer> offers;
+  vector<Offer> offers;
   TaskStatus status;
   string schedData;
 
-  trigger resourceOfferCall, statusUpdateCall, schedFrameworkMessageCall;
+  trigger resourceOffersCall, statusUpdateCall, schedFrameworkMessageCall;
 
   EXPECT_CALL(sched, getFrameworkName(&schedDriver))
     .WillOnce(Return(""));
@@ -299,9 +296,9 @@ TEST(MasterTest, FrameworkMessage)
   EXPECT_CALL(sched, registered(&schedDriver, _))
     .Times(1);
 
-  EXPECT_CALL(sched, resourceOffer(&schedDriver, _, _))
-    .WillOnce(DoAll(SaveArg<1>(&offerId), SaveArg<2>(&offers),
-                    Trigger(&resourceOfferCall)))
+  EXPECT_CALL(sched, resourceOffers(&schedDriver, _))
+    .WillOnce(DoAll(SaveArg<1>(&offers),
+                    Trigger(&resourceOffersCall)))
     .WillRepeatedly(Return());
 
   EXPECT_CALL(sched, statusUpdate(&schedDriver, _))
@@ -313,7 +310,7 @@ TEST(MasterTest, FrameworkMessage)
 
   schedDriver.start();
 
-  WAIT_UNTIL(resourceOfferCall);
+  WAIT_UNTIL(resourceOffersCall);
 
   EXPECT_NE(0, offers.size());
 
@@ -326,7 +323,7 @@ TEST(MasterTest, FrameworkMessage)
   vector<TaskDescription> tasks;
   tasks.push_back(task);
 
-  schedDriver.replyToOffer(offerId, tasks);
+  schedDriver.replyToOffer(offers[0].id(), tasks);
 
   WAIT_UNTIL(statusUpdateCall);
 
@@ -421,11 +418,10 @@ TEST(MasterTest, MultipleExecutors)
   MockScheduler sched;
   MesosSchedulerDriver driver(&sched, master);
 
-  OfferID offerId;
-  vector<SlaveOffer> offers;
+  vector<Offer> offers;
   TaskStatus status1, status2;
 
-  trigger resourceOfferCall, statusUpdateCall1, statusUpdateCall2;
+  trigger resourceOffersCall, statusUpdateCall1, statusUpdateCall2;
 
   EXPECT_CALL(sched, getFrameworkName(&driver))
     .WillOnce(Return(""));
@@ -436,9 +432,9 @@ TEST(MasterTest, MultipleExecutors)
   EXPECT_CALL(sched, registered(&driver, _))
     .Times(1);
 
-  EXPECT_CALL(sched, resourceOffer(&driver, _, _))
-    .WillOnce(DoAll(SaveArg<1>(&offerId), SaveArg<2>(&offers),
-                    Trigger(&resourceOfferCall)))
+  EXPECT_CALL(sched, resourceOffers(&driver, _))
+    .WillOnce(DoAll(SaveArg<1>(&offers),
+                    Trigger(&resourceOffersCall)))
     .WillRepeatedly(Return());
 
   EXPECT_CALL(sched, statusUpdate(&driver, _))
@@ -447,7 +443,7 @@ TEST(MasterTest, MultipleExecutors)
 
   driver.start();
 
-  WAIT_UNTIL(resourceOfferCall);
+  WAIT_UNTIL(resourceOffersCall);
 
   ASSERT_NE(0, offers.size());
 
@@ -471,7 +467,7 @@ TEST(MasterTest, MultipleExecutors)
   tasks.push_back(task1);
   tasks.push_back(task2);
 
-  driver.replyToOffer(offerId, tasks);
+  driver.replyToOffer(offers[0].id(), tasks);
 
   WAIT_UNTIL(statusUpdateCall1);
 

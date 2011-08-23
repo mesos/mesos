@@ -32,9 +32,8 @@ public:
   virtual ExecutorInfo getExecutorInfo(SchedulerDriver* driver);
   virtual void registered(SchedulerDriver* driver,
                           const FrameworkID& frameworkId);
-  virtual void resourceOffer(SchedulerDriver* driver,
-                             const OfferID& offerId,
-                             const vector<SlaveOffer>& offers);
+  virtual void resourceOffers(SchedulerDriver* driver,
+                              const vector<Offer>& offers);
   virtual void offerRescinded(SchedulerDriver* driver, const OfferID& offerId);
   virtual void statusUpdate(SchedulerDriver* driver, const TaskStatus& status);
   virtual void frameworkMessage(SchedulerDriver* driver,
@@ -163,9 +162,8 @@ void JNIScheduler::registered(SchedulerDriver* driver,
 }
 
 
-void JNIScheduler::resourceOffer(SchedulerDriver* driver,
-                                 const OfferID& offerId,
-                                 const vector<SlaveOffer>& offers)
+void JNIScheduler::resourceOffers(SchedulerDriver* driver,
+                                  const vector<Offer>& offers)
 {
   jvm->AttachCurrentThread((void**) &env, NULL);
 
@@ -176,14 +174,11 @@ void JNIScheduler::resourceOffer(SchedulerDriver* driver,
 
   clazz = env->GetObjectClass(jsched);
 
-  // sched.resourceOffer(driver, offerId, offers);
-  jmethodID resourceOffer =
-    env->GetMethodID(clazz, "resourceOffer",
+  // sched.resourceOffers(driver, offers);
+  jmethodID resourceOffers =
+    env->GetMethodID(clazz, "resourceOffers",
 		     "(Lorg/apache/mesos/SchedulerDriver;"
-		     "Lorg/apache/mesos/Protos$OfferID;"
 		     "Ljava/util/List;)V");
-
-  jobject jofferId = convert<OfferID>(env, offerId);
 
   // List offers = new ArrayList();
   clazz = env->FindClass("java/util/ArrayList");
@@ -192,16 +187,16 @@ void JNIScheduler::resourceOffer(SchedulerDriver* driver,
   jobject joffers = env->NewObject(clazz, _init_);
 
   jmethodID add = env->GetMethodID(clazz, "add", "(Ljava/lang/Object;)Z");
-    
+
   // Loop through C++ vector and add each offer to the Java vector.
-  foreach (const SlaveOffer& offer, offers) {
-    jobject joffer = convert<SlaveOffer>(env, offer);
+  foreach (const Offer& offer, offers) {
+    jobject joffer = convert<Offer>(env, offer);
     env->CallBooleanMethod(joffers, add, joffer);
   }
 
   env->ExceptionClear();
 
-  env->CallVoidMethod(jsched, resourceOffer, jdriver, jofferId, joffers);
+  env->CallVoidMethod(jsched, resourceOffers, jdriver, joffers);
 
   if (env->ExceptionOccurred()) {
     env->ExceptionDescribe();
@@ -591,10 +586,10 @@ JNIEXPORT jint JNICALL Java_org_apache_mesos_MesosSchedulerDriver_killTask
 /*
  * Class:     org_apache_mesos_MesosSchedulerDriver
  * Method:    replyToOffer
- * Signature: (Lorg/apache/mesos/Protos$OfferID;Ljava/util/Collection;Ljava/util/Map;)I
+ * Signature: (Lorg/apache/mesos/Protos$OfferID;Ljava/util/Collection;Lorg/apache/mesos/Protos$Filters;)I
  */
 JNIEXPORT jint JNICALL Java_org_apache_mesos_MesosSchedulerDriver_replyToOffer
-  (JNIEnv* env, jobject thiz, jobject jofferId, jobject jtasks, jobject jparams)
+  (JNIEnv* env, jobject thiz, jobject jofferId, jobject jtasks, jobject jfilters)
 {
   // Construct a C++ OfferID from the Java OfferID.
   const OfferID& offerId = construct<OfferID>(env, jofferId);
@@ -623,9 +618,8 @@ JNIEXPORT jint JNICALL Java_org_apache_mesos_MesosSchedulerDriver_replyToOffer
     tasks.push_back(task);
   }
 
-  // Construct a C++ map from the Java map.
-  const map<string, string>& params =
-    construct< map<string, string> >(env, jparams);
+  // Construct a C++ Filters from the Java Filters.
+  const Filters& filters = construct<Filters>(env, jfilters);
 
   // Now invoke the underlying driver.
   clazz = env->GetObjectClass(thiz);
@@ -634,7 +628,7 @@ JNIEXPORT jint JNICALL Java_org_apache_mesos_MesosSchedulerDriver_replyToOffer
   MesosSchedulerDriver* driver =
     (MesosSchedulerDriver*) env->GetLongField(thiz, __driver);
 
-  return driver->replyToOffer(offerId, tasks, params);
+  return driver->replyToOffer(offerId, tasks, filters);
 }
 
 

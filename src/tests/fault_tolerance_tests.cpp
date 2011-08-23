@@ -43,7 +43,7 @@ using testing::Return;
 using testing::SaveArg;
 
 
-TEST(MasterTest, SlaveLost)
+TEST(FaultToleranceTest, SlaveLost)
 {
   ASSERT_TRUE(GTEST_IS_THREADSAFE);
 
@@ -54,7 +54,7 @@ TEST(MasterTest, SlaveLost)
   ProcessBasedIsolationModule isolationModule;
 
   Resources resources = Resources::parse("cpus:2;mem:1024");
-  
+
   Slave s(resources, true, &isolationModule);
   PID<Slave> slave = process::spawn(&s);
 
@@ -63,10 +63,9 @@ TEST(MasterTest, SlaveLost)
   MockScheduler sched;
   MesosSchedulerDriver driver(&sched, master);
 
-  OfferID offerId;
-  vector<SlaveOffer> offers;
+  vector<Offer> offers;
 
-  trigger resourceOfferCall;
+  trigger resourceOffersCall;
 
   EXPECT_CALL(sched, getFrameworkName(&driver))
     .WillOnce(Return(""));
@@ -77,20 +76,20 @@ TEST(MasterTest, SlaveLost)
   EXPECT_CALL(sched, registered(&driver, _))
     .Times(1);
 
-  EXPECT_CALL(sched, resourceOffer(&driver, _, _))
-    .WillOnce(DoAll(SaveArg<1>(&offerId), SaveArg<2>(&offers),
-                    Trigger(&resourceOfferCall)))
+  EXPECT_CALL(sched, resourceOffers(&driver, _))
+    .WillOnce(DoAll(SaveArg<1>(&offers),
+                    Trigger(&resourceOffersCall)))
     .WillRepeatedly(Return());
 
   driver.start();
 
-  WAIT_UNTIL(resourceOfferCall);
+  WAIT_UNTIL(resourceOffersCall);
 
-  EXPECT_NE(0, offers.size());
+  EXPECT_EQ(1, offers.size());
 
   trigger offerRescindedCall, slaveLostCall;
 
-  EXPECT_CALL(sched, offerRescinded(&driver, offerId))
+  EXPECT_CALL(sched, offerRescinded(&driver, offers[0].id()))
     .WillOnce(Trigger(&offerRescindedCall));
 
   EXPECT_CALL(sched, slaveLost(&driver, offers[0].slave_id()))
@@ -111,7 +110,7 @@ TEST(MasterTest, SlaveLost)
 }
 
 
-TEST(MasterTest, SlavePartitioned)
+TEST(FaultToleranceTest, SlavePartitioned)
 {
   ASSERT_TRUE(GTEST_IS_THREADSAFE);
 
@@ -139,7 +138,7 @@ TEST(MasterTest, SlavePartitioned)
   EXPECT_CALL(sched, registered(&driver, _))
     .Times(1);
 
-  EXPECT_CALL(sched, resourceOffer(&driver, _, _))
+  EXPECT_CALL(sched, resourceOffers(&driver, _))
     .WillRepeatedly(Return());
 
   EXPECT_CALL(sched, offerRescinded(&driver, _))
@@ -170,7 +169,7 @@ TEST(MasterTest, SlavePartitioned)
 }
 
 
-TEST(MasterTest, SchedulerFailover)
+TEST(FaultToleranceTest, SchedulerFailover)
 {
   ASSERT_TRUE(GTEST_IS_THREADSAFE);
 
@@ -196,7 +195,7 @@ TEST(MasterTest, SchedulerFailover)
   EXPECT_CALL(sched1, registered(&driver1, _))
     .WillOnce(DoAll(SaveArg<1>(&frameworkId), Trigger(&sched1RegisteredCall)));
 
-  EXPECT_CALL(sched1, resourceOffer(&driver1, _, _))
+  EXPECT_CALL(sched1, resourceOffers(&driver1, _))
     .WillRepeatedly(Return());
 
   EXPECT_CALL(sched1, offerRescinded(&driver1, _))
@@ -227,7 +226,7 @@ TEST(MasterTest, SchedulerFailover)
   EXPECT_CALL(sched2, registered(&driver2, frameworkId))
     .WillOnce(Trigger(&sched2RegisteredCall));
 
-  EXPECT_CALL(sched2, resourceOffer(&driver2, _, _))
+  EXPECT_CALL(sched2, resourceOffers(&driver2, _))
     .WillRepeatedly(Return());
 
   EXPECT_CALL(sched2, offerRescinded(&driver2, _))
@@ -247,7 +246,7 @@ TEST(MasterTest, SchedulerFailover)
 }
 
 
-TEST(MasterTest, SchedulerFailoverStatusUpdate)
+TEST(FaultToleranceTest, SchedulerFailoverStatusUpdate)
 {
   ASSERT_TRUE(GTEST_IS_THREADSAFE);
 
@@ -293,10 +292,9 @@ TEST(MasterTest, SchedulerFailoverStatusUpdate)
   MesosSchedulerDriver driver1(&sched1, master);
 
   FrameworkID frameworkId;
-  OfferID offerId;
-  vector<SlaveOffer> offers;
+  vector<Offer> offers;
 
-  trigger resourceOfferCall, statusUpdateMsg;
+  trigger resourceOffersCall, statusUpdateMsg;
 
   EXPECT_CALL(sched1, getFrameworkName(&driver1))
     .WillOnce(Return(""));
@@ -307,9 +305,9 @@ TEST(MasterTest, SchedulerFailoverStatusUpdate)
   EXPECT_CALL(sched1, registered(&driver1, _))
     .WillOnce(SaveArg<1>(&frameworkId));
 
-  EXPECT_CALL(sched1, resourceOffer(&driver1, _, _))
-    .WillOnce(DoAll(SaveArg<1>(&offerId), SaveArg<2>(&offers),
-                    Trigger(&resourceOfferCall)))
+  EXPECT_CALL(sched1, resourceOffers(&driver1, _))
+    .WillOnce(DoAll(SaveArg<1>(&offers),
+                    Trigger(&resourceOffersCall)))
     .WillRepeatedly(Return());
 
   EXPECT_CALL(sched1, statusUpdate(&driver1, _))
@@ -325,7 +323,7 @@ TEST(MasterTest, SchedulerFailoverStatusUpdate)
 
   driver1.start();
 
-  WAIT_UNTIL(resourceOfferCall);
+  WAIT_UNTIL(resourceOffersCall);
 
   EXPECT_NE(0, offers.size());
 
@@ -338,7 +336,7 @@ TEST(MasterTest, SchedulerFailoverStatusUpdate)
   vector<TaskDescription> tasks;
   tasks.push_back(task);
 
-  driver1.replyToOffer(offerId, tasks);
+  driver1.replyToOffer(offers[0].id(), tasks);
 
   WAIT_UNTIL(statusUpdateMsg);
 
@@ -390,7 +388,7 @@ TEST(MasterTest, SchedulerFailoverStatusUpdate)
 }
 
 
-TEST(MasterTest, SchedulerFailoverFrameworkMessage)
+TEST(FaultToleranceTest, SchedulerFailoverFrameworkMessage)
 {
   ASSERT_TRUE(GTEST_IS_THREADSAFE);
 
@@ -427,8 +425,7 @@ TEST(MasterTest, SchedulerFailoverFrameworkMessage)
   MesosSchedulerDriver driver1(&sched1, master);
 
   FrameworkID frameworkId;
-  OfferID offerId;
-  vector<SlaveOffer> offers;
+  vector<Offer> offers;
   TaskStatus status;
 
   trigger sched1ResourceOfferCall, sched1StatusUpdateCall;
@@ -445,8 +442,8 @@ TEST(MasterTest, SchedulerFailoverFrameworkMessage)
   EXPECT_CALL(sched1, statusUpdate(&driver1, _))
     .WillOnce(DoAll(SaveArg<1>(&status), Trigger(&sched1StatusUpdateCall)));
 
-  EXPECT_CALL(sched1, resourceOffer(&driver1, _, ElementsAre(_)))
-    .WillOnce(DoAll(SaveArg<1>(&offerId), SaveArg<2>(&offers),
+  EXPECT_CALL(sched1, resourceOffers(&driver1, _))
+    .WillOnce(DoAll(SaveArg<1>(&offers),
                     Trigger(&sched1ResourceOfferCall)))
     .WillRepeatedly(Return());
 
@@ -468,7 +465,7 @@ TEST(MasterTest, SchedulerFailoverFrameworkMessage)
   vector<TaskDescription> tasks;
   tasks.push_back(task);
 
-  driver1.replyToOffer(offerId, tasks);
+  driver1.replyToOffer(offers[0].id(), tasks);
 
   WAIT_UNTIL(sched1StatusUpdateCall);
 

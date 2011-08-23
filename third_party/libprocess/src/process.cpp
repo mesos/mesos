@@ -975,9 +975,10 @@ void * schedule(void *arg)
               // Adjust the current time to the next timeout, provided
               // it is not past the elapsed time.
               ev_tstamp tstamp = timeouts->begin()->first;
-              if (tstamp <= clk->getElapsed())
+              if (tstamp <= clk->getElapsed()) {
                 clk->setCurrent(tstamp);
-              
+              }
+
               update_timer = true;
               ev_async_send(loop, &async_watcher);
             } else {
@@ -2531,7 +2532,7 @@ void ProcessManager::cancel_timeout(const timeout &timeout)
 }
 
 
-double Clock::elapsed()
+double Clock::now()
 {
   synchronized (timeouts) {
     if (clk != NULL) {

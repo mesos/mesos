@@ -198,7 +198,7 @@ jobject convert(JNIEnv* env, const TaskStatus& status)
 
 
 template <>
-jobject convert(JNIEnv* env, const SlaveOffer& offer)
+jobject convert(JNIEnv* env, const Offer& offer)
 {
   string data;
   offer.SerializeToString(&data);
@@ -207,12 +207,12 @@ jobject convert(JNIEnv* env, const SlaveOffer& offer)
   jbyteArray jdata = env->NewByteArray(data.size());
   env->SetByteArrayRegion(jdata, 0, data.size(), (jbyte*) data.data());
 
-  // SlaveOffer offer = SlaveOffer.parseFrom(data);
-  jclass clazz = env->FindClass("org/apache/mesos/Protos$SlaveOffer");
+  // Offer offer = Offer.parseFrom(data);
+  jclass clazz = env->FindClass("org/apache/mesos/Protos$Offer");
 
   jmethodID parseFrom =
     env->GetStaticMethodID(clazz, "parseFrom",
-                           "([B)Lorg/apache/mesos/Protos$SlaveOffer;");
+                           "([B)Lorg/apache/mesos/Protos$Offer;");
 
   jobject joffer = env->CallStaticObjectMethod(clazz, parseFrom, jdata);
 

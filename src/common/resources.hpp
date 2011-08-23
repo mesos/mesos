@@ -401,13 +401,14 @@ inline Resource::Set Resources::get(
       return resource.set();
     }
   }
-    
+
   return set;
 }
 
 
-inline
-std::ostream& operator << (std::ostream& stream, const Resources& resources)
+inline std::ostream& operator << (
+    std::ostream& stream,
+    const Resources& resources)
 {
   mesos::internal::Resources::const_iterator it = resources.begin();
 
@@ -421,23 +422,39 @@ std::ostream& operator << (std::ostream& stream, const Resources& resources)
   return stream;
 }
 
-}} // namespace mesos { namespace internal {
 
-// namespace boost {
+inline std::ostream& operator << (
+    std::ostream& stream,
+    const google::protobuf::RepeatedPtrField<Resource>& resources)
+{
+  return stream << Resources(resources);
+}
 
-// template <>
-// struct range_iterator<mesos::internal::Resources>
-// {
-//   typedef mesos::internal::Resources::iterator type;
-// };
 
-// template <>
-// struct range_const_iterator<mesos::internal::Resources>
-// {
-//   typedef mesos::internal::Resources::const_iterator type;
-// };
+inline Resources operator + (
+    const google::protobuf::RepeatedPtrField<Resource>& left,
+    const Resources& right)
+{
+  return Resources(left) + right;
+}
 
-// } // namespace boost {
 
+inline Resources operator - (
+    const google::protobuf::RepeatedPtrField<Resource>& left,
+    const Resources& right)
+{
+  return Resources(left) - right;
+}
+
+
+inline bool operator == (
+    const google::protobuf::RepeatedPtrField<Resource>& left,
+    const Resources& right)
+{
+  return Resources(left) == right;
+}
+
+} // namespace internal {
+} // namespace mesos {
 
 #endif // __RESOURCES_HPP__

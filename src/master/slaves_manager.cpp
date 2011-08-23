@@ -68,7 +68,9 @@ public:
   Promise<bool> updated(const string& path);
 
 private:
-  bool parse(const string& key, const string& s, multimap<string, uint16_t>* result);
+  bool parse(const string& key,
+             const string& s,
+             multihashmap<string, uint16_t>* result);
 
   const string servers;
   const string znode;
@@ -502,12 +504,12 @@ Promise<bool> ZooKeeperSlavesManagerStorage::updated(const string& path)
     }
 
     // Parse what's in ZooKeeper into active/inactive hostname port pairs.
-    multimap<string, uint16_t> active;
+    multihashmap<string, uint16_t> active;
     if (parse("active=", result, &active)) {
       process::dispatch(slavesManager, &SlavesManager::updateActive, active);
     }
 
-    multimap<string, uint16_t> inactive;
+    multihashmap<string, uint16_t> inactive;
     if (parse("inactive=", result, &inactive)) {
       process::dispatch(slavesManager, &SlavesManager::updateInactive, inactive);
     }
@@ -521,8 +523,10 @@ Promise<bool> ZooKeeperSlavesManagerStorage::updated(const string& path)
 }
 
 
-bool ZooKeeperSlavesManagerStorage::parse(const string& key, const string& s,
-                                          multimap<string, uint16_t>* result)
+bool ZooKeeperSlavesManagerStorage::parse(
+    const string& key,
+    const string& s,
+    multihashmap<string, uint16_t>* result)
 {
   size_t begin = s.find(key);
   if (begin == string::npos) {
@@ -554,7 +558,7 @@ bool ZooKeeperSlavesManagerStorage::parse(const string& key, const string& s,
     }
 
     try {
-      result->insert(pairs[0], lexical_cast<uint16_t>(pairs[1]));
+      result->put(pairs[0], lexical_cast<uint16_t>(pairs[1]));
     } catch (const bad_lexical_cast&) {
       LOG(WARNING) << "Slaves manager storage found bad data in '" << znode
                    << "', could not parse " << token;
@@ -613,7 +617,7 @@ SlavesManager::SlavesManager(const Configuration& conf,
         }
 
         try {
-          active[pairs[0]].insert(lexical_cast<uint16_t>(pairs[1]));
+          active.put(pairs[0], lexical_cast<uint16_t>(pairs[1]));
         } catch (const bad_lexical_cast&) {
           fatal("Failed to parse \"%s\" in option 'slaves'", token.c_str());
         }
@@ -654,13 +658,13 @@ void SlavesManager::registerOptions(Configurator* configurator)
 bool SlavesManager::add(const string& hostname, uint16_t port)
 {
   // Ignore request if slave is already active.
-  if (active.count(hostname, port) > 0) {
+  if (active.contains(hostname, port)) {
     LOG(WARNING) << "Attempted to add an already added slave!";
     return true;
   }
 
   // Make sure this slave is not currently deactivated.
-  if (inactive.count(hostname, port) > 0) {
+  if (inactive.contains(hostname, port)) {
     LOG(WARNING) << "Attempted to add a deactivated slave, "
                  << "try activating it instead!";
     return false;
@@ -669,7 +673,7 @@ bool SlavesManager::add(const string& hostname, uint16_t port)
   // Ask the storage system to persist the addition.
   if (process::call(storage->self(), &SlavesManagerStorage::add,
                     hostname, port)) {
-    active.insert(hostname, port);
+    active.put(hostname, port);
 
     // Tell the master that this slave is now active.
     process::dispatch(master, &Master::activatedSlaveHostnamePort,
@@ -685,8 +689,8 @@ bool SlavesManager::add(const string& hostname, uint16_t port)
 bool SlavesManager::remove(const string& hostname, uint16_t port)
 {
   // Make sure the slave is currently activated or deactivated.
-  if (active.count(hostname, port) == 0 &&
-      inactive.count(hostname, port) == 0) {
+  if (!active.contains(hostname, port) &&
+      !inactive.contains(hostname, port)) {
     LOG(WARNING) << "Attempted to remove unknown slave!";
     return false;
   }
@@ -694,8 +698,8 @@ bool SlavesManager::remove(const string& hostname, uint16_t port)
   // Get the storage system to persist the removal.
   if (process::call(storage->self(), &SlavesManagerStorage::remove,
                     hostname, port)) {
-    active.erase(hostname, port);
-    inactive.erase(hostname, port);
+    active.remove(hostname, port);
+    inactive.remove(hostname, port);
 
     // Tell the master that this slave is now deactivated.
     process::dispatch(master, &Master::deactivatedSlaveHostnamePort,
@@ -711,12 +715,12 @@ bool SlavesManager::remove(const string& hostname, uint16_t port)
 bool SlavesManager::activate(const string& hostname, uint16_t port)
 {
   // Make sure the slave is currently deactivated.
-  if (inactive.count(hostname, port) > 0) {
+  if (inactive.contains(hostname, port)) {
     // Get the storage system to persist the activation.
     if (process::call(storage->self(), &SlavesManagerStorage::activate,
                       hostname, port)) {
-      active.insert(hostname, port);
-      inactive.erase(hostname, port);
+      active.put(hostname, port);
+      inactive.remove(hostname, port);
 
       // Tell the master that this slave is now activated.
       process::dispatch(master, &Master::activatedSlaveHostnamePort,
@@ -733,12 +737,12 @@ bool SlavesManager::activate(const string& hostname, uint16_t port)
 bool SlavesManager::deactivate(const string& hostname, uint16_t port)
 {
   // Make sure the slave is currently activated.
-  if (active.count(hostname, port) > 0) {
+  if (active.contains(hostname, port)) {
     // Get the storage system to persist the deactivation.
     if (process::call(storage->self(), &SlavesManagerStorage::deactivate,
                       hostname, port)) {
-      active.erase(hostname, port);
-      inactive.insert(hostname, port);
+      active.remove(hostname, port);
+      inactive.put(hostname, port);
 
       // Tell the master that this slave is now deactivated.
       process::dispatch(master, &Master::deactivatedSlaveHostnamePort,
@@ -752,31 +756,32 @@ bool SlavesManager::deactivate(const string& hostname, uint16_t port)
 }
 
 
-void SlavesManager::updateActive(const multimap<string, uint16_t>& updated)
+void SlavesManager::updateActive(const multihashmap<string, uint16_t>& updated)
 {
   // Loop through the current active slave hostname:port pairs and
   // remove all that are not found in updated.
   foreachpair (const string& hostname, uint16_t port, utils::copy(active)) {
-    if (updated.count(hostname, port) == 0) {
+    if (!updated.contains(hostname, port)) {
       process::dispatch(master, &Master::deactivatedSlaveHostnamePort,
                         hostname, port);
-      active.erase(hostname, port);
+      active.remove(hostname, port);
     }
   }
 
   // Now loop through the updated slave hostname:port pairs and add
   // all that are not found in active.
   foreachpair (const string& hostname, uint16_t port, updated) {
-    if (active.count(hostname, port) == 0) {
+    if (!active.contains(hostname, port)) {
       process::dispatch(master, &Master::activatedSlaveHostnamePort,
                         hostname, port);
-      active.insert(hostname, port);
+      active.put(hostname, port);
     }
   }
 }
 
 
-void SlavesManager::updateInactive(const multimap<string, uint16_t>& updated)
+void SlavesManager::updateInactive(
+    const multihashmap<string, uint16_t>& updated)
 {
   inactive = updated;
 }

@@ -37,9 +37,8 @@ public:
   virtual void registered(SchedulerDriver* driver,
                           const FrameworkID& frameworkId) = 0;
 
-  virtual void resourceOffer(SchedulerDriver* driver,
-                             const OfferID& offerId,
-                             const std::vector<SlaveOffer>& offers) = 0;
+  virtual void resourceOffers(SchedulerDriver* driver,
+                              const std::vector<Offer>& offers) = 0;
 
   virtual void offerRescinded(SchedulerDriver* driver,
                               const OfferID& offerId) = 0;
@@ -90,13 +89,7 @@ public:
 
   virtual int replyToOffer(const OfferID& offerId,
                            const std::vector<TaskDescription>& tasks,
-                           const std::map<std::string, std::string>& params) = 0;
-
-  virtual int replyToOffer(const OfferID& offerId,
-                           const std::vector<TaskDescription>& tasks)
-  {
-    return replyToOffer(offerId, tasks, std::map<std::string, std::string>());
-  }
+                           const Filters& filters = Filters()) = 0;
 
   virtual int reviveOffers() = 0;
 
@@ -180,13 +173,7 @@ public:
 
   virtual int replyToOffer(const OfferID& offerId,
                            const std::vector<TaskDescription>& tasks,
-                           const std::map<std::string, std::string>& params);
-
-  virtual int replyToOffer(const OfferID& offerId,
-                           const std::vector<TaskDescription>& tasks)
-  {
-    return replyToOffer(offerId, tasks, std::map<std::string, std::string>());
-  }
+                           const Filters& filters = Filters());
 
   virtual int reviveOffers();
 

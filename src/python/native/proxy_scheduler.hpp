@@ -39,9 +39,8 @@ public:
   virtual void registered(SchedulerDriver* driver,
                           const FrameworkID& frameworkId);
 
-  virtual void resourceOffer(SchedulerDriver* driver,
-                             const OfferID& offerId,
-                             const std::vector<SlaveOffer>& offers);
+  virtual void resourceOffers(SchedulerDriver* driver,
+                              const std::vector<Offer>& offers);
 
   virtual void offerRescinded(SchedulerDriver* driver,
                               const OfferID& offerId);

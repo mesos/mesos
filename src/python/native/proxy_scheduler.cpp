@@ -108,27 +108,20 @@ cleanup:
 }
 
 
-void ProxyScheduler::resourceOffer(SchedulerDriver* driver,
-                                   const OfferID& offerId,
-                                   const vector<SlaveOffer>& offers)
+void ProxyScheduler::resourceOffers(SchedulerDriver* driver,
+                                    const vector<Offer>& offers)
 {
   InterpreterLock lock;
 
-  PyObject* oid = NULL;
   PyObject* list = NULL;
   PyObject* res = NULL;
-
-  oid = createPythonProtobuf(offerId, "OfferID");
-  if (oid == NULL) {
-    goto cleanup; // createPythonProtobuf will have set an exception
-  }
 
   list = PyList_New(offers.size());
   if (list == NULL) {
     goto cleanup;
   }
   for (int i = 0; i < offers.size(); i++) {
-    PyObject* offer = createPythonProtobuf(offers[i], "SlaveOffer");
+    PyObject* offer = createPythonProtobuf(offers[i], "Offer");
     if (offer == NULL) {
       goto cleanup;
     }
@@ -137,9 +130,8 @@ void ProxyScheduler::resourceOffer(SchedulerDriver* driver,
 
   res = PyObject_CallMethod(impl->pythonScheduler,
                             (char*) "resourceOffer",
-                            (char*) "OOO",
+                            (char*) "OO",
                             impl,
-                            oid,
                             list);
   if (res == NULL) {
     cerr << "Failed to call scheduler's resourceOffer" << endl;
@@ -151,7 +143,6 @@ cleanup:
     PyErr_Print();
     driver->stop();
   }
-  Py_XDECREF(oid);
   Py_XDECREF(list);
   Py_XDECREF(res);
 }

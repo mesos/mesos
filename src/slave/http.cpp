@@ -135,7 +135,7 @@ Promise<HttpResponse> stats(
   LOG(INFO) << "HTTP request for '" << request.path << "'";
 
   JSON::Object object;
-  object.values["uptime"] = Clock::elapsed() - slave.startTime;
+  object.values["uptime"] = Clock::now() - slave.startTime;
   object.values["total_frameworks"] = slave.frameworks.size();
   object.values["started_tasks"] = slave.stats.tasks[TASK_STARTING];
   object.values["finished_tasks"] = slave.stats.tasks[TASK_FINISHED];

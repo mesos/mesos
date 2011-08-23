@@ -90,8 +90,8 @@ public:
   MOCK_METHOD1(getFrameworkName, std::string(SchedulerDriver*));
   MOCK_METHOD1(getExecutorInfo, ExecutorInfo(SchedulerDriver*));
   MOCK_METHOD2(registered, void(SchedulerDriver*, const FrameworkID&));
-  MOCK_METHOD3(resourceOffer, void(SchedulerDriver*, const OfferID&,
-                                   const std::vector<SlaveOffer>&));
+  MOCK_METHOD2(resourceOffers, void(SchedulerDriver*,
+                                    const std::vector<Offer>&));
   MOCK_METHOD2(offerRescinded, void(SchedulerDriver*, const OfferID&));
   MOCK_METHOD2(statusUpdate, void(SchedulerDriver*, const TaskStatus&));
   MOCK_METHOD4(frameworkMessage, void(SchedulerDriver*,
@@ -126,14 +126,15 @@ public:
   MOCK_METHOD1(frameworkRemoved, void(master::Framework*));
   MOCK_METHOD1(slaveAdded, void(master::Slave*));
   MOCK_METHOD1(slaveRemoved, void(master::Slave*));
-  MOCK_METHOD1(taskAdded, void(Task*));
-  MOCK_METHOD2(taskRemoved, void(Task*, master::TaskRemovalReason));
-  MOCK_METHOD3(offerReturned, void(master::Offer*,
-                                   master::OfferReturnReason,
-                                   const std::vector<master::SlaveResources>&));
+  MOCK_METHOD2(resourcesRequested, void(const FrameworkID&,
+                                        const std::vector<ResourceRequest>&));
+  MOCK_METHOD3(resourcesUnused, void(const FrameworkID&,
+                                     const SlaveID&,
+                                     const Resources&));
+  MOCK_METHOD3(resourcesRecovered, void(const FrameworkID&,
+                                        const SlaveID&,
+                                        const Resources&));
   MOCK_METHOD1(offersRevived, void(master::Framework*));
-  MOCK_METHOD2(request, void(const FrameworkID&,
-                             const std::vector<ResourceRequest>&));
   MOCK_METHOD0(timerTick, void());
 };
 

@@ -11,8 +11,8 @@ namespace master {
 // Maximum number of slot offers to have outstanding for each framework.
 const int MAX_OFFERS_PER_FRAMEWORK = 50;
 
-// Default number of seconds until a refused slot is resent to a framework.
-const double DEFAULT_REFUSAL_TIMEOUT = 5;
+// Seconds until unused resources are re-offered to a framework.
+const double UNUSED_RESOURCES_TIMEOUT = 5.0;
 
 // Minimum number of cpus / task.
 const int32_t MIN_CPUS = 1;
@@ -34,26 +34,6 @@ const int MAX_SLAVE_TIMEOUTS = 5;
 
 // Time to wait for a framework to failover (TODO(benh): Make configurable)).
 const double FRAMEWORK_FAILOVER_TIMEOUT = 60 * 60 * 24;
-
-// Reasons why offers might be returned to the Allocator.
-enum OfferReturnReason
-{
-  ORR_FRAMEWORK_REPLIED,
-  ORR_OFFER_RESCINDED,
-  ORR_FRAMEWORK_LOST,
-  ORR_FRAMEWORK_FAILOVER,
-  ORR_SLAVE_LOST
-};
-
-
-// Reasons why tasks might be removed, passed to the Allocator.
-enum TaskRemovalReason
-{
-  TRR_TASK_ENDED,
-  TRR_FRAMEWORK_LOST,
-  TRR_EXECUTOR_LOST,
-  TRR_SLAVE_LOST
-};
 
 } // namespace mesos {
 } // namespace internal {

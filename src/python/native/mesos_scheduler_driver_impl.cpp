@@ -288,18 +288,18 @@ PyObject* MesosSchedulerDriverImpl_replyToOffer(MesosSchedulerDriverImpl* self,
     return NULL;
   }
 
-  PyObject* oidObj = NULL;
+  PyObject* offerIdObj = NULL;
   PyObject* tasksObj = NULL;
-  PyObject* paramsObj = NULL;
-  OfferID oid;
-  map<string, string> params;
+  PyObject* filtersObj = NULL;
+  OfferID offerId;
   vector<TaskDescription> tasks;
+  Filters filters;
 
-  if (!PyArg_ParseTuple(args, "OO|O", &oidObj, &tasksObj, &paramsObj)) {
+  if (!PyArg_ParseTuple(args, "OO|O", &offerIdObj, &tasksObj, &filtersObj)) {
     return NULL;
   }
 
-  if (!readPythonProtobuf(oidObj, &oid)) {
+  if (!readPythonProtobuf(offerIdObj, &offerId)) {
     PyErr_Format(PyExc_Exception, "Could not deserialize Python OfferID");
     return NULL;
   }
@@ -323,52 +323,16 @@ PyObject* MesosSchedulerDriverImpl_replyToOffer(MesosSchedulerDriverImpl* self,
     tasks.push_back(task);
   }
 
-  if (paramsObj != NULL) {
-    if (!PyDict_Check(paramsObj)) {
+  if (filtersObj != NULL) {
+    if (!readPythonProtobuf(filtersObj, &filters)) {
       PyErr_Format(PyExc_Exception,
-                   "Parameter 3 to replyToOffer is not a dictionary");
+                   "Could not deserialize Python Filters");
       return NULL;
-    }
-
-    Py_ssize_t pos = 0;
-    PyObject* key;
-    PyObject* value;
-    while (PyDict_Next(paramsObj, &pos, &key, &value)) {
-      // Convert both key and value to strings. Note that this returns
-      // new references, which must be cleaned up.
-      PyObject* keyStr = PyObject_Str(key);
-      if (keyStr == NULL) {
-        return NULL;
-      }
-      PyObject* valueStr = PyObject_Str(value);
-      if (valueStr == NULL) {
-        Py_DECREF(keyStr);
-        return NULL;
-      }
-      char* keyChars = PyString_AsString(keyStr);
-      if (keyChars == NULL) {
-        Py_DECREF(keyStr);
-        Py_DECREF(valueStr);
-        return NULL;
-      }
-      char* valueChars = PyString_AsString(valueStr);
-      if (valueChars == NULL) {
-        Py_DECREF(keyStr);
-        Py_DECREF(valueStr);
-        return NULL;
-      }
-      params[keyChars] = valueChars;
-      Py_DECREF(keyStr);
-      Py_DECREF(valueStr);
     }
   }
 
   int res;
-  if (paramsObj != NULL) {
-    res = self->driver->replyToOffer(oid, tasks, params);
-  } else {
-    res = self->driver->replyToOffer(oid, tasks);
-  }
+  res = self->driver->replyToOffer(offerId, tasks, filters);
   return PyInt_FromLong(res); // Sets an exception if creating the int fails
 }
 

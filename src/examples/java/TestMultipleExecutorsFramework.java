@@ -48,16 +48,13 @@ public class TestMultipleExecutorsFramework {
     }
 
     @Override
-    public void resourceOffer(SchedulerDriver driver,
-                              OfferID offerId,
-                              List<SlaveOffer> offers) {
-
-      List<TaskDescription> tasks = new ArrayList<TaskDescription>();
-
+    public void resourceOffers(SchedulerDriver driver,
+                               List<Offer> offers) {
       try {
         File file = new File("./test_executor");
 
-        for (SlaveOffer offer : offers) {
+        for (Offer offer : offers) {
+          List<TaskDescription> tasks = new ArrayList<TaskDescription>();
           if (!fooLaunched) {
             TaskID taskId = TaskID.newBuilder()
               .setValue("foo")
@@ -136,7 +133,7 @@ public class TestMultipleExecutorsFramework {
             barLaunched = true;
           }
 
-          driver.replyToOffer(offerId, tasks);
+          driver.replyToOffer(offer.getId(), tasks);
         }
       } catch (Throwable t) {
         throw new RuntimeException(t);

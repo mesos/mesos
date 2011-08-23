@@ -39,10 +39,10 @@ public class MesosSchedulerDriver implements SchedulerDriver {
 
   public native int sendFrameworkMessage(SlaveID slaveId, ExecutorID executorId, byte[] data);
   public native int killTask(TaskID taskId);
-  public native int replyToOffer(OfferID offerId, Collection<TaskDescription> tasks, Map<String, String> params);
+  public native int replyToOffer(OfferID offerId, Collection<TaskDescription> tasks, Filters filters);
 
   public int replyToOffer(OfferID offerId, Collection<TaskDescription> tasks) {
-    return replyToOffer(offerId, tasks, Collections.<String, String>emptyMap());
+    return replyToOffer(offerId, tasks, Filters.newBuilder().build());
   }
 
   public native int reviveOffers();

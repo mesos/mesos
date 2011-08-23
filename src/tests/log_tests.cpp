@@ -516,10 +516,24 @@ TEST(CoordinatorTest, AppendReadError)
 }
 
 
-TEST(CoordinatorTest, ElectNoQuorum)
-{
-  Clock::pause();
+// TODO(benh): The coordinator tests that rely on timeouts can't rely
+// on pausing the clock because when they get run with other tests
+// there could be some lingering timeouts that cause the clock to
+// advance such that the timeout within Coordinator::elect or
+// Coordinator::append get started beyond what we expect. If this
+// happens it doesn't matter what we "advance" the clock by, since
+// certain orderings might still cause the test to hang, waiting for a
+// future that started later than expected because the clock got
+// updated unknowingly. This would be solved if Coordinator was
+// actually a Process because then it would have a time associated
+// with it and all processes that it creates (transitively). There
+// might be a way to fix this by giving threads a similar role in
+// libprocess, but until that happens these tests do not use the clock
+// and are therefore disabled by default so as not to pause the tests
+// for random unknown periods of time (but can still be run manually).
 
+TEST(CoordinatorTest, DISABLED_ElectNoQuorum)
+{
   const std::string file = ".log_tests_elect_no_quorum";
 
   utils::os::rm(file);
@@ -535,7 +549,6 @@ TEST(CoordinatorTest, ElectNoQuorum)
   Coordinator coord(2, &replica, &group);
 
   {
-    Clock::advance(1.0);
     Result<uint64_t> result = coord.elect(1);
     ASSERT_TRUE(result.isNone());
   }
@@ -547,15 +560,11 @@ TEST(CoordinatorTest, ElectNoQuorum)
   wait(replica);
 
   utils::os::rm(file);
-
-  Clock::resume();
 }
 
 
-TEST(CoordinatorTest, AppendNoQuorum)
+TEST(CoordinatorTest, DISABLED_AppendNoQuorum)
 {
-  Clock::pause();
-
   const std::string file1 = ".log_tests_append_no_quorum1";
   const std::string file2 = ".log_tests_append_no_quorum2";
 
@@ -586,7 +595,6 @@ TEST(CoordinatorTest, AppendNoQuorum)
   wait(replica1);
 
   {
-    Clock::advance(1.0);
     Result<uint64_t> result = coord.append("hello world");
     ASSERT_TRUE(result.isNone());
   }
@@ -599,8 +607,6 @@ TEST(CoordinatorTest, AppendNoQuorum)
 
   utils::os::rm(file1);
   utils::os::rm(file2);
-
-  Clock::resume();
 }
 
 

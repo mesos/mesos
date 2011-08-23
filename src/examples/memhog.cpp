@@ -44,14 +44,13 @@ public:
     cout << "Registered!" << endl;
   }
 
-  virtual void resourceOffer(SchedulerDriver* driver,
-                             const OfferID& offerId,
-                             const vector<SlaveOffer>& offers)
+  virtual void resourceOffers(SchedulerDriver* driver,
+                              const vector<Offer>& offers)
   {
-    vector<TaskDescription> tasks;
-    vector<SlaveOffer>::const_iterator iterator = offers.begin();
+    vector<Offer>::const_iterator iterator = offers.begin();
     for (; iterator != offers.end(); ++iterator) {
-      const SlaveOffer& offer = *iterator;
+      const Offer& offer = *iterator;
+
       // Lookup resources we care about.
       // TODO(benh): It would be nice to ultimately have some helper
       // functions for looking up resources.
@@ -69,7 +68,8 @@ public:
         }
       }
 
-      // Launch task.
+      // Launch task (only one per offer).
+      vector<TaskDescription> tasks;
       if ((tasksLaunched < totalTasks) && (cpus >= 1 && mem >= memToRequest)) {
         int taskId = tasksLaunched++;
 
@@ -99,9 +99,9 @@ public:
 
         tasks.push_back(task);
       }
-    }
 
-    driver->replyToOffer(offerId, tasks);
+      driver->replyToOffer(offer.id(), tasks);
+    }
   }
 
   virtual void offerRescinded(SchedulerDriver* driver,

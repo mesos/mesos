@@ -1,44 +1,47 @@
-#ifndef __MULTIMAP_HPP__
-#define __MULTIMAP_HPP__
+#ifndef __MULTIHASHMAP_HPP__
+#define __MULTIHASHMAP_HPP__
 
 #include <iterator>
 
-#include <tr1/unordered_map>
-#include <tr1/unordered_set>
+#include "common/hashmap.hpp"
+#include "common/hashset.hpp"
 
 
-namespace mesos { namespace internal {
-
-// Forward declarations of multimap iterators.
+// Forward declarations of multihashmap iterators.
 template <typename K, typename V>
-struct multimap_iterator;
+struct multihashmap_iterator;
 
 template <typename K, typename V>
-struct const_multimap_iterator;
+struct const_multihashmap_iterator;
 
 
-// Multimap implementation using an unordered_map with an
-// unordered_set as a value. The multimap implementation is painful to
-// use (requires lots of iterator garbage, as well as the use of
-// 'equal_range' which makes for cluttered code). Note that this
-// implementation doesn't actually provide certain STL operations such
-// as 'find' or a version of 'insert' that returns an iterator.
+// Implementation of a multimap using hashmap and hashset. The
+// rationale for creating this is that the std::multimap
+// implementation is painful to use (requires lots of iterator
+// garbage, as well as the use of 'equal_range' which makes for
+// cluttered code). Note that this implementation doesn't actually
+// provide certain STL operations such as 'find' or 'insert' which may
+// make it hard(er) to use in some STL data structures (this is
+// intentional, it is meant to provide functions with "higher-level"
+// semantics such as 'contains'). In the future we might consider
+// extending boost::unordered_multimap to recover the STL interface
+// (as is done with hashmap and hashset) .
 template <typename K, typename V>
-class multimap
+class multihashmap
 {
 public:
-  void insert(const K& key, const V& value);
+  void put(const K& key, const V& value);
+  const hashset<V>& get(const K& key) const;
   void clear();
   bool empty() const;
   size_t size() const;
-  size_t erase(const K& key);
-  size_t erase(const K& key, const V& value);
-  size_t count(const K& key) const;
-  size_t count(const K& key, const V& value) const;
-  std::tr1::unordered_set<V>& operator [] (const K& key);
+  bool remove(const K& key);
+  bool remove(const K& key, const V& value);
+  bool contains(const K& key) const;
+  bool contains(const K& key, const V& value) const;
 
-  typedef multimap_iterator<K, V> iterator;
-  typedef const_multimap_iterator<K, V> const_iterator;
+  typedef multihashmap_iterator<K, V> iterator;
+  typedef const_multihashmap_iterator<K, V> const_iterator;
 
   iterator begin();
   iterator end();
@@ -47,28 +50,30 @@ public:
   const_iterator end() const;
 
 private:
-  friend class multimap_iterator<K, V>;
-  friend class const_multimap_iterator<K, V>;
+  friend class multihashmap_iterator<K, V>;
+  friend class const_multihashmap_iterator<K, V>;
 
-  typedef std::tr1::unordered_map<K, std::tr1::unordered_set<V> > type;
+  hashset<V> EMPTY; // Used when no key is present.
+
+  typedef hashmap<K, hashset<V> > type;
   type map;
 };
 
 
 template <typename K, typename V>
-struct multimap_iterator
-  : std::iterator_traits<typename std::tr1::unordered_map<K, V>::iterator>
+struct multihashmap_iterator
+  : std::iterator_traits<typename hashmap<K, V>::iterator>
 {
   typedef std::forward_iterator_tag iterator_category;
 
-  multimap_iterator()
+  multihashmap_iterator()
     : current(NULL),
       outer_iterator(outer_type().end()),
       outer_end(outer_type().end()),
       inner_iterator(inner_type().end()),
       inner_end(inner_type().end()) {}
 
-  explicit multimap_iterator(multimap<K, V>& map)
+  explicit multihashmap_iterator(multihashmap<K, V>& map)
     : current(NULL),
       outer_iterator(map.map.begin()),
       outer_end(map.map.end()),
@@ -78,7 +83,7 @@ struct multimap_iterator
     update();
   }
 
-  multimap_iterator(const multimap_iterator<K, V>& that)
+  multihashmap_iterator(const multihashmap_iterator<K, V>& that)
     : current(NULL),
       outer_iterator(that.outer_iterator),
       outer_end(that.outer_end),
@@ -91,14 +96,14 @@ struct multimap_iterator
     }
   }
 
-  virtual ~multimap_iterator()
+  virtual ~multihashmap_iterator()
   {
     if (current != NULL) {
       delete current;
     }
   }
 
-  multimap_iterator& operator ++ ()
+  multihashmap_iterator& operator ++ ()
   {
     ++inner_iterator;
     if (inner_iterator == inner_end) {
@@ -126,7 +131,7 @@ struct multimap_iterator
     return current;
   }
 
-  bool operator == (const multimap_iterator& that) const
+  bool operator == (const multihashmap_iterator& that) const
   {
     bool this_end = outer_iterator == outer_end;
     bool that_end = that.outer_iterator == that.outer_end;
@@ -136,20 +141,20 @@ struct multimap_iterator
       return false;
     }
 
-    return outer_iterator == that.outer_iterator 
+    return outer_iterator == that.outer_iterator
       && inner_iterator == that.inner_iterator;
   }
 
-  bool operator != (const multimap_iterator& that) const
+  bool operator != (const multihashmap_iterator& that) const
   {
-    return !((*this).operator == (that));
+    return !((*this) == (that));
   }
 
 private:
-  typedef std::tr1::unordered_map<K, std::tr1::unordered_set<V> > outer_type;
-  typedef std::tr1::unordered_set<V> inner_type;
+  typedef hashmap<K, hashset<V> > outer_type;
+  typedef hashset<V> inner_type;
 
-  multimap_iterator& operator = (const multimap_iterator<K, V>&);
+  multihashmap_iterator& operator = (const multihashmap_iterator<K, V>&);
 
   void update()
   {
@@ -177,19 +182,19 @@ private:
 
 
 template <typename K, typename V>
-struct const_multimap_iterator
-  : std::iterator_traits<typename std::tr1::unordered_map<K, V>::const_iterator>
+struct const_multihashmap_iterator
+  : std::iterator_traits<typename hashmap<K, V>::const_iterator>
 {
   typedef std::forward_iterator_tag iterator_category;
 
-  const_multimap_iterator()
+  const_multihashmap_iterator()
     : current(NULL),
       outer_iterator(outer_type().end()),
       outer_end(outer_type().end()),
       inner_iterator(inner_type().end()),
       inner_end(inner_type().end()) {}
 
-  explicit const_multimap_iterator(const multimap<K, V>& map)
+  explicit const_multihashmap_iterator(const multihashmap<K, V>& map)
   : current(NULL),
       outer_iterator(map.map.begin()),
       outer_end(map.map.end()),
@@ -199,7 +204,7 @@ struct const_multimap_iterator
     update();
   }
 
-  const_multimap_iterator(const const_multimap_iterator<K, V>& that)
+  const_multihashmap_iterator(const const_multihashmap_iterator<K, V>& that)
     : current(NULL),
       outer_iterator(that.outer_iterator),
       outer_end(that.outer_end),
@@ -212,14 +217,14 @@ struct const_multimap_iterator
     }
   }
 
-  virtual ~const_multimap_iterator()
+  virtual ~const_multihashmap_iterator()
   {
     if (current != NULL) {
       delete current;
     }
   }
 
-  const_multimap_iterator& operator ++ ()
+  const_multihashmap_iterator& operator ++ ()
   {
     ++inner_iterator;
     if (inner_iterator == inner_end) {
@@ -247,7 +252,7 @@ struct const_multimap_iterator
     return current;
   }
 
-  bool operator == (const const_multimap_iterator& that) const
+  bool operator == (const const_multihashmap_iterator& that) const
   {
     bool this_end = outer_iterator == outer_end;
     bool that_end = that.outer_iterator == that.outer_end;
@@ -257,20 +262,22 @@ struct const_multimap_iterator
       return false;
     }
 
-    return outer_iterator == that.outer_iterator 
+    return outer_iterator == that.outer_iterator
       && inner_iterator == that.inner_iterator;
   }
 
-  bool operator != (const const_multimap_iterator& that) const
+  bool operator != (const const_multihashmap_iterator& that) const
   {
-    return !((*this).operator == (that));
+    return !((*this) == (that));
   }
 
 private:
-  typedef std::tr1::unordered_map<K, std::tr1::unordered_set<V> > outer_type;
-  typedef std::tr1::unordered_set<V> inner_type;
+  typedef hashmap<K, hashset<V> > outer_type;
+  typedef hashset<V> inner_type;
 
-  const_multimap_iterator& operator = (const const_multimap_iterator<K, V>&);
+  // Not assignable.
+  const_multihashmap_iterator& operator = (
+      const const_multihashmap_iterator<K, V>&);
 
   void update()
   {
@@ -298,114 +305,114 @@ private:
 
 
 template <typename K, typename V>
-void multimap<K, V>::insert(const K& key, const V& value)
+void multihashmap<K, V>::put(const K& key, const V& value)
 {
   map[key].insert(value);
 }
 
 
 template <typename K, typename V>
-void multimap<K, V>::clear()
+const hashset<V>& multihashmap<K, V>::get(const K& key) const
+{
+  typename type::const_iterator i = map.find(key);
+  if (i != map.end()) {
+    return (*i).second;
+  }
+  return EMPTY;
+}
+
+
+template <typename K, typename V>
+void multihashmap<K, V>::clear()
 {
   map.clear();
 }
 
 
 template <typename K, typename V>
-bool multimap<K, V>::empty() const
+bool multihashmap<K, V>::empty() const
 {
   return map.empty();
 }
 
 
 template <typename K, typename V>
-size_t multimap<K, V>::size() const
+size_t multihashmap<K, V>::size() const
 {
   return map.size();
 }
 
 
 template <typename K, typename V>
-size_t multimap<K, V>::erase(const K& key)
+bool multihashmap<K, V>::remove(const K& key)
 {
-  size_t result = count(key);
+  size_t result = map.count(key);
   map.erase(key);
-  return result;
+  return result > 0;
 }
 
 
 template <typename K, typename V>
-size_t multimap<K, V>::erase(const K& key, const V& value)
+bool multihashmap<K, V>::remove(const K& key, const V& value)
 {
-  size_t result = count(key, value);
+  size_t result = map.count(key);
   if (result > 0) {
     map[key].erase(value);
     if (map[key].size() == 0) {
       map.erase(key);
     }
   }
-  return result;
+  return result > 0;
 }
 
 
 template <typename K, typename V>
-size_t multimap<K, V>::count(const K& key) const
+bool multihashmap<K, V>::contains(const K& key) const
 {
   typename type::const_iterator i = map.find(key);
   if (i != map.end()) {
-    return i->second.size();
+    return i->second.size() > 0;
   }
-
-  return 0;
+  return false;
 }
 
 
 template <typename K, typename V>
-size_t multimap<K, V>::count(const K& key, const V& value) const
+bool multihashmap<K, V>::contains(const K& key, const V& value) const
 {
   typename type::const_iterator i = map.find(key);
   if (i != map.end()) {
-    return i->second.count(value);
+    return i->second.count(value) > 0;
   }
-
-  return 0;
+  return false;
 }
 
 
 template <typename K, typename V>
-std::tr1::unordered_set<V>& multimap<K, V>::operator [] (const K& key)
+typename multihashmap<K, V>::iterator multihashmap<K, V>::begin()
 {
-  return map[key];
+  return multihashmap_iterator<K, V>(*this);
 }
 
 
 template <typename K, typename V>
-typename multimap<K, V>::iterator multimap<K, V>::begin()
+typename multihashmap<K, V>::iterator multihashmap<K, V>::end()
 {
-  return multimap_iterator<K, V>(*this);
+  return multihashmap_iterator<K, V>();
 }
 
 
 template <typename K, typename V>
-typename multimap<K, V>::iterator multimap<K, V>::end()
+typename multihashmap<K, V>::const_iterator multihashmap<K, V>::begin() const
 {
-  return multimap_iterator<K, V>();
+  return const_multihashmap_iterator<K, V>(*this);
 }
 
 
 template <typename K, typename V>
-typename multimap<K, V>::const_iterator multimap<K, V>::begin() const
+typename multihashmap<K, V>::const_iterator multihashmap<K, V>::end() const
 {
-  return const_multimap_iterator<K, V>(*this);
+  return const_multihashmap_iterator<K, V>();
 }
 
-
-template <typename K, typename V>
-typename multimap<K, V>::const_iterator multimap<K, V>::end() const
-{
-  return const_multimap_iterator<K, V>();
-}
-
-}} // namespace mesos { namespace internal {
-
-#endif // __MULTIMAP_HPP__
+#endif // __MULTIHASHMAP_HPP__

@@ -54,7 +54,6 @@ inline std::ostream& operator << (std::ostream& stream, const TaskState& state)
 }
 
 
-
 inline bool operator == (const FrameworkID& left, const FrameworkID& right)
 {
   return left.value() == right.value();

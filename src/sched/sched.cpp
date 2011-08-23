@@ -84,11 +84,10 @@ public:
         &SchedulerProcess::registered,
         &FrameworkRegisteredMessage::framework_id);
 
-    installProtobufHandler<ResourceOfferMessage>(
-        &SchedulerProcess::resourceOffer,
-        &ResourceOfferMessage::offer_id,
-        &ResourceOfferMessage::offers,
-        &ResourceOfferMessage::pids);
+    installProtobufHandler<ResourceOffersMessage>(
+        &SchedulerProcess::resourceOffers,
+        &ResourceOffersMessage::offers,
+        &ResourceOffersMessage::pids);
 
     installProtobufHandler<RescindResourceOfferMessage>(
         &SchedulerProcess::rescindOffer,
@@ -160,29 +159,27 @@ protected:
     invoke(bind(&Scheduler::registered, sched, driver, cref(frameworkId)));
   }
 
-  void resourceOffer(const OfferID& offerId,
-                     const vector<SlaveOffer>& offers,
-                     const vector<string>& pids)
+  void resourceOffers(const vector<Offer>& offers,
+                      const vector<string>& pids)
   {
-    VLOG(1) << "Received offer " << offerId;
+    VLOG(1) << "Received " << offers.size() << " offers";
 
-    // Save the pid associated with each slave (one per SlaveOffer) so
-    // later we can send framework messages directly.
     CHECK(offers.size() == pids.size());
 
+    // Save the pid associated with each slave (one per offer) so
+    // later we can send framework messages directly.
     for (int i = 0; i < offers.size(); i++) {
       UPID pid(pids[i]);
+      // Check if parse failed (e.g., due to DNS).
       if (pid != UPID()) {
 	VLOG(2) << "Saving PID '" << pids[i] << "'";
-	savedOffers[offerId][offers[i].slave_id()] = pid;
+	savedOffers[offers[i].id()][offers[i].slave_id()] = pid;
       } else {
-	// Parsing of a PID may fail due to DNS! 
 	VLOG(2) << "Failed to parse PID '" << pids[i] << "'";
       }
     }
 
-    invoke(bind(&Scheduler::resourceOffer, sched, driver, cref(offerId),
-                cref(offers)));
+    invoke(bind(&Scheduler::resourceOffers, sched, driver, cref(offers)));
   }
 
   void rescindOffer(const OfferID& offerId)
@@ -298,7 +295,7 @@ protected:
 
   void replyToOffer(const OfferID& offerId,
                     const vector<TaskDescription>& tasks,
-                    const map<string, string>& params)
+                    const Filters& filters)
   {
     if (!active)
       return;
@@ -306,12 +303,7 @@ protected:
     ResourceOfferReplyMessage message;
     message.mutable_framework_id()->MergeFrom(frameworkId);
     message.mutable_offer_id()->MergeFrom(offerId);
-
-    foreachpair (const string& key, const string& value, params) {
-      Param* param = message.mutable_params()->add_param();
-      param->set_key(key);
-      param->set_value(value);
-    }
+    message.mutable_filters()->MergeFrom(filters);
 
     foreach (const TaskDescription& task, tasks) {
       // Keep only the slave PIDs where we run tasks so we can send
@@ -437,7 +429,7 @@ MesosSchedulerDriver::MesosSchedulerDriver(Scheduler* sched,
 
 
 MesosSchedulerDriver::MesosSchedulerDriver(Scheduler* sched,
-					   const map<string, string> &params,
+					   const map<string, string>& params,
 					   const FrameworkID& frameworkId)
 {
   Configurator configurator;
@@ -665,7 +657,7 @@ int MesosSchedulerDriver::killTask(const TaskID& taskId)
 
 int MesosSchedulerDriver::replyToOffer(const OfferID& offerId,
                                        const vector<TaskDescription>& tasks,
-                                       const map<string, string>& params)
+                                       const Filters& filters)
 {
   Lock lock(&mutex);
 
@@ -673,7 +665,7 @@ int MesosSchedulerDriver::replyToOffer(const OfferID& offerId,
     return -1;
   }
 
-  dispatch(process, &SchedulerProcess::replyToOffer, offerId, tasks, params);
+  dispatch(process, &SchedulerProcess::replyToOffer, offerId, tasks, filters);
 
   return 0;
 }

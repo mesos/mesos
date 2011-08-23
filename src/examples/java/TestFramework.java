@@ -46,13 +46,10 @@ public class TestFramework {
     }
 
     @Override
-    public void resourceOffer(SchedulerDriver driver,
-                              OfferID offerId,
-                              List<SlaveOffer> offers) {
-      System.out.println("Got offer " + offerId.getValue());
-      List<TaskDescription> tasks = new ArrayList<TaskDescription>();
-
-      for (SlaveOffer offer : offers) {
+    public void resourceOffers(SchedulerDriver driver,
+                               List<Offer> offers) {
+      for (Offer offer : offers) {
+        List<TaskDescription> tasks = new ArrayList<TaskDescription>();
         if (launchedTasks < totalTasks) {
           TaskID taskId = TaskID.newBuilder()
             .setValue(Integer.toString(launchedTasks++)).build();
@@ -78,14 +75,11 @@ public class TestFramework {
                                      .build())
                           .build())
             .build();
-
           tasks.add(task);
         }
+        Filters filters = Filters.newBuilder().setRefuseSeconds(1).build();
+        driver.replyToOffer(offer.getId(), tasks, filters);
       }
-
-      Map<String, String> params = new HashMap<String, String>();
-      params.put("timeout", "1");
-      driver.replyToOffer(offerId, tasks, params);
     }
 
     @Override
