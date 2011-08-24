@@ -523,6 +523,12 @@ int ZooKeeper::getState()
 }
 
 
+int64_t ZooKeeper::getSessionId()
+{
+  return zoo_client_id(impl->zh)->client_id;
+}
+
+
 int ZooKeeper::create(const string& path, const string& data,
                       const ACL_vector& acl, int flags, string* result)
 {

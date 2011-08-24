@@ -17,6 +17,18 @@ CXXFLAGS = @CXXFLAGS@
 LDFLAGS = @LDFLAGS@
 LIBS = @LIBS@
 
+OS_NAME = @OS_NAME@
+
+JAVA_HOME = @JAVA_HOME@
+JAVA_HEADERS = @JAVA_HEADERS@
+
+ifeq ($(OS_NAME),darwin)
+  LDFLAGS += -framework JavaVM
+else
+  # TODO(John Sirois): parameterize via configure templates
+  LDFLAGS += -L$(JAVA_HOME)/jre/lib/amd64/server -ljvm
+endif
+
 WITH_ZOOKEEPER = @WITH_ZOOKEEPER@
 
 WITH_INCLUDED_ZOOKEEPER = @WITH_INCLUDED_ZOOKEEPER@
@@ -111,7 +123,9 @@ TESTS_OBJ = main.o utils.o master_tests.o resource_offers_tests.o	\
 	    uuid_tests.o external_tests.o sample_frameworks_tests.o	\
 	    configurator_tests.o string_utils_tests.o			\
 	    multihashmap_tests.o protobuf_io_tests.o			\
-	    lxc_isolation_tests.o
+	    lxc_isolation_tests.o utils_tests.o jvm.o			\
+	    zookeeper_server.o base_zookeeper_test.o			\
+	    zookeeper_server_tests.o
 
 ALLTESTS_EXE = $(BINDIR)/tests/all-tests
 
@@ -156,7 +170,8 @@ $(TESTS_OBJ): %.o: $(SRCDIR)/%.cpp
 	$(CXX) -c $(CXXFLAGS) \
 	  -DROOT_DIR=\"$(TOP)/@top_srcdir@\" \
 	  -DBUILD_DIR=\"$(TOP)/@top_builddir@\" \
-	  -o $@ $<
+	  -I$(JAVA_HOME)/include -I$(JAVA_HOME)/include/$(OS_NAME) \
+	  -I$(JAVA_HEADERS) -o $@ $<
 
 $(ALLTESTS_EXE): $(TESTS_OBJ) $(GMOCK_LIB) $(SCHED_LIB) $(EXEC_LIB) | $(BINDIR)/tests
 	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)

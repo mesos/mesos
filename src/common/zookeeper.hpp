@@ -24,7 +24,6 @@
 class ZooKeeper;
 class ZooKeeperImpl;
 
-
 /**
  * This interface specifies the public interface an event handler
  * class must implement. A ZooKeeper client will get various events
@@ -113,14 +112,21 @@ public:
 
   /**
    * \brief get the state of the zookeeper connection.
-   * 
+   *
    * The return value will be one of the \ref State Consts.
    */
   int getState();
 
   /**
+   * \brief get the current session id.
+   *
+   * The current session id or 0 if no session is established.
+   */
+  int64_t getSessionId();
+
+  /**
    * \brief create a node synchronously.
-   * 
+   *
    * This method will create a node in ZooKeeper. A node can only be
    * created if it does not already exists. The Create Flags affect
    * the creation of nodes.  If ZOO_EPHEMERAL flag is set, the node
