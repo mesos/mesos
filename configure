@@ -1810,6 +1810,7 @@ ac_compiler_gnu=$ac_cv_c_compiler_gnu
 if test -z "$PYTHON"; then
   PYTHON=python2.6
 fi
+PYTHON_CONFIG=$PYTHON-config
 
 # Update CFLAGS and CXXFLAGS with environment args.
 CFLAGS="-O2 -fno-strict-aliasing -fPIC ${CFLAGS}"
@@ -2068,7 +2069,7 @@ if test "${with_python_headers+set}" = set; then :
 		    *)
                       PYTHON_HEADERS="$withval"
                       echo running $PYTHON to find compiler flags for creating the Mesos Python library...
-                      PYTHON_LDFLAGS=`$PYTHON -c 'from distutils import sysconfig; print sysconfig.get_config_var("LINKFORSHARED") + " -lpython" + sysconfig.get_config_var("VERSION")'`
+                      PYTHON_LDFLAGS=`$PYTHON_CONFIG --ldflags`
                       HAS_PYTHON="1"
                       ;;
 	          esac
@@ -2088,9 +2089,9 @@ if test "${with_webui+set}" = set; then :
   withval=$with_webui; case "$with_webui" in
 		    yes) WITH_WEBUI="1"
                          echo running $PYTHON to find compiler flags for embedding it...
-                         WEBUI_CFLAGS=`$PYTHON -c 'from distutils import sysconfig; print "-I" + sysconfig.get_config_var("INCLUDEPY")'`
+                         WEBUI_CFLAGS=`$PYTHON_CONFIG --includes`
                          WEBUI_CXXFLAGS=$WEBUI_CFLAGS
-                         WEBUI_LDFLAGS=`$PYTHON -c 'from distutils import sysconfig; print sysconfig.get_config_var("LINKFORSHARED") + " -lpython" + sysconfig.get_config_var("VERSION")'`
+                         WEBUI_LDFLAGS=`$PYTHON_CONFIG --ldflags`
                          if [ "$?" -ne "0" ]; then
                            as_fn_error $? "
 *** Failed to determine compiler flags for embedding Python, needed by web UI.
