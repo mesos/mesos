@@ -53,7 +53,10 @@ public:
     void awaitCreated(const std::string& path);
 
     // Blocks until an event is fired matching the given predicate.
-    void awaitEvent(function<bool(Event)> matches);
+    Event awaitEvent(function<bool(Event)> matches);
+
+    // Blocks until an event is fired.
+    Event awaitEvent();
 
   private:
     std::queue<Event> events;

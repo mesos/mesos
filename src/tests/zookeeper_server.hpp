@@ -62,7 +62,6 @@ private:
 
   Jvm* jvm;
 
-
   Jvm::JConstructor* fileConstructor;
   jobject snapLog;
   jobject dataTreeBuilder;

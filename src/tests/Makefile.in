@@ -125,7 +125,7 @@ TESTS_OBJ = main.o utils.o master_tests.o resource_offers_tests.o	\
 	    multihashmap_tests.o protobuf_io_tests.o			\
 	    lxc_isolation_tests.o utils_tests.o jvm.o			\
 	    zookeeper_server.o base_zookeeper_test.o			\
-	    zookeeper_server_tests.o
+	    zookeeper_server_tests.o zookeeper_tests.o
 
 ALLTESTS_EXE = $(BINDIR)/tests/all-tests
 

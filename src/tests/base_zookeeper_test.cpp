@@ -28,19 +28,23 @@ namespace test {
 
 void BaseZooKeeperTest::SetUpTestCase()
 {
-  std::vector<std::string> opts;
+  static Jvm* singleton;
+  if (singleton == NULL) {
+    std::vector<std::string> opts;
 
-  std::string zkHome = mesosRoot + "/third_party/zookeeper-3.3.1";
-  std::string classpath = "-Djava.class.path=" +
-      zkHome + "/conf:" +
-      zkHome + "/zookeeper-3.3.1.jar:" +
-      zkHome + "/lib/log4j-1.2.15.jar";
-  LOG(INFO) << "Using classpath setup: " << classpath << std::endl;
-  opts.push_back(classpath);
+    std::string zkHome = mesosRoot + "/third_party/zookeeper-3.3.1";
+    std::string classpath = "-Djava.class.path=" +
+        zkHome + "/conf:" +
+        zkHome + "/zookeeper-3.3.1.jar:" +
+        zkHome + "/lib/log4j-1.2.15.jar";
+    LOG(INFO) << "Using classpath setup: " << classpath << std::endl;
+    opts.push_back(classpath);
+    singleton = new Jvm(opts);
+  }
 
   // TODO(John Sirois): Introduce a mechanism to contribute classpath
   // requirements to a singleton Jvm, then access the singleton here.
-  jvm = new Jvm(opts);
+  jvm = singleton;
 }
 
 
@@ -116,7 +120,8 @@ void BaseZooKeeperTest::TestWatcher::awaitCreated(const std::string& path)
 }
 
 
-void BaseZooKeeperTest::TestWatcher::awaitEvent(function<bool(Event)> matches)
+BaseZooKeeperTest::TestWatcher::Event
+BaseZooKeeperTest::TestWatcher::awaitEvent()
 {
   Lock lock(&mutex);
   while (true) {
@@ -125,8 +130,18 @@ void BaseZooKeeperTest::TestWatcher::awaitEvent(function<bool(Event)> matches)
     }
     Event event = events.front();
     events.pop();
+    return event;
+  }
+}
+
+
+BaseZooKeeperTest::TestWatcher::Event
+BaseZooKeeperTest::TestWatcher::awaitEvent(function<bool(Event)> matches)
+{
+  while (true) {
+    Event event = awaitEvent();
     if (matches(event)) {
-      return;
+      return event;
     }
   }
 }

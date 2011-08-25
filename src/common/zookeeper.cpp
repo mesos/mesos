@@ -180,6 +180,25 @@ public:
     }
   }
 
+  Promise<int> authenticate(const string& username, const string& password)
+  {
+    std::string auth = username + ":" + password;
+
+    Promise<int> promise;
+
+    tuple<Promise<int> >* args = new tuple<Promise<int> >(promise);
+
+    int ret = zoo_add_auth(zh, "digest", auth.c_str(), auth.length(),
+                           voidCompletion, args);
+
+    if (ret != ZOK) {
+      promise.set(ret);
+      delete args;
+    }
+
+    return promise;
+  }
+
   Promise<int> create(const string& path, const string& data,
                       const ACL_vector& acl, int flags, string* result)
   {
@@ -385,6 +404,7 @@ private:
 		      impl->zk, type, state, string(path));
   }
 
+
   static void voidCompletion(int ret, const void *data)
   {
     const tuple<Promise<int> >* args =
@@ -396,6 +416,7 @@ private:
 
     delete args;
   }
+
 
   static void stringCompletion(int ret, const char* value, const void* data)
   {
@@ -415,6 +436,7 @@ private:
 
     delete args;
   }
+
 
   static void statCompletion(int ret, const Stat* stat, const void* data)
   {
@@ -526,6 +548,18 @@ int ZooKeeper::getState()
 int64_t ZooKeeper::getSessionId()
 {
   return zoo_client_id(impl->zh)->client_id;
+}
+
+
+int ZooKeeper::authenticate(const string& username, const string& password)
+{
+#ifndef USE_THREADED_ZOOKEEPER
+  return process::call(impl->self(), &ZooKeeperImpl::authenticate,
+                       cref(username), cref(password));
+#else
+  Promise<int> promise = impl->authenticate(username, password);
+  return promise.future().get();
+#endif // USE_THREADED_ZOOKEEPER
 }
 
 

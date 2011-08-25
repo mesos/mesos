@@ -125,6 +125,11 @@ public:
   int64_t getSessionId();
 
   /**
+   * \brief authenticate synchronously.
+   */
+  int authenticate(const std::string& username, const std::string& password);
+
+  /**
    * \brief create a node synchronously.
    *
    * This method will create a node in ZooKeeper. A node can only be

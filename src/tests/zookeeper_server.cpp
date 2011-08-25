@@ -123,13 +123,17 @@ ZooKeeperServer::~ZooKeeperServer()
   jvm->deleteGlobalRefSafe(dataTreeBuilder);
   jvm->deleteGlobalRefSafe(zooKeeperServer);
 
+  delete fileConstructor;
   delete getClientPort;
   delete closeSession;
+
   delete inetSocketAddressConstructor;
   delete cnxnFactoryConstructor;
+
+  delete startup;
   delete isAlive;
   delete shutdown;
-  delete fileConstructor;
+
   delete dataDir;
   delete snapDir;
 }
