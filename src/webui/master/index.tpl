@@ -73,6 +73,7 @@
 
 <p>
   Server: {{HOSTNAME}} ({{ip}})<br />
+  PID: {{state['pid']}}<br />
   Built: {{state['build_date']}} by {{state['build_user']}}<br />
   Started: {{start_local}} ({{start_utc}} UTC)<br />
   ID: {{state['id']}}<br />
