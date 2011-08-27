@@ -1,6 +1,8 @@
 #ifndef __OPTION_HPP__
 #define __OPTION_HPP__
 
+#include <assert.h>
+
 template <typename T>
 class Option
 {

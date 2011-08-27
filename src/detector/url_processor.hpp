@@ -4,7 +4,8 @@
 #include <string>
 
 
-namespace mesos { namespace internal {
+namespace mesos {
+namespace internal {
     
 class UrlProcessor {
       
@@ -16,6 +17,7 @@ public:
   static std::pair<UrlProcessor::URLType, std::string> process(const std::string &_url);
 };
 
-}}
+} // namespace internal
+} // namespace mesos
 
 #endif /* _URL_PROCESSOR_HPP_ */
