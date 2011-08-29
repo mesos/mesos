@@ -18,7 +18,7 @@ TEST(Multihashmap, Put)
   map.put("foo", 1025);
   ASSERT_EQ(2, map.get("foo").size());
 
-  ASSERT_EQ(1, map.size());
+  ASSERT_EQ(2, map.size());
 
   map.put("bar", 1024);
   ASSERT_EQ(1, map.get("bar").size());
@@ -26,7 +26,7 @@ TEST(Multihashmap, Put)
   map.put("bar", 1025);
   ASSERT_EQ(2, map.get("bar").size());
 
-  ASSERT_EQ(2, map.size());
+  ASSERT_EQ(4, map.size());
 }
 
 
@@ -44,7 +44,7 @@ TEST(Multihashmap, Remove)
   map.put("foo", 1025);
   ASSERT_EQ(2, map.get("foo").size());
 
-  ASSERT_EQ(1, map.size());
+  ASSERT_EQ(2, map.size());
 
   map.remove("foo");
   ASSERT_EQ(0, map.get("foo").size());
@@ -61,12 +61,14 @@ TEST(Multihashmap, Size)
   ASSERT_EQ(2, map.get("foo").size());
   ASSERT_TRUE(map.contains("foo", 1024));
   ASSERT_TRUE(map.contains("foo", 1025));
+  ASSERT_EQ(2, map.size());
 
   map.put("bar", 1024);
   map.put("bar", 1025);
   ASSERT_EQ(2, map.get("bar").size());
   ASSERT_TRUE(map.contains("bar", 1024));
   ASSERT_TRUE(map.contains("bar", 1025));
+  ASSERT_EQ(4, map.size());
 }
 
 
