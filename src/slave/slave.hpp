@@ -114,8 +114,8 @@ protected:
   // Helper function for generating a unique work directory for this
   // framework/executor pair (non-trivial since a framework/executor
   // pair may be launched more than once on the same slave).
-  std::string getUniqueWorkDirectory(const FrameworkID& frameworkId,
-                                     const ExecutorID& executorId);
+  std::string createUniqueWorkDirectory(const FrameworkID& frameworkId,
+                                        const ExecutorID& executorId);
 
 private:
   // Http handlers, friends of the slave in order to access state,

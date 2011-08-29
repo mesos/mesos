@@ -250,6 +250,8 @@ public:
       MesosExecutorDriver* driver = new MesosExecutorDriver(executor);
       drivers[executorInfo.executor_id()] = driver;
 
+      directories[executorInfo.executor_id()] = directory;
+
       utils::os::setenv("MESOS_LOCAL", "1");
       utils::os::setenv("MESOS_DIRECTORY", directory);
       utils::os::setenv("MESOS_SLAVE_PID", slave);
@@ -286,6 +288,8 @@ public:
                                 const ExecutorID& executorId,
                                 const Resources& resources)
   {}
+
+  std::map<ExecutorID, std::string> directories;
 
 private:
   std::map<ExecutorID, Executor*> executors;

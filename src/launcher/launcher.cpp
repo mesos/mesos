@@ -42,13 +42,13 @@ ExecutorLauncher::ExecutorLauncher(const FrameworkID& _frameworkId,
                                    const string& _hadoopHome,
                                    bool _redirectIO,
                                    bool _shouldSwitchUser,
-				   const string& _container,
+                                   const string& _container,
                                    const map<string, string>& _params)
   : frameworkId(_frameworkId), executorId(_executorId),
     executorUri(_executorUri), user(_user),
     workDirectory(_workDirectory), slavePid(_slavePid),
     frameworksHome(_frameworksHome), mesosHome(_mesosHome),
-    hadoopHome(_hadoopHome), redirectIO(_redirectIO), 
+    hadoopHome(_hadoopHome), redirectIO(_redirectIO),
     shouldSwitchUser(_shouldSwitchUser), container(_container), params(_params)
 {}
 
@@ -60,7 +60,7 @@ ExecutorLauncher::~ExecutorLauncher()
 
 int ExecutorLauncher::run()
 {
-  createWorkingDirectory();
+  initializeWorkingDirectory();
 
   // Enter working directory
   if (chdir(workDirectory.c_str()) < 0)
@@ -114,32 +114,19 @@ int ExecutorLauncher::run()
 }
 
 
-// Create the executor's working directory and return its path.
-void ExecutorLauncher::createWorkingDirectory()
+// Own the working directory, if necessary.
+void ExecutorLauncher::initializeWorkingDirectory()
 {
-  cout << "Creating directory " << workDirectory << endl;
-
-  // Split the path into tokens by "/" and make each directory
-  vector<string> tokens;
-  StringUtils::split(workDirectory, "/", &tokens);
-  string dir = "";
-  if (workDirectory.find_first_of("/") == 0) // We got an absolute path, so
-    dir = "/";                               // keep the leading slash
-
-  foreach (const string& token, tokens) {
-    dir += token;
-    if (mkdir(dir.c_str(), 0755) < 0 && errno != EEXIST)
-      fatalerror("Failed to mkdir %s.", dir.c_str());
-    dir += "/";
-  }
+  // NOTE(vinod): The directory creation now happens in the slave
+  // instead of executor.
   if (shouldSwitchUser) {
     struct passwd *passwd;
     if ((passwd = getpwnam(user.c_str())) == NULL)
       fatal("Failed to get username information for %s.", user.c_str());
 
-    if (chown(dir.c_str(), passwd->pw_uid, passwd->pw_gid) < 0)
+    if (chown(workDirectory.c_str(), passwd->pw_uid, passwd->pw_gid) < 0)
       fatalerror("Failed to chown framework's working directory %s to %s.",
-                 dir.c_str(), passwd->pw_uid);
+                 workDirectory.c_str(), passwd->pw_uid);
   }
 }
 
@@ -171,7 +158,7 @@ string ExecutorLauncher::fetchExecutor()
     } else {
       hadoopScript = "hadoop"; // Look for hadoop on the PATH.
     }
-    
+
     string localFile = string("./") + basename((char *) executor.c_str());
     ostringstream command;
     command << hadoopScript << " fs -copyToLocal '" << executor
@@ -196,7 +183,7 @@ string ExecutorLauncher::fetchExecutor()
     } else {
       if (mesosHome != "") {
         executor = mesosHome + "/frameworks/" + executor;
-        cout << "Prepended MESOS_HOME/frameworks/ to relative " 
+        cout << "Prepended MESOS_HOME/frameworks/ to relative "
              << "executor path, making it: " << executor << endl;
       } else {
         fatal("A relative path was passed for the executor, but " \
@@ -208,7 +195,7 @@ string ExecutorLauncher::fetchExecutor()
   }
 
   // If the executor was a .tgz, untar it in the work directory. The .tgz
-  // expected to contain a single directory. This directory should contain 
+  // expected to contain a single directory. This directory should contain
   // a program or script called "executor" to run the executor. We chdir
   // into this directory and run the script from in there.
   if (executor.rfind(".tgz") == executor.size() - strlen(".tgz")) {
@@ -261,7 +248,7 @@ void ExecutorLauncher::setupEnvironment()
   setenv("MESOS_SLAVE_PID", slavePid.c_str(), 1);
   setenv("MESOS_FRAMEWORK_ID", frameworkId.value().c_str(), 1);
   setenv("MESOS_EXECUTOR_ID", executorId.value().c_str(), 1);
-  
+
   // Set LIBPROCESS_PORT so that we bind to a random free port.
   setenv("LIBPROCESS_PORT", "0", 1);
 

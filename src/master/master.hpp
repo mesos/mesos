@@ -298,7 +298,7 @@ struct Slave
 
       executors[frameworkId].erase(executorId);
       if (executors[frameworkId].size() == 0) {
-	executors.erase(frameworkId);
+        executors.erase(frameworkId);
       }
     }
   }

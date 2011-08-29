@@ -21,6 +21,12 @@ def framework(id):
   return template("framework", slave_port = slave_port, framework_id = id)
 
 
+@route('/executor/:fid#.*#/:eid#.*#')
+def executor(fid, eid):
+  bottle.TEMPLATES.clear() # For rapid development
+  return template("executor", slave_port = slave_port, framework_id = fid, executor_id = eid)
+
+
 @route('/static/:filename#.*#')
 def static(filename):
   send_file(filename, root = './webui/static')
@@ -39,33 +45,33 @@ def log_tail(level, lines):
   return commands.getoutput(command)
 
 
-@route('/framework-logs/:fid#.*#/:log_type#[a-z]*#')
-def framework_log_full(fid, log_type):
+@route('/executor-logs/:fid#.*#/:eid#.*#/:log_type#[a-z]*#')
+def framework_log_full(fid, eid, log_type):
   url = "http://localhost:" + slave_port + "/slave/state.json"
   data = urllib.urlopen(url).read()
   state = json.loads(data)
   sid = state['id']
   if sid != -1:
-    dir = '%s/slave-%s/fw-%s' % (work_dir, sid, fid)
+    dir = '%s/slaves/%s/frameworks/%s/executors/%s/runs/' % (work_dir, sid, fid, eid)
     i = max(os.listdir(dir))
-    exec_dir = '%s/slave-%s/fw-%s/%s' % (work_dir, sid, fid, i)
+    exec_dir = '%s/slaves/%s/frameworks/%s/executors/%s/runs/%s' % (work_dir, sid, fid, eid, i)
     send_file(log_type, root = exec_dir,
               guessmime = False, mimetype = 'text/plain')
   else:
     abort(403, 'Slave not yet registered with master')
 
 
-@route('/framework-logs/:fid#.*#/:log_type#[a-z]*#/:lines#[0-9]*#')
-def framework_log_tail(fid, log_type, lines):
+@route('/executor-logs/:fid#.*#/:eid#.*#/:log_type#[a-z]*#/:lines#[0-9]*#')
+def framework_log_tail(fid, eid, log_type, lines):
   bottle.response.content_type = 'text/plain'
   url = "http://localhost:" + slave_port + "/slave/state.json"
   data = urllib.urlopen(url).read()
   state = json.loads(data)
   sid = state['id']
   if sid != -1:
-    dir = '%s/slave-%s/fw-%s' % (work_dir, sid, fid)
+    dir = '%s/slaves/%s/frameworks/%s/executors/%s/runs/' % (work_dir, sid, fid, eid)
     i = max(os.listdir(dir))
-    filename = '%s/slave-%s/fw-%s/%s/%s' % (work_dir, sid, fid, i, log_type)
+    filename = '%s/slaves/%s/frameworks/%s/executors/%s/runs/%s/%s' % (work_dir, sid, fid, eid, i, log_type)
     command = 'tail -%s %s' % (lines, filename)
     return commands.getoutput(command)
   else:

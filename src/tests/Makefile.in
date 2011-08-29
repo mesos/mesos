@@ -126,9 +126,11 @@ TESTS_OBJ = main.o utils.o master_tests.o resource_offers_tests.o	\
 	    lxc_isolation_tests.o utils_tests.o jvm.o			\
 	    zookeeper_server.o base_zookeeper_test.o			\
 	    zookeeper_server_tests.o zookeeper_tests.o			\
-	    url_processor_tests.o
+	    url_processor_tests.o killtree_tests.o
 
 ALLTESTS_EXE = $(BINDIR)/tests/all-tests
+
+PROCESS_SPAWN = $(BINDIR)/tests/process_spawn
 
 EXTERNAL_SCRIPTS =							\
   $(BINDIR)/tests/external/LxcIsolation/HoldMoreMemThanRequested.sh	\
@@ -141,13 +143,15 @@ EXTERNAL_SCRIPTS =							\
   $(BINDIR)/tests/external/SampleFrameworks/CppFramework.sh		\
   $(BINDIR)/tests/external/SampleFrameworks/JavaExceptionFramework.sh	\
   $(BINDIR)/tests/external/SampleFrameworks/JavaFramework.sh		\
-  $(BINDIR)/tests/external/SampleFrameworks/PythonFramework.sh
+  $(BINDIR)/tests/external/SampleFrameworks/PythonFramework.sh		\
+  $(BINDIR)/tests/external/KillTree/KillTreeTest.sh
 
 # Create rules for building the directories that aren't created
 # automagically by configure.
 DIRECTORIES = $(BINDIR)/tests                                   \
 	      $(BINDIR)/tests/external/LxcIsolation		\
-              $(BINDIR)/tests/external/SampleFrameworks
+              $(BINDIR)/tests/external/SampleFrameworks         \
+              $(BINDIR)/tests/external/KillTree
 
 
 default: all
@@ -177,15 +181,19 @@ $(TESTS_OBJ): %.o: $(SRCDIR)/%.cpp
 $(ALLTESTS_EXE): $(TESTS_OBJ) $(GMOCK_LIB) $(SCHED_LIB) $(EXEC_LIB) | $(BINDIR)/tests
 	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
 
+$(PROCESS_SPAWN): $(SRCDIR)/process_spawn.cpp
+	$(CXX) -o $@ $<
+
 $(EXTERNAL_SCRIPTS): | $(BINDIR)/tests/external/LxcIsolation
 $(EXTERNAL_SCRIPTS): | $(BINDIR)/tests/external/SampleFrameworks
+$(EXTERNAL_SCRIPTS): | $(BINDIR)/tests/external/KillTree
 $(EXTERNAL_SCRIPTS): $(BINDIR)/tests/%: $(SRCDIR)/%
 	cp $< $@
 
 test: all
 	$(ALLTESTS_EXE)
 
-all: $(ALLTESTS_EXE) $(EXTERNAL_SCRIPTS) 
+all: $(ALLTESTS_EXE) $(EXTERNAL_SCRIPTS) $(PROCESS_SPAWN)
 
 clean:
 	rm -f $(patsubst %.o, %.d, $(GTEST_OBJ)) $(GTEST_OBJ)

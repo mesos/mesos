@@ -18,6 +18,7 @@
 #include "common/lock.hpp"
 #include "common/logging.hpp"
 #include "common/type_utils.hpp"
+#include "common/utils.hpp"
 #include "common/uuid.hpp"
 
 #include "messages/messages.hpp"
@@ -45,13 +46,15 @@ public:
                   Executor* _executor,
                   const FrameworkID& _frameworkId,
                   const ExecutorID& _executorId,
-                  bool _local)
+                  bool _local,
+                  const std::string& _directory)
     : slave(_slave),
       driver(_driver),
       executor(_executor),
       frameworkId(_frameworkId),
       executorId(_executorId),
-      local(_local)
+      local(_local),
+      directory(_directory)
   {
     installProtobufHandler<ExecutorRegisteredMessage>(
         &ExecutorProcess::registered,
@@ -189,6 +192,7 @@ private:
   ExecutorID executorId;
   SlaveID slaveId;
   bool local;
+  const std::string directory;
 };
 
 }} // namespace mesos { namespace internal {
@@ -245,6 +249,7 @@ int MesosExecutorDriver::start()
   UPID slave;
   FrameworkID frameworkId;
   ExecutorID executorId;
+  std::string workDirectory;
 
   char* value;
   std::istringstream iss;
@@ -289,8 +294,18 @@ int MesosExecutorDriver::start()
 
   executorId.set_value(value);
 
+  /* Get working directory from environment */
+  value = getenv("MESOS_DIRECTORY");
+
+  if (value == NULL) {
+    fatal("expecting MESOS_DIRECTORY in environment");
+  }
+
+  workDirectory = value;
+
   process =
-    new ExecutorProcess(slave, this, executor, frameworkId, executorId, local);
+    new ExecutorProcess(slave, this, executor, frameworkId,
+                        executorId, local, workDirectory);
 
   spawn(process);
 

@@ -243,7 +243,7 @@ void Master::operator () ()
   // Don't do anything until we get a master token.
   while (receive() != GotMasterTokenMessage().GetTypeName()) {
     LOG(INFO) << "Oops! We're dropping a message since "
-              << "we haven't received an identifier yet!";  
+              << "we haven't received an identifier yet!";
   }
 
   GotMasterTokenMessage message;
@@ -901,7 +901,7 @@ void Master::exitedExecutor(const SlaveID& slaveId,
 {
   // TODO(benh): Send status updates for the tasks running under this
   // executor from the slave! Maybe requires adding an extra "reason"
-  // so that people can see that the tasks were lost because of 
+  // so that people can see that the tasks were lost because of
 
   Slave* slave = getSlave(slaveId);
   if (slave != NULL) {
@@ -976,9 +976,9 @@ void Master::deactivatedSlaveHostnamePort(const string& hostname,
     foreachvalue (Slave* slave, slaves) {
       if (slave->info.hostname() == hostname && slave->pid.port == port) {
         LOG(WARNING) << "Removing slave " << slave->id << " at "
-		     << hostname << ":" << port
-                     << " because it has been deactivated";
-	send(slave->pid, TERMINATE);
+          << hostname << ":" << port
+          << " because it has been deactivated";
+        send(slave->pid, TERMINATE);
         removeSlave(slave);
         break;
       }
@@ -1434,7 +1434,7 @@ void Master::removeFramework(Framework* framework)
 {
   framework->active = false;
   // TODO: Notify allocator that a framework removal is beginning?
-  
+
   // Tell slaves to shutdown the framework.
   foreachvalue (Slave* slave, slaves) {
     ShutdownFrameworkMessage message;
@@ -1519,10 +1519,10 @@ void Master::readdSlave(Slave* slave,
     // Find the executor running this task and add it to the slave.
     foreach (const ExecutorInfo& executorInfo, executorInfos) {
       if (executorInfo.executor_id() == task.executor_id()) {
-	if (!slave->hasExecutor(task.framework_id(), task.executor_id())) {
-	  slave->addExecutor(task.framework_id(), executorInfo);
-	}
-	break;
+        if (!slave->hasExecutor(task.framework_id(), task.executor_id())) {
+          slave->addExecutor(task.framework_id(), executorInfo);
+        }
+        break;
       }
     }
 
@@ -1556,11 +1556,11 @@ void Master::readdSlave(Slave* slave,
 
 // Lose all of a slave's tasks and delete the slave object
 void Master::removeSlave(Slave* slave)
-{ 
+{
   slave->active = false;
 
   // TODO: Notify allocator that a slave removal is beginning?
-  
+
   // Remove pointers to slave's tasks in frameworks, and send status updates
   foreachvalue (Task* task, utils::copy(slave->tasks)) {
     Framework* framework = getFramework(task->framework_id());

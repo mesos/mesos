@@ -210,6 +210,7 @@ WEBUI_FILES = $(BINDIR)/webui/bottle-0.8.3		\
               $(BINDIR)/webui/master/index.tpl		\
               $(BINDIR)/webui/master/webui.py		\
               $(BINDIR)/webui/slave/framework.tpl	\
+              $(BINDIR)/webui/slave/executor.tpl	\
               $(BINDIR)/webui/slave/index.tpl		\
               $(BINDIR)/webui/slave/webui.py		\
               $(BINDIR)/webui/static/stylesheet.css
@@ -217,7 +218,7 @@ WEBUI_FILES = $(BINDIR)/webui/bottle-0.8.3		\
 # We copy template config files into the conf directory.
 CONF_FILES = $(CONFDIR)/mesos.conf $(CONFDIR)/deploy-env.sh
 
-# We copy all the deploy scripts into the bin directory.
+# We copy all the deploy scripts into the deploy directory.
 DEPLOY_FILES = $(DEPLOYDIR)/deploy-to-slaves             \
 	       $(DEPLOYDIR)/mesos-daemon                 \
 	       $(DEPLOYDIR)/mesos-env.sh                 \
@@ -227,6 +228,9 @@ DEPLOY_FILES = $(DEPLOYDIR)/deploy-to-slaves             \
 	       $(DEPLOYDIR)/stop-masters                 \
 	       $(DEPLOYDIR)/stop-mesos                   \
 	       $(DEPLOYDIR)/stop-slaves                  \
+
+# We copy all the script files into the bin directory.
+SCRIPT_FILES = $(BINDIR)/killtree.sh
 
 # Create rules for building the directories that aren't created
 # automagically by configure.
@@ -367,6 +371,9 @@ endif
 $(DEPLOY_FILES): $(DEPLOYDIR)/%: $(SRCDIR)/deploy/% | $(DEPLOYDIR)
 	cp -r $< $@
 
+$(SCRIPT_FILES): $(BINDIR)/%: $(SRCDIR)/scripts/% | $(BINDIR)
+	cp -r $< $@
+
 $(CONFDIR)/mesos.conf: | $(SRCDIR)/conf/mesos.conf.template $(CONFDIR)
 	cp -r $(SRCDIR)/conf/mesos.conf.template $@
 
@@ -376,7 +383,7 @@ $(CONFDIR)/deploy-env.sh: | $(SRCDIR)/conf/deploy-env.sh.template $(CONFDIR)
 test: all
 	$(MAKE) -C tests test
 
-all: $(MESOS_LIBS) $(MESOS_EXES) java python $(WEBUI_FILES) $(CONF_FILES) $(DEPLOY_FILES)
+all: $(MESOS_LIBS) $(MESOS_EXES) java python $(WEBUI_FILES) $(CONF_FILES) $(DEPLOY_FILES) $(SCRIPT_FILES)
 	$(MAKE) -C examples
 	$(MAKE) -C tests
 
@@ -404,6 +411,7 @@ clean:
 	rm -f $(LIBDIR)/python/mesos.py
 	rm -f $(LIBDIR)/python/mesos.pyc
 	rm -f $(DEPLOY_FILES)
+	rm -f $(SCRIPT_FILES)
 	rm -f $(INCLUDEDIR)/mesos/mesos.hpp
 	rm -f mesos.pb.cc
 	rm -f mesos.pb.h

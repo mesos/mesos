@@ -57,7 +57,6 @@
     <th class="lists">Running Tasks</th>
     <th class="lists">CPUs</th>
     <th class="lists">MEM</th>
-    <th class="lists">Logs</th>
   </tr>
   % for framework in state['frameworks']:
   %   # For now just sum up the tasks and resources across all executors.
@@ -77,10 +76,6 @@
     <td class="lists">{{tasks}}</td>
     <td class="lists">{{cpus}}</td>
     <td class="lists">{{format_mem(mem)}}</td>
-    <td class="lists">
-      <a href="/framework-logs/{{framework['id']}}/stdout">[stdout]</a>
-      <a href="/framework-logs/{{framework['id']}}/stderr">[stderr]</a>
-    </td>
   </tr>
   % end
 </table>
