@@ -11,8 +11,9 @@
 
 #include "common/fatal.hpp"
 #include "common/tokenize.hpp"
+
 #ifdef WITH_ZOOKEEPER
-#include "common/zookeeper.hpp"
+#include "zookeeper/zookeeper.hpp"
 #endif
 
 #include "master.hpp"

@@ -2,10 +2,6 @@
 
 #include <gtest/gtest.h>
 
-#include <zookeeper.h>
-
-#include "common/zookeeper.hpp"
-
 #include "tests/base_zookeeper_test.hpp"
 
 class ZooKeeperTest : public mesos::internal::test::BaseZooKeeperTest {

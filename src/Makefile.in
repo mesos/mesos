@@ -125,7 +125,7 @@ COMMON_OBJ = common/fatal.o common/lock.o detector/detector.o		\
 	     common/utils.o
 
 ifeq ($(WITH_ZOOKEEPER),1)
-  COMMON_OBJ += common/zookeeper.o
+  COMMON_OBJ += zookeeper/zookeeper.o
 endif
 
 EXEC_LIB_OBJ = exec/exec.o
@@ -231,7 +231,7 @@ DEPLOY_FILES = $(DEPLOYDIR)/deploy-to-slaves             \
 # Create rules for building the directories that aren't created
 # automagically by configure.
 OBJ_DIRECTORIES = common configurator detector exec launcher local log	\
-                  master messages sched slave
+                  master messages sched slave zookeeper
 
 WEBUI_DIRECTORIES = $(BINDIR)/webui/common $(BINDIR)/webui/master	\
                     $(BINDIR)/webui/slave $(BINDIR)/webui/static

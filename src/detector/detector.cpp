@@ -10,8 +10,9 @@
 
 #include "common/fatal.hpp"
 #include "common/foreach.hpp"
+
 #ifdef WITH_ZOOKEEPER
-#include "common/zookeeper.hpp"
+#include "zookeeper/zookeeper.hpp"
 #endif
 
 #include "messages/messages.hpp"

@@ -8,7 +8,6 @@
 
 #include "common/utils.hpp"
 #include "common/uuid.hpp"
-#include "common/zookeeper.hpp"
 
 #include "tests/jvm.hpp"
 #include "tests/zookeeper_server.hpp"

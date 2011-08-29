@@ -9,7 +9,6 @@
 #include <tr1/functional>
 
 #include "common/lock.hpp"
-#include "common/zookeeper.hpp"
 
 #include "tests/base_zookeeper_test.hpp"
 #include "tests/jvm.hpp"

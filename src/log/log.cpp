@@ -34,7 +34,8 @@
 #include "common/fatal.hpp"
 #include "common/foreach.hpp"
 #include "common/result.hpp"
-#include "common/zookeeper.hpp"
+
+#include "zookeeper/zookeeper.hpp"
 
 #include "log/coordinator.hpp"
 #include "log/replica.hpp"

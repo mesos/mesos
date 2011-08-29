@@ -6,9 +6,10 @@
 #include <glog/logging.h>
 
 #include "common/utils.hpp"
-#include "common/zookeeper.hpp"
 
 #include "tests/jvm.hpp"
+
+#include "zookeeper/zookeeper.hpp"
 
 namespace mesos {
 namespace internal {

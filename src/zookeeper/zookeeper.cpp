@@ -8,9 +8,9 @@
 #include <process/dispatch.hpp>
 #include <process/process.hpp>
 
-#include "zookeeper.hpp"
-
 #include "common/fatal.hpp"
+
+#include "zookeeper/zookeeper.hpp"
 
 // DO NOT REMOVE! Removing this will require also changing which
 // ZooKeeper library get's used for linking, right now the Makefile is
@@ -85,24 +85,27 @@ public:
     return process;
   }
 
-  void destroy(Watcher* watcher)
+  bool destroy(Watcher* watcher)
   {
-    if (processes.count(watcher) > 0) {
+   if (processes.count(watcher) > 0) {
       WatcherProcess* process = processes[watcher];
       processes.erase(watcher);
       process::post(process->self(), process::TERMINATE);
       process::wait(process->self());
       delete process;
+      return true;
     }
+
+    return false;
   }
 
   PID<WatcherProcess> lookup(Watcher* watcher)
   {
     if (processes.count(watcher) > 0) {
       return processes[watcher]->self();
-    } else {
-      return PID<WatcherProcess>();
     }
+
+    return PID<WatcherProcess>();
   }
 
 private:
@@ -138,7 +141,7 @@ Watcher::Watcher()
 
 Watcher::~Watcher()
 {
-  process::dispatch(manager->self(), &WatcherProcessManager::destroy, this);
+  process::call(manager->self(), &WatcherProcessManager::destroy, this);
 }
 
 

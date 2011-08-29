@@ -2,10 +2,10 @@
 
 #include <gtest/gtest.h>
 
-#include "common/zookeeper.hpp"
 #include "tests/base_zookeeper_test.hpp"
 #include "tests/zookeeper_server.hpp"
 
+#include "zookeeper/zookeeper.hpp"
 
 namespace mesos {
 namespace internal {
