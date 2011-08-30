@@ -3,6 +3,8 @@
 
 #include <jni.h>
 
+#include <glog/logging.h>
+
 #include <vector>
 
 namespace mesos {
@@ -26,11 +28,16 @@ public:
   class MethodSignature;
   class JMethod;
 
-  // An opaque class descriptor obtained via Jvm::findClass and used to
-  // find constructors and methods.
+  // An opaque class descriptor that can be used to find constructors, methods
+  // and fields.
   class JClass
   {
   public:
+    // A factory for new java reference type class descriptors given the native
+    // name.  To obtain class descriptors for native types, use the fields in
+    // Jvm.
+    static const JClass forName(const std::string& nativeName);
+
     JClass(const JClass& other);
 
     // Returns the class of an array of the current class.
@@ -47,15 +54,13 @@ public:
   private:
     friend class Jvm;
 
-    JClass(const jclass clazz,
-           const std::string& nativeName,
-           int arrayCount = 0);
+    JClass(const std::string& nativeName,
+           bool isNative = true);
 
     std::string signature() const;
 
-    jclass clazz;
     std::string nativeName;
-    int arrayCount;
+    bool isNative;
   };
 
 
@@ -152,9 +157,27 @@ public:
     friend class Jvm;
     friend class MethodSignature;
 
-    JMethod(const jmethodID method);
+    JMethod(const JClass& clazz, const jmethodID id);
 
+    const JClass clazz;
     const jmethodID id;
+  };
+
+
+  // An opaque field descriptor that can be used to access fields using
+  // methods like Jvm::getStaticField.
+  class JField
+  {
+  public:
+    JField(const JField& other);
+
+  private:
+    friend class Jvm;
+
+    JField(const JClass& clazz, const jfieldID id);
+
+    const JClass clazz;
+    const jfieldID id;
   };
 
 
@@ -189,9 +212,6 @@ public:
       JNIVersion jniVersion = Jvm::v_1_6);
   ~Jvm();
 
-  // Finds a class with the given native name, ie: 'java/lang/String'.
-  JClass findClass(const std::string& name);
-
   const JClass voidClass;
   const JClass booleanClass;
   const JClass byteClass;
@@ -201,30 +221,44 @@ public:
   const JClass longClass;
   const JClass floatClass;
   const JClass doubleClass;
-  const JClass& stringClass() const;
+  const JClass stringClass;
 
   jobject string(const std::string& str);
 
   JConstructor findConstructor(const ConstructorFinder& constructor);
   JMethod findMethod(const MethodSignature& signature);
+  JMethod findStaticMethod(const MethodSignature& signature);
+  JField findStaticField(const JClass& clazz, const std::string& name);
 
   jobject invoke(const JConstructor& ctor, ...);
 
   template <typename T>
   T invoke(const jobject receiver, const JMethod& method, ...);
 
+  template <typename T>
+  T invokeStatic(const JMethod& method, ...);
+
+  template <typename T>
+  T getStaticField(const JField& field);
+
   jobject newGlobalRef(const jobject object);
   void deleteGlobalRef(const jobject object);
   void deleteGlobalRefSafe(const jobject object);
 
 private:
+  jclass findClass(const JClass& clazz);
+
   jmethodID findMethod(const Jvm::JClass& clazz,
                        const std::string& name,
                        const Jvm::JClass& returnType,
-                       const std::vector<Jvm::JClass> argTypes);
+                       const std::vector<Jvm::JClass> argTypes,
+                       bool isStatic);
 
   template <typename T>
   T invokeV(const jobject receiver, const jmethodID id, va_list args);
+
+  template <typename T>
+  T invokeStaticV(const JClass& receiver, const jmethodID id, va_list args);
 
   void attachDaemon();
   void attach();
@@ -232,8 +266,6 @@ private:
 
   JavaVM* jvm;
   JNIEnv* env;
-
-  JClass* _stringClass;
 };
 
 
@@ -247,6 +279,21 @@ T Jvm::invoke(const jobject receiver, const JMethod& method, ...)
   va_list args;
   va_start(args, method);
   const T result = invokeV<T>(receiver, method.id, args);
+  va_end(args);
+  return result;
+}
+
+
+template <>
+void Jvm::invokeStatic<void>(const JMethod& method, ...);
+
+
+template <typename T>
+T Jvm::invokeStatic(const JMethod& method, ...)
+{
+  va_list args;
+  va_start(args, method);
+  const T result = invokeStaticV<T>(method.clazz, method.id, args);
   va_end(args);
   return result;
 }

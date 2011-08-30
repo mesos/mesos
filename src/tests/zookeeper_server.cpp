@@ -20,28 +20,28 @@ ZooKeeperServer::ZooKeeperServer(Jvm* _jvm) : jvm(_jvm), port(0), started(false)
 {
   Jvm::Attach attach(jvm);
 
-  Jvm::JClass fileClass(jvm->findClass("java/io/File"));
+  Jvm::JClass fileClass = Jvm::JClass::forName("java/io/File");
   fileConstructor =
       new Jvm::JConstructor(
           jvm->findConstructor(
-              fileClass.constructor().parameter(jvm->stringClass())));
+              fileClass.constructor().parameter(jvm->stringClass)));
 
-  Jvm::JClass inetSocketAddressClass(
-      jvm->findClass("java/net/InetSocketAddress"));
+  Jvm::JClass inetSocketAddressClass =
+      Jvm::JClass::forName("java/net/InetSocketAddress");
   inetSocketAddressConstructor =
       new Jvm::JConstructor(
           jvm->findConstructor(
               inetSocketAddressClass.constructor().parameter(jvm->intClass)));
 
-  Jvm::JClass cnxnFactoryClass(
-      jvm->findClass("org/apache/zookeeper/server/NIOServerCnxn$Factory"));
+  Jvm::JClass cnxnFactoryClass =
+      Jvm::JClass::forName("org/apache/zookeeper/server/NIOServerCnxn$Factory");
   cnxnFactoryConstructor =
       new Jvm::JConstructor(
           jvm->findConstructor(cnxnFactoryClass.constructor()
               .parameter(inetSocketAddressClass)));
 
-  Jvm::JClass zkServerClass(
-      jvm->findClass("org/apache/zookeeper/server/ZooKeeperServer"));
+  Jvm::JClass zkServerClass =
+      Jvm::JClass::forName("org/apache/zookeeper/server/ZooKeeperServer");
   startup =
       new Jvm::JMethod(
           jvm->findMethod(cnxnFactoryClass.method("startup")
@@ -59,8 +59,9 @@ ZooKeeperServer::ZooKeeperServer(Jvm* _jvm) : jvm(_jvm), port(0), started(false)
 
   dataDir = createTempDir();
   snapDir = createTempDir();
-  Jvm::JClass snapLogClass(
-      jvm->findClass("org/apache/zookeeper/server/persistence/FileTxnSnapLog"));
+  Jvm::JClass snapLogClass =
+      Jvm::JClass::forName("org/apache/zookeeper/server/"
+                           "persistence/FileTxnSnapLog");
 
   snapLog =
       jvm->newGlobalRef(
@@ -74,13 +75,13 @@ ZooKeeperServer::ZooKeeperServer(Jvm* _jvm) : jvm(_jvm), port(0), started(false)
       jvm->newGlobalRef(
           jvm->invoke(
               jvm->findConstructor(
-                  jvm->findClass("org/apache/zookeeper/server/"
-                                 "ZooKeeperServer$BasicDataTreeBuilder")
-                                 .constructor())));
+                  Jvm::JClass::forName("org/apache/zookeeper/server/"
+                                       "ZooKeeperServer$BasicDataTreeBuilder")
+                                       .constructor())));
 
   Jvm::JClass dataTreeBuilderClass(
-        jvm->findClass("org/apache/zookeeper/server/"
-                       "ZooKeeperServer$DataTreeBuilder"));
+      Jvm::JClass::forName("org/apache/zookeeper/server/"
+                           "ZooKeeperServer$DataTreeBuilder"));
 
   zooKeeperServer =
       jvm->newGlobalRef(

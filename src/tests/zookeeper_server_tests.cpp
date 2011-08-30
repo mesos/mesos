@@ -5,8 +5,6 @@
 #include "tests/base_zookeeper_test.hpp"
 #include "tests/zookeeper_server.hpp"
 
-#include "zookeeper/zookeeper.hpp"
-
 namespace mesos {
 namespace internal {
 namespace test {

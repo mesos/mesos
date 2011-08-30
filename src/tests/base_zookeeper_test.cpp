@@ -25,6 +25,31 @@ namespace mesos {
 namespace internal {
 namespace test {
 
+
+static void silenceServerLogs(Jvm* jvm)
+{
+  Jvm::Attach attach(jvm);
+
+  Jvm::JClass loggerClass = Jvm::JClass::forName("org/apache/log4j/Logger");
+  jobject rootLogger = jvm->invokeStatic<jobject>(
+      jvm->findStaticMethod(loggerClass.method("getRootLogger")
+          .returns(loggerClass)));
+
+  Jvm::JClass levelClass = Jvm::JClass::forName("org/apache/log4j/Level");
+  jvm->invoke<void>(rootLogger,
+      jvm->findMethod(loggerClass.method("setLevel").parameter(levelClass)
+          .returns(jvm->voidClass)),
+      jvm->getStaticField<jobject>(jvm->findStaticField(levelClass, "OFF")));
+}
+
+
+static void silenceClientLogs()
+{
+  // TODO(jsirois): Put this in the C++ API.
+  zoo_set_debug_level(ZOO_LOG_LEVEL_ERROR);
+}
+
+
 void BaseZooKeeperTest::SetUpTestCase()
 {
   static Jvm* singleton;
@@ -33,12 +58,14 @@ void BaseZooKeeperTest::SetUpTestCase()
 
     std::string zkHome = mesosRoot + "/third_party/zookeeper-3.3.1";
     std::string classpath = "-Djava.class.path=" +
-        zkHome + "/conf:" +
         zkHome + "/zookeeper-3.3.1.jar:" +
         zkHome + "/lib/log4j-1.2.15.jar";
     LOG(INFO) << "Using classpath setup: " << classpath << std::endl;
     opts.push_back(classpath);
     singleton = new Jvm(opts);
+
+    silenceServerLogs(singleton);
+    silenceClientLogs();
   }
 
   // TODO(John Sirois): Introduce a mechanism to contribute classpath

@@ -22,7 +22,8 @@ namespace test {
 jmethodID Jvm::findMethod(const Jvm::JClass& clazz,
                           const std::string& name,
                           const Jvm::JClass& returnType,
-                          const std::vector<Jvm::JClass> argTypes)
+                          const std::vector<Jvm::JClass> argTypes,
+                          bool isStatic)
 {
   std::ostringstream signature;
   signature << "(";
@@ -32,10 +33,19 @@ jmethodID Jvm::findMethod(const Jvm::JClass& clazz,
   }
   signature << ")" << returnType.signature();
 
-  LOG(INFO) << "looking up method " << signature;
-  jmethodID id = env->GetMethodID(clazz.clazz,
-                                  name.c_str(),
-                                  signature.str().c_str());
+  LOG(INFO) << "looking up" << (isStatic ? " static " : " ") << "method "
+            << name << signature.str();
+
+  jmethodID id = NULL;
+  if (isStatic) {
+    id = env->GetStaticMethodID(findClass(clazz),
+                                name.c_str(),
+                                signature.str().c_str());
+  } else {
+    id = env->GetMethodID(findClass(clazz),
+                          name.c_str(),
+                          signature.str().c_str());
+  }
 
   // TODO(John Sirois): consider CHECK -> return Option if re-purposing this
   // code outside of tests.
@@ -61,7 +71,11 @@ Jvm::ConstructorFinder::parameter(const Jvm::JClass& type)
 Jvm::JConstructor Jvm::findConstructor(const ConstructorFinder& signature)
 {
   jmethodID id =
-      findMethod(signature.type, "<init>", voidClass, signature.parameters);
+      findMethod(signature.type,
+                 "<init>",
+                 voidClass,
+                 signature.parameters,
+                 false);
   return Jvm::JConstructor(signature.type, id);
 }
 
@@ -79,7 +93,7 @@ jobject Jvm::invoke(const JConstructor& ctor, ...)
 {
   va_list args;
   va_start(args, ctor);
-  const jobject result = env->NewObjectV(ctor.clazz.clazz, ctor.id, args);
+  jobject result = env->NewObjectV(findClass(ctor.clazz), ctor.id, args);
   va_end(args);
   CHECK(result != NULL);
   return result;
@@ -112,8 +126,20 @@ Jvm::JMethod Jvm::findMethod(const MethodSignature& signature)
   jmethodID id = findMethod(signature.clazz,
                             signature.name,
                             signature.returnType,
-                            signature.parameters);
-  return Jvm::JMethod(id);
+                            signature.parameters,
+                            false);
+  return Jvm::JMethod(signature.clazz, id);
+}
+
+
+Jvm::JMethod Jvm::findStaticMethod(const MethodSignature& signature)
+{
+  jmethodID id = findMethod(signature.clazz,
+                            signature.name,
+                            signature.returnType,
+                            signature.parameters,
+                            true);
+  return Jvm::JMethod(signature.clazz, id);
 }
 
 
@@ -134,10 +160,12 @@ Jvm::MethodSignature::MethodSignature(const JClass& _clazz,
     parameters(_parameters) {}
 
 
-Jvm::JMethod::JMethod(const JMethod& other) : id(other.id) {}
+Jvm::JMethod::JMethod(const JMethod& other)
+    : clazz(other.clazz), id(other.id) {}
 
 
-Jvm::JMethod::JMethod(const jmethodID _id) : id(_id) {}
+Jvm::JMethod::JMethod(const JClass& _clazz, const jmethodID _id)
+    : clazz(_clazz), id(_id) {}
 
 
 template <>
@@ -145,7 +173,7 @@ jobject Jvm::invokeV<jobject>(const jobject receiver,
                               const jmethodID id,
                               va_list args)
 {
-  const jobject result = env->CallObjectMethodV(receiver, id, args);
+  jobject result = env->CallObjectMethodV(receiver, id, args);
   CHECK(result != NULL);
   return result;
 }
@@ -233,21 +261,117 @@ void Jvm::invoke<void>(const jobject receiver, const JMethod& method, ...)
 }
 
 
-Jvm::JClass::JClass(const JClass& other) : clazz(other.clazz),
-                                           nativeName(other.nativeName),
-                                           arrayCount(other.arrayCount) {}
+template <>
+jobject Jvm::invokeStaticV<jobject>(const JClass& receiver,
+                                    const jmethodID id,
+                                    va_list args)
+{
+  jobject result = env->CallStaticObjectMethodV(findClass(receiver), id, args);
+  CHECK(result != NULL);
+  return result;
+}
 
 
-Jvm::JClass::JClass(const jclass _clazz,
-                    const std::string& _nativeName,
-                    int _arrayCount) : clazz(_clazz),
-                                       nativeName(_nativeName),
-                                       arrayCount(_arrayCount) {}
+template<>
+void Jvm::invokeStaticV<void>(const JClass& receiver,
+                              const jmethodID id,
+                              va_list args)
+{
+  env->CallStaticVoidMethodV(findClass(receiver), id, args);
+}
+
+
+template <>
+bool Jvm::invokeStaticV<bool>(const JClass& receiver,
+                              const jmethodID id,
+                              va_list args)
+{
+  return env->CallStaticBooleanMethodV(findClass(receiver), id, args);
+}
+
+
+template <>
+char Jvm::invokeStaticV<char>(const JClass& receiver,
+                              const jmethodID id,
+                              va_list args)
+{
+  return env->CallStaticCharMethodV(findClass(receiver), id, args);
+}
+
+
+template <>
+short Jvm::invokeStaticV<short>(const JClass& receiver,
+                                const jmethodID id,
+                                va_list args)
+{
+  return env->CallStaticShortMethodV(findClass(receiver), id, args);
+}
+
+
+template <>
+int Jvm::invokeStaticV<int>(const JClass& receiver,
+                            const jmethodID id,
+                            va_list args)
+{
+  return env->CallStaticIntMethodV(findClass(receiver), id, args);
+}
+
+
+template <>
+long Jvm::invokeStaticV<long>(const JClass& receiver,
+                              const jmethodID id,
+                              va_list args)
+{
+  return env->CallStaticLongMethodV(findClass(receiver), id, args);
+}
+
+
+template <>
+float Jvm::invokeStaticV<float>(const JClass& receiver,
+                                const jmethodID id,
+                                va_list args)
+{
+  return env->CallStaticFloatMethodV(findClass(receiver), id, args);
+}
+
+
+template <>
+double Jvm::invokeStaticV<double>(const JClass& receiver,
+                                  const jmethodID id,
+                                  va_list args)
+{
+  return env->CallStaticDoubleMethodV(findClass(receiver), id, args);
+}
+
+
+template <>
+void Jvm::invokeStatic<void>(const JMethod& method, ...)
+{
+  va_list args;
+  va_start(args, method);
+  invokeStaticV<void>(method.clazz, method.id, args);
+  va_end(args);
+}
+
+
+const Jvm::JClass Jvm::JClass::forName(const std::string& nativeName)
+{
+  return Jvm::JClass(nativeName, false /* not a native type */);
+}
+
+
+Jvm::JClass::JClass(const JClass& other) : nativeName(other.nativeName),
+                                           isNative(other.isNative) {}
+
+
+Jvm::JClass::JClass(const std::string& _nativeName,
+                    bool _isNative) : nativeName(_nativeName),
+                                      isNative(_isNative) {}
 
 
 const Jvm::JClass Jvm::JClass::arrayOf() const
 {
-  return Jvm::JClass(clazz, nativeName, arrayCount + 1);
+  return Jvm::JClass("[" + nativeName, isNative);
 }
 
 
@@ -265,31 +389,98 @@ Jvm::MethodFinder Jvm::JClass::method(const std::string& name) const
 
 std::string Jvm::JClass::signature() const
 {
-  if (clazz == NULL) {
-    return nativeName;
-  }
+  return isNative ? nativeName : "L" + nativeName + ";";
+}
 
-  std::ostringstream signature;
-  for (int i = 0; i < arrayCount; ++i) {
-    signature << "[";
-  }
-  signature << "L" << nativeName << ";";
-  return signature.str();
+
+Jvm::JField::JField(const JField& other) : clazz(other.clazz), id(other.id) {}
+
+
+Jvm::JField::JField(const JClass& _clazz, const jfieldID _id)
+    : clazz(_clazz), id(_id) {}
+
+
+Jvm::JField Jvm::findStaticField(const JClass& clazz, const std::string& name)
+{
+  jfieldID id =
+      env->GetStaticFieldID(findClass(clazz),
+                            name.c_str(),
+                            clazz.signature().c_str());
+  return Jvm::JField(clazz, id);
+}
+
+
+template <>
+jobject Jvm::getStaticField<jobject>(const JField& field)
+{
+  jobject result = env->GetStaticObjectField(findClass(field.clazz), field.id);
+  CHECK(result != NULL);
+  return result;
+}
+
+
+template <>
+bool Jvm::getStaticField<bool>(const JField& field)
+{
+  return env->GetStaticBooleanField(findClass(field.clazz), field.id);
+}
+
+
+template <>
+char Jvm::getStaticField<char>(const JField& field)
+{
+  return env->GetStaticCharField(findClass(field.clazz), field.id);
+}
+
+
+template <>
+short Jvm::getStaticField<short>(const JField& field)
+{
+  return env->GetStaticShortField(findClass(field.clazz), field.id);
+}
+
+
+template <>
+int Jvm::getStaticField<int>(const JField& field)
+{
+  return env->GetStaticIntField(findClass(field.clazz), field.id);
+}
+
+
+template <>
+long Jvm::getStaticField<long>(const JField& field)
+{
+  return env->GetStaticLongField(findClass(field.clazz), field.id);
+}
+
+
+template <>
+float Jvm::getStaticField<float>(const JField& field)
+{
+  return env->GetStaticFloatField(findClass(field.clazz), field.id);
+}
+
+
+template <>
+double Jvm::getStaticField<double>(const JField& field)
+{
+  return env->GetStaticDoubleField(findClass(field.clazz), field.id);
 }
 
 
 Jvm::Jvm(const std::vector<std::string>& options, JNIVersion jniVersion)
   : jvm(NULL),
     env(NULL),
-    voidClass(NULL, "V"),
-    booleanClass(NULL, "Z"),
-    byteClass(NULL, "B"),
-    charClass(NULL, "C"),
-    shortClass(NULL, "S"),
-    intClass(NULL, "I"),
-    longClass(NULL, "J"),
-    floatClass(NULL, "F"),
-    doubleClass(NULL, "D")
+    voidClass("V"),
+    booleanClass("Z"),
+    byteClass("B"),
+    charClass("C"),
+    shortClass("S"),
+    intClass("I"),
+    longClass("J"),
+    floatClass("F"),
+    doubleClass("D"),
+    stringClass(JClass::forName("java/lang/String"))
 {
   JavaVMInitArgs vmArgs;
   vmArgs.version = jniVersion;
@@ -306,14 +497,11 @@ Jvm::Jvm(const std::vector<std::string>& options, JNIVersion jniVersion)
   CHECK(result != JNI_ERR) << "Failed to create JVM!";
 
   delete[] opts;
-
-  _stringClass = new Jvm::JClass(findClass("java/lang/String"));
 }
 
 
 Jvm::~Jvm()
 {
-  delete _stringClass;
   CHECK(0 == jvm->DestroyJavaVM()) << "Failed to destroy JVM";
 }
 
@@ -336,25 +524,19 @@ void Jvm::detach()
 }
 
 
-Jvm::JClass Jvm::findClass(const std::string& name)
+jclass Jvm::findClass(const JClass& clazz)
 {
-  jclass clazz = env->FindClass(name.c_str());
+  jclass cls = env->FindClass(clazz.nativeName.c_str());
   // TODO(John Sirois): consider CHECK -> return Option if re-purposing this
   // code outside of tests.
-  CHECK(clazz != NULL);
-  return JClass(clazz, name);
+  CHECK(cls != NULL);
+  return cls;
 }
 
 
 jobject Jvm::string(const std::string& str)
 {
   return env->NewStringUTF(str.c_str());
-}
-
-
-const Jvm::JClass& Jvm::stringClass() const
-{
-  return *_stringClass;
 }
 
 
