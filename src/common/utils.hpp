@@ -10,6 +10,7 @@
 #include <pwd.h>
 #include <signal.h>
 #include <stddef.h>
+#include <stdarg.h>
 #include <unistd.h>
 
 #include <google/protobuf/message.h>
