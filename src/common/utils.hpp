@@ -9,6 +9,7 @@
 #include <netdb.h>
 #include <pwd.h>
 #include <signal.h>
+#include <stdarg.h>
 #include <stddef.h>
 #include <stdarg.h>
 #include <unistd.h>
