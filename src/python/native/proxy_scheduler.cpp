@@ -129,7 +129,7 @@ void ProxyScheduler::resourceOffers(SchedulerDriver* driver,
   }
 
   res = PyObject_CallMethod(impl->pythonScheduler,
-                            (char*) "resourceOffer",
+                            (char*) "resourceOffers",
                             (char*) "OO",
                             impl,
                             list);
