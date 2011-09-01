@@ -11,17 +11,18 @@
 #include "configurator/option.hpp"
 
 
-namespace mesos { namespace internal {
-
+namespace mesos {
+namespace internal {
 
 /**
  * Exception type thrown by Configurator.
  */
 struct ConfigurationException : std::exception
 {
-  const char* message;
-  ConfigurationException(const char* msg): message(msg) {}
-  const char* what() const throw () { return message; }
+  ConfigurationException(const std::string& _message) : message(_message) {}
+  ~ConfigurationException() throw () {}
+  const char* what() const throw () { return message.c_str(); }
+  const std::string message;
 };
 
 
@@ -343,6 +344,7 @@ private:
   void dumpToGoogleLog();
 };
 
-} }   // end mesos :: internal namespace
+} // namespace internal {
+} // namespace mesos {
 
-#endif
+#endif // __CONFIGURATOR_HPP__
