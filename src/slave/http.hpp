@@ -1,8 +1,9 @@
 #ifndef __SLAVE_HTTP_HPP__
 #define __SLAVE_HTTP_HPP__
 
+#include <process/future.hpp>
 #include <process/http.hpp>
-#include <process/promise.hpp>
+
 
 namespace mesos {
 namespace internal {
