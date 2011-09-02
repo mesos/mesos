@@ -16,7 +16,6 @@
 #include "launcher.hpp"
 
 #include "common/foreach.hpp"
-#include "common/string_utils.hpp"
 
 using namespace mesos;
 using namespace mesos::internal;
