@@ -95,8 +95,8 @@ public:
   MOCK_METHOD2(offerRescinded, void(SchedulerDriver*, const OfferID&));
   MOCK_METHOD2(statusUpdate, void(SchedulerDriver*, const TaskStatus&));
   MOCK_METHOD4(frameworkMessage, void(SchedulerDriver*,
-				      const SlaveID&,
-				      const ExecutorID&,
+                                      const SlaveID&,
+                                      const ExecutorID&,
                                       const std::string&));
   MOCK_METHOD2(slaveLost, void(SchedulerDriver*, const SlaveID&));
   MOCK_METHOD3(error, void(SchedulerDriver*, int, const std::string&));

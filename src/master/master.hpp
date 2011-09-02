@@ -66,20 +66,20 @@ public:
   void reviveOffers(const FrameworkID& frameworkId);
   void killTask(const FrameworkID& frameworkId, const TaskID& taskId);
   void schedulerMessage(const SlaveID& slaveId,
-			const FrameworkID& frameworkId,
-			const ExecutorID& executorId,
-			const std::string& data);
+                        const FrameworkID& frameworkId,
+                        const ExecutorID& executorId,
+                        const std::string& data);
   void registerSlave(const SlaveInfo& slaveInfo);
   void reregisterSlave(const SlaveID& slaveId,
                        const SlaveInfo& slaveInfo,
-		       const std::vector<ExecutorInfo>& executorInfos,
+                       const std::vector<ExecutorInfo>& executorInfos,
                        const std::vector<Task>& tasks);
   void unregisterSlave(const SlaveID& slaveId);
   void statusUpdate(const StatusUpdate& update, const UPID& pid);
   void executorMessage(const SlaveID& slaveId,
-		       const FrameworkID& frameworkId,
-		       const ExecutorID& executorId,
-		       const std::string& data);
+                       const FrameworkID& frameworkId,
+                       const ExecutorID& executorId,
+                       const std::string& data);
   void exitedExecutor(const SlaveID& slaveId,
                       const FrameworkID& frameworkId,
                       const ExecutorID& executorId,
@@ -156,6 +156,7 @@ protected:
   SlaveID newSlaveId();
 
 private:
+
   // TODO(benh): Remove once SimpleAllocator doesn't use Master::get*.
   friend class SimpleAllocator;
   friend struct SlaveRegistrar;

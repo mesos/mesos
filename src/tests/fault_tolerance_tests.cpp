@@ -41,7 +41,7 @@ using testing::Eq;
 using testing::Not;
 using testing::Return;
 using testing::SaveArg;
-
+using testing::SaveArgPointee;
 
 TEST(FaultToleranceTest, SlaveLost)
 {
@@ -507,4 +507,79 @@ TEST(FaultToleranceTest, SchedulerFailoverFrameworkMessage)
 
   process::post(master, process::TERMINATE);
   process::wait(master);
+}
+
+
+TEST(FaultToleranceTest, SlaveReRegister)
+{
+  ASSERT_TRUE(GTEST_IS_THREADSAFE);
+
+  MockFilter filter;
+  process::filter(&filter);
+
+  EXPECT_MSG(filter, _, _, _)
+    .WillRepeatedly(Return(false));
+
+  SimpleAllocator a;
+  Master m(&a);
+  PID<Master> master = process::spawn(&m);
+
+  ProcessBasedIsolationModule isolationModule;
+
+  Resources resources = Resources::parse("cpus:2;mem:1024");
+
+  Slave s(resources, true, &isolationModule);
+  PID<Slave> slave = process::spawn(&s);
+
+  BasicMasterDetector detector(master, slave, true);
+
+  MockScheduler sched;
+  MesosSchedulerDriver driver(&sched, master);
+
+  vector<Offer> offers;
+
+  trigger resourceOffersCall;
+
+  EXPECT_CALL(sched, getFrameworkName(&driver))
+    .WillOnce(Return(""));
+
+  EXPECT_CALL(sched, getExecutorInfo(&driver))
+    .WillOnce(Return(DEFAULT_EXECUTOR_INFO));
+
+  EXPECT_CALL(sched, registered(&driver, _))
+    .Times(1);
+
+  EXPECT_CALL(sched, resourceOffers(&driver, _))
+    .WillOnce(DoAll(SaveArg<1>(&offers),
+                    Trigger(&resourceOffersCall)))
+    .WillRepeatedly(Return());
+
+  trigger slaveReRegisterMsg;
+
+  EXPECT_MSG(filter, Eq(SlaveReregisteredMessage().GetTypeName()), _, _)
+    .WillOnce(DoAll(Trigger(&slaveReRegisterMsg), Return(false)));
+
+  driver.start();
+
+  WAIT_UNTIL(resourceOffersCall);
+
+  EXPECT_EQ(1, offers.size());
+
+  // Simulate a spurious newMasterDetected event (e.g., due to zookeeper
+  // expiration) at the slave.
+
+  process::dispatch(slave, &Slave::newMasterDetected, master);
+
+  WAIT_UNTIL(slaveReRegisterMsg);
+
+  driver.stop();
+  driver.join();
+
+  process::post(slave, process::TERMINATE);
+  process::wait(slave);
+
+  process::post(master, process::TERMINATE);
+  process::wait(master);
+
+  process::filter(NULL);
 }

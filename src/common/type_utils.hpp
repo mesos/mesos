@@ -7,6 +7,7 @@
 
 #include <boost/functional/hash.hpp>
 
+#include "common/resources.hpp"
 #include "messages/messages.hpp"
 
 

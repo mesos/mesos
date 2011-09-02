@@ -77,7 +77,7 @@ protected:
         pinged = true;
       } else if (name() == TERMINATE) {
         return;
-      } 
+      }
     } while (timeouts < MAX_SLAVE_TIMEOUTS);
 
     // Tell the slave manager to deactivate the slave, this will take
@@ -133,7 +133,7 @@ struct SlaveRegistrar
 struct SlaveReregistrar
 {
   static bool run(Slave* slave,
-		  const vector<ExecutorInfo>& executorInfos,
+                  const vector<ExecutorInfo>& executorInfos,
                   const vector<Task>& tasks,
                   const PID<Master>& master)
   {
@@ -742,7 +742,7 @@ void Master::registerSlave(const SlaveInfo& slaveInfo)
 
 void Master::reregisterSlave(const SlaveID& slaveId,
                              const SlaveInfo& slaveInfo,
-			     const vector<ExecutorInfo>& executorInfos,
+                             const vector<ExecutorInfo>& executorInfos,
                              const vector<Task>& tasks)
 {
   if (slaveId == "") {
@@ -751,23 +751,21 @@ void Master::reregisterSlave(const SlaveID& slaveId,
   } else {
     Slave* slave = getSlave(slaveId);
     if (slave != NULL) {
-      // TODO(benh): It's still unclear whether or not
-      // MasterDetector::detectMaster will cause spurious
-      // Slave::newMasterDetected to get invoked even though the
-      // ephemeral znode hasn't changed. If that does happen, the
-      // re-register that the slave is trying to do is just
-      // bogus. Letting it re-register might not be all that bad now,
-      // but maybe in the future it's bad because during that
-      // "disconnected" time it might not have received certain
-      // messages from us (like launching a task), and so until we
-      // have some form of task reconciliation between all the
-      // different components, the safe thing to do is have the slave
-      // restart (kind of defeats the purpose of session expiration
-      // support in ZooKeeper if the spurious calls happen each time).
-      LOG(ERROR) << "Slave at " << from()
-		 << " attempted to re-register with an already in use id ("
-		 << slaveId << ")";
-      send(from(), TERMINATE);
+      // NOTE: This handles the case where a slave tries to re-register with an
+      // existing master (e.g. because of a spurious zookeeper session
+      // expiration.)
+      // For now, we assume this slave is not nefarious (eventually this will
+      // be handled by orthogonal security measures like key based
+      // authentication).
+
+      LOG(WARNING) << "Slave at " << from()
+                   << " is being allowed to re-register with an already"
+                   << " in use id (" << slaveId << ")";
+
+      SlaveReregisteredMessage message;
+      message.mutable_slave_id()->MergeFrom(slave->id);
+      send(slave->pid, message);
+
     } else {
       Slave* slave = new Slave(slaveInfo, slaveId, from(), elapsedTime());
 
@@ -936,7 +934,7 @@ void Master::exitedExecutor(const SlaveID& slaveId,
           status->mutable_task_id()->MergeFrom(task->task_id());
           status->set_state(TASK_LOST);
           update->set_timestamp(elapsedTime());
-	  update->set_uuid(UUID::random().toBytes());
+          update->set_uuid(UUID::random().toBytes());
           send(framework->pid, message);
 
           LOG(INFO) << "Removing task " << task->task_id()
