@@ -29,8 +29,8 @@ inline Try<std::string> format(const std::string& fmt, va_list args)
 
 
 // TODO(benh): Can we implement a variant of format which for all
-// possible argument permutations converts invokes std::string::c_str
-// on each std::string?
+// possible argument permutations invokes std::string::c_str on each
+// std::string?
 inline Try<std::string> format(const std::string& fmt, ...)
 {
   va_list args;

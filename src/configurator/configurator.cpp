@@ -272,7 +272,7 @@ void Configurator::loadConfigFile(const string& fname, bool overwrite)
     // Split line by = and trim to get key and value
     vector<string> tokens = strings::split(line, "=");
     if (tokens.size() != 2) {
-      string message = "Malformed line in config file: '" + 
+      string message = "Malformed line in config file: '" +
                        strings::trim(originalLine) + "'";
       throw ConfigurationException(message.c_str());
     }
