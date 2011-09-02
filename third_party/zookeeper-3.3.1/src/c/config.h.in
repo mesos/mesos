@@ -9,6 +9,12 @@
 /* Define to 1 if you have the <fcntl.h> header file. */
 #undef HAVE_FCNTL_H
 
+/* Define to 1 if you have the file `generated/zookeeper.jute.c'. */
+#undef HAVE_GENERATED_ZOOKEEPER_JUTE_C
+
+/* Define to 1 if you have the file `generated/zookeeper.jute.h'. */
+#undef HAVE_GENERATED_ZOOKEEPER_JUTE_H
+
 /* Define to 1 if you have the `getcwd' function. */
 #undef HAVE_GETCWD
 

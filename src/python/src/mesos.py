@@ -8,7 +8,8 @@ class Scheduler:
   def getFrameworkName(self, driver): pass
   def getExecutorInfo(self, driver): pass
   def registered(self, driver, frameworkId): pass
-  def resourceOffer(self, driver, offerId, offers): pass
+  def resourceOffers(self, driver, offers): pass
+  def offerRescinded(self, driver, offerId): pass
   def statusUpdate(self, driver, status): pass
   def frameworkMessage(self, driver, message): pass
   def slaveLost(self, driver, slaveId): pass

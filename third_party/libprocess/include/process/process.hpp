@@ -16,7 +16,6 @@
 #include <process/future.hpp>
 #include <process/http.hpp>
 #include <process/pid.hpp>
-#include <process/promise.hpp>
 
 
 namespace process {

@@ -1,8 +1,8 @@
 #ifndef __MASTER_HTTP_HPP__
 #define __MASTER_HTTP_HPP__
 
+#include <process/future.hpp>
 #include <process/http.hpp>
-#include <process/promise.hpp>
 
 namespace mesos {
 namespace internal {
