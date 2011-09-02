@@ -121,10 +121,9 @@ GMOCK_LIB = gmock.a
 TESTS_OBJ = main.o utils.o master_tests.o resource_offers_tests.o	\
 	    fault_tolerance_tests.o log_tests.o resources_tests.o	\
 	    uuid_tests.o external_tests.o sample_frameworks_tests.o	\
-	    configurator_tests.o string_utils_tests.o			\
-	    multihashmap_tests.o protobuf_io_tests.o			\
-	    lxc_isolation_tests.o utils_tests.o jvm.o			\
-	    zookeeper_server.o base_zookeeper_test.o			\
+	    configurator_tests.o strings_tests.o multihashmap_tests.o	\
+	    protobuf_io_tests.o lxc_isolation_tests.o utils_tests.o	\
+	    jvm.o zookeeper_server.o base_zookeeper_test.o		\
 	    zookeeper_server_tests.o zookeeper_tests.o			\
 	    url_processor_tests.o killtree_tests.o
 

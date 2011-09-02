@@ -11,7 +11,6 @@
 #include <signal.h>
 #include <stdarg.h>
 #include <stddef.h>
-#include <stdarg.h>
 #include <unistd.h>
 
 #include <google/protobuf/message.h>
@@ -31,7 +30,8 @@
 #include "common/foreach.hpp"
 #include "common/option.hpp"
 #include "common/result.hpp"
-#include "common/tokenize.hpp"
+#include "common/strings.hpp"
+#include "common/try.hpp"
 
 #ifdef __APPLE__
 #define gethostbyname2_r(name, af, ret, buf, buflen, result, h_errnop)  \
@@ -39,7 +39,9 @@
 #endif // __APPLE__
 
 
-namespace mesos { namespace internal { namespace utils {
+namespace mesos {
+namespace internal {
+namespace utils {
 
 template <typename T>
 T copy(const T& t) { return t; }
@@ -168,7 +170,7 @@ inline std::string basename(const std::string& path)
 inline bool mkdir(const std::string& directory)
 {
   try {
-    std::vector<std::string> tokens = tokenize::split(directory, "/");
+    std::vector<std::string> tokens = strings::split(directory, "/");
 
     std::string path = "";
 
@@ -369,42 +371,45 @@ inline Result<std::string> hostname()
 
 // Runs a shell command formatted with varargs and return the return value
 // of the command. Optionally, the output is returned via an argument.
-inline Result<int> shell(std::iostream* ios, const std::string& format, ...)
+inline Try<int> shell(std::iostream* ios, const std::string& fmt, ...)
 {
-  char* cmd;
-  FILE* f;
   va_list args;
-  va_start(args, format);
+  va_start(args, fmt);
 
-  cmd = NULL;
+  const Try<std::string>& cmdline = strings::format(fmt, args);
 
-  if (vasprintf(&cmd, format.c_str(), args) == -1) {
-    free(cmd);
-    return Result<int>::error(strerror(errno));
+  va_end(args);
+
+  if (cmdline.isError()) {
+    return Try<int>::error(cmdline.error());
   }
 
-  if ((f = popen(cmd, "r")) == NULL) {
-    free(cmd);
-    return Result<int>::error(strerror(errno));
+  FILE* file;
+
+  if ((file = popen(cmdline.get().c_str(), "r")) == NULL) {
+    return Try<int>::error("Failed to run '" + cmdline.get() + "'");
   }
 
-  char line[1024]; // TODO(vinod): Handle output lines longer than 1024 bytes.
+  char line[1024];
   // NOTE(vinod): Ideally the if and while loops should be interchanged. But
   // we get a broken pipe error if we don't read the output and simply close.
-  while (fgets(line, sizeof(line), f)) {
+  while (fgets(line, sizeof(line), file) != NULL) {
     if (ios != NULL) {
       *ios << line ;
     }
   }
 
-  int status;
-  if ((status = pclose(f)) == -1) {
-    free(cmd);
-    return Result<int>::error(strerror(errno));
+  if (ferror(file) != 0) {
+    std::string error =
+      "Error reading output of '" + cmdline.get() + "': " + strerror(errno);
+    pclose(file); // Ignoring result since we already have an error.
+    return Try<int>::error(error);
   }
 
-  free(cmd);
-  va_end(args);
+  int status;
+  if ((status = pclose(file)) == -1) {
+    return Try<int>::error("Failed to get status of '" + cmdline.get() + "'");
+  }
 
   return status;
 }
@@ -568,6 +573,8 @@ inline Result<bool> read(const std::string& path,
 
 } // namespace protobuf {
 
-}}} // namespace mesos { namespace internal { namespace utils {
+} // namespace utils {
+} // namespace internal {
+} // namespace mesos {
 
 #endif // __UTILS_HPP__

@@ -10,7 +10,7 @@
 #include "config/config.hpp"
 
 #include "common/fatal.hpp"
-#include "common/tokenize.hpp"
+#include "common/strings.hpp"
 
 #ifdef WITH_ZOOKEEPER
 #include "zookeeper/zookeeper.hpp"
@@ -549,9 +549,9 @@ bool ZooKeeperSlavesManagerStorage::parse(
 
   const string& temp = s.substr(begin + key.size(), length);
 
-  const vector<string>& tokens = tokenize::split(temp, ",");
+  const vector<string>& tokens = strings::split(temp, ",");
   foreach (const string& token, tokens) {
-    const vector<string>& pairs = tokenize::split(token, ":");
+    const vector<string>& pairs = strings::split(token, ":");
     if (pairs.size() != 2) {
       LOG(WARNING) << "Slaves manager storage found bad data in '" << znode
                    << "', could not parse " << token;
@@ -610,9 +610,9 @@ SlavesManager::SlavesManager(const Configuration& conf,
   } else {
     // Parse 'slaves' as initial active hostname:port pairs.
     if (slaves != "*") {
-      const vector<string>& tokens = tokenize::split(slaves, ",");
+      const vector<string>& tokens = strings::split(slaves, ",");
       foreach (const string& token, tokens) {
-        const vector<string>& pairs = tokenize::split(token, ":");
+        const vector<string>& pairs = strings::split(token, ":");
         if (pairs.size() != 2) {
           fatal("Failed to parse \"%s\" in option 'slaves'", token.c_str());
         }
@@ -795,7 +795,7 @@ Promise<HttpResponse> SlavesManager::add(const HttpRequest& request)
   uint16_t port = 0;
 
   map<string, vector<string> > pairs =
-    tokenize::pairs(request.query, ',', '=');
+    strings::pairs(request.query, ',', '=');
 
   // Make sure there is at least a 'hostname=' and 'port='.
   if (pairs.count("hostname") == 0) {
@@ -838,7 +838,7 @@ Promise<HttpResponse> SlavesManager::remove(const HttpRequest& request)
   uint16_t port = 0;
 
   map<string, vector<string> > pairs =
-    tokenize::pairs(request.query, ',', '=');
+    strings::pairs(request.query, ',', '=');
 
   // Make sure there is at least a 'hostname=' and 'port='.
   if (pairs.count("hostname") == 0) {
@@ -881,7 +881,7 @@ Promise<HttpResponse> SlavesManager::activate(const HttpRequest& request)
   uint16_t port = 0;
 
   map<string, vector<string> > pairs =
-    tokenize::pairs(request.query, ',', '=');
+    strings::pairs(request.query, ',', '=');
 
   // Make sure there is at least a 'hostname=' and 'port='.
   if (pairs.count("hostname") == 0) {
@@ -924,7 +924,7 @@ Promise<HttpResponse> SlavesManager::deactivate(const HttpRequest& request)
   uint16_t port = 0;
 
   map<string, vector<string> > pairs =
-    tokenize::pairs(request.query, ',', '=');
+    strings::pairs(request.query, ',', '=');
 
   // Make sure there is at least a 'hostname=' and 'port='.
   if (pairs.count("hostname") == 0) {
