@@ -226,15 +226,15 @@ void LxcIsolationModule::killExecutor(
 
   LOG(INFO) << "Stopping container " << info->container;
 
-  Result<int> status = utils::os::shell(NULL,
-                                        "lxc-stop -n %s",
-                                        info->container.c_str());
+  Try<int> status =
+    utils::os::shell(NULL, "lxc-stop -n %s", info->container.c_str());
 
-  CHECK(status.isSome()) << "Error executing shell command lxc-stop";
-
-  if (status.get() != 0) {
+  if (status.isError()) {
     LOG(ERROR) << "Failed to stop container " << info->container
-               << ": lxc-stop returned " << status.get();
+               << ": " << status.error();
+  } else if (status.get() != 0) {
+    LOG(ERROR) << "Failed to stop container " << info->container
+               << ", lxc-stop returned: " << status.get();
   }
 
   if (infos[frameworkId].size() == 1) {
@@ -332,19 +332,19 @@ bool LxcIsolationModule::setControlGroupValue(
             << " for container " << container
             << " to " << value;
 
-  Result<int> status = utils::os::shell(NULL,
-                                        "lxc-cgroup -n %s %s %lld",
-                                        container.c_str(),
-                                        property.c_str(),
-                                        value);
+  Try<int> status =
+    utils::os::shell(NULL, "lxc-cgroup -n %s %s %lld",
+                     container.c_str(), property.c_str(), value);
 
-  CHECK(status.isSome()) << "Error executing shell command lxc-cgroup";
-
-  if (status.get() != 0) {
+  if (status.isError()) {
     LOG(ERROR) << "Failed to set " << property
                << " for container " << container
-               << ": lxc-cgroup returned "
-               << status.get();
+               << ": " << status.error();
+    return false;
+  } else if (status.get() != 0) {
+    LOG(ERROR) << "Failed to set " << property
+               << " for container " << container
+               << ": lxc-cgroup returned " << status.get();
     return false;
   }
 
