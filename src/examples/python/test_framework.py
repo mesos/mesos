@@ -30,10 +30,11 @@ class MyScheduler(mesos.Scheduler):
   def registered(self, driver, fid):
     print "Registered with framework ID %s" % fid.value
 
-  def resourceOffer(self, driver, oid, offers):
-    tasks = []
-    print "Got resource offer %s" % oid.value
+  def resourceOffers(self, driver, offers):
+    print "Got %d resource offers" % len(offers)
     for offer in offers:
+      tasks = []
+      print "Got resource offer %s" % offer.id.value
       if self.tasksLaunched < TOTAL_TASKS:
         tid = self.tasksLaunched
         self.tasksLaunched += 1
@@ -56,7 +57,7 @@ class MyScheduler(mesos.Scheduler):
         mem.scalar.value = TASK_MEM
 
         tasks.append(task)
-    driver.replyToOffer(oid, tasks, {})
+      driver.replyToOffer(offer.id, tasks)
 
   def statusUpdate(self, driver, update):
     print "Task %s is in state %d" % (update.task_id.value, update.state)
