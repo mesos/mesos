@@ -7,11 +7,14 @@ AC_INIT
 if test -z "$PYTHON"; then
   PYTHON=python2.6
 fi
+AC_SUBST(PYTHON)
 if test -z "$PYTHON_CONFIG"; then
   PYTHON_CONFIG=python2.6-config
 fi
+SETUPTOOLS=third_party/distribute-0.6.19/distribute-0.6.19-py2.6.egg
+AC_SUBST(SETUPTOOLS)
 
-# Update CFLAGS and CXXFLAGS with environment args. 
+# Update CFLAGS and CXXFLAGS with environment args.
 CFLAGS="-O2 -fno-strict-aliasing -fPIC ${CFLAGS}"
 CXXFLAGS="-O2 -fno-strict-aliasing -fPIC ${CXXFLAGS}"
 
@@ -32,7 +35,8 @@ AC_CONFIG_FILES([Makefile
                  src/examples/java/Makefile
                  src/examples/python/Makefile
                  src/tests/Makefile
-                 src/config/config.hpp])
+                 src/config/config.hpp
+                 src/python/setup.py])
 AC_CONFIG_SUBDIRS([third_party/libprocess])
 AC_CONFIG_SUBDIRS([third_party/protobuf-2.3.0])
 AC_CONFIG_SUBDIRS([third_party/glog-0.3.1])

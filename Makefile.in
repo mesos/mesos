@@ -2,12 +2,14 @@
 
 SHELL = '/bin/sh'
 
+BUILDSRC = @top_builddir@/src
 BINDIR = @top_builddir@/bin
 LIBDIR = @top_builddir@/lib
 CONFDIR = @top_builddir@/conf
 DEPLOYDIR = @top_builddir@/deploy
 
 OS_NAME = @OS_NAME@
+PYTHON = @PYTHON@
 
 MESOS_HOME = @prefix@/mesos
 
@@ -17,19 +19,25 @@ LIBPROCESS = third_party/libprocess
 PROTOBUF = third_party/protobuf-2.3.0
 GLOG = third_party/glog-0.3.1
 ZOOKEEPER = third_party/zookeeper-3.3.1/src/c
-
+SETUPTOOLS = @SETUPTOOLS@
 
 default: all
 
 src: third_party
 	$(MAKE) -C src
 
-third_party:
+third_party: setuptools
 	$(MAKE) -C $(LIBPROCESS)
 	$(MAKE) -C $(PROTOBUF)
 	$(MAKE) -C $(GLOG)
 ifeq ($(WITH_INCLUDED_ZOOKEEPER),1)
 	$(MAKE) -C $(ZOOKEEPER)
+endif
+
+setuptools:
+ifneq (@top_srcdir@,@top_builddir@)
+	mkdir -p @top_builddir@/`dirname $(SETUPTOOLS)`
+	cp -f @top_srcdir@/$(SETUPTOOLS) @top_builddir@/$(SETUPTOOLS)
 endif
 
 # TODO(benh): Install generated C++ header files.
@@ -42,9 +50,6 @@ install:
 	fi
 	if test ! -d $(MESOS_HOME)/lib/java; \
 		then mkdir -p $(MESOS_HOME)/lib/java; \
-	fi
-	if test ! -d $(MESOS_HOME)/lib/python; \
-		then mkdir -p $(MESOS_HOME)/lib/python; \
 	fi
 	if test ! -d $(MESOS_HOME)/conf; \
 		then mkdir -p $(MESOS_HOME)/conf; \
@@ -70,8 +75,9 @@ else
 	install -m 755 $(LIBDIR)/java/libmesos.so $(MESOS_HOME)/lib/java
 endif
 	install -m 755 $(LIBDIR)/java/mesos.jar $(MESOS_HOME)/lib/java
-	install -m 755 $(LIBDIR)/python/_mesos.so $(MESOS_HOME)/lib/python
-	install -m 755 $(LIBDIR)/python/mesos.py $(MESOS_HOME)/lib/python
+	mkdir -p $(MESOS_HOME)/lib/python
+	PYTHONPATH=$(SETUPTOOLS):$(MESOS_HOME)/lib/python $(PYTHON) -m easy_install --install-dir $(MESOS_HOME)/lib/python $(BUILDSRC)/python/dist/*.egg
+	PYTHONPATH=$(SETUPTOOLS):$(MESOS_HOME)/lib/python $(PYTHON) -m easy_install --install-dir $(MESOS_HOME)/lib/python @top_builddir@/$(PROTOBUF)/python/dist/*.egg
 
 uninstall:
 	$(error unimplemented)

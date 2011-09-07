@@ -600,6 +600,8 @@ build_vendor
 build_cpu
 build
 subdirs
+SETUPTOOLS
+PYTHON
 target_alias
 host_alias
 build_alias
@@ -1810,9 +1812,12 @@ ac_compiler_gnu=$ac_cv_c_compiler_gnu
 if test -z "$PYTHON"; then
   PYTHON=python2.6
 fi
+
 if test -z "$PYTHON_CONFIG"; then
   PYTHON_CONFIG=python2.6-config
 fi
+SETUPTOOLS=third_party/distribute-0.6.19/distribute-0.6.19-py2.6.egg
+
 
 # Update CFLAGS and CXXFLAGS with environment args.
 CFLAGS="-O2 -fno-strict-aliasing -fPIC ${CFLAGS}"
@@ -1829,7 +1834,7 @@ ac_configure_args=`echo $ac_configure_args | \
                    sed -e "s/CXXFLAGS=/CXXFLAGS=-O2 -fno-strict-aliasing /"`
 ac_configure_args="$ac_configure_args --enable-shared=no --with-pic"
 
-ac_config_files="$ac_config_files Makefile src/Makefile src/examples/Makefile src/examples/java/Makefile src/examples/python/Makefile src/tests/Makefile src/config/config.hpp"
+ac_config_files="$ac_config_files Makefile src/Makefile src/examples/Makefile src/examples/java/Makefile src/examples/python/Makefile src/tests/Makefile src/config/config.hpp src/python/setup.py"
 
 ac_aux_dir=
 for ac_dir in "$srcdir" "$srcdir/.." "$srcdir/../.."; do
@@ -3730,6 +3735,7 @@ do
     "src/examples/python/Makefile") CONFIG_FILES="$CONFIG_FILES src/examples/python/Makefile" ;;
     "src/tests/Makefile") CONFIG_FILES="$CONFIG_FILES src/tests/Makefile" ;;
     "src/config/config.hpp") CONFIG_FILES="$CONFIG_FILES src/config/config.hpp" ;;
+    "src/python/setup.py") CONFIG_FILES="$CONFIG_FILES src/python/setup.py" ;;
 
   *) as_fn_error $? "invalid argument: \`$ac_config_target'" "$LINENO" 5;;
   esac
