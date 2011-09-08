@@ -19,6 +19,8 @@ using namespace process;
 
 namespace utils = mesos::internal::utils; // TODO(benh): Pull utils out.
 
+using process::wait; // Necessary on some OS's to disambiguate.
+
 using std::make_pair;
 using std::map;
 using std::queue;
