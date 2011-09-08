@@ -157,7 +157,7 @@ void GroupProcess::initialize()
   // Doing initialization here allows to avoid the race between
   // instantiating the ZooKeeper instance and being spawned ourself.
   watcher = new ProcessWatcher<GroupProcess>(self());
-  zk = new ZooKeeper(servers, timeout.millis(), watcher);
+  zk = new ZooKeeper(servers, timeout, watcher);
   state = CONNECTING;
 }
 
@@ -352,7 +352,7 @@ void GroupProcess::expired()
   owned.clear();
   state = DISCONNECTED;
   delete zk;
-  zk = new ZooKeeper(servers, timeout.millis(), watcher);
+  zk = new ZooKeeper(servers, timeout, watcher);
   state = CONNECTING;
 }
 

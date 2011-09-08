@@ -7,6 +7,8 @@
 
 #include <tr1/functional>
 
+#include "common/seconds.hpp"
+
 #include "tests/jvm.hpp"
 #include "tests/zookeeper_server.hpp"
 
@@ -71,7 +73,7 @@ protected:
   virtual void TearDown();
 
   // A very long session timeout that simulates no timeout for test cases.
-  static const int NO_TIMEOUT = 1000 /* ms */ * 5 /* secs */;
+  static const milliseconds NO_TIMEOUT;
 
   ZooKeeperServer* zks;
 

@@ -154,7 +154,9 @@ class ZooKeeperImpl
 #endif // USE_THREADED_ZOOKEEPER
 {
 public:
-  ZooKeeperImpl(ZooKeeper* zk, const string& servers, int timeout,
+  ZooKeeperImpl(ZooKeeper* zk,
+                const string& servers,
+                const milliseconds& timeout,
 		Watcher* watcher)
     : zk(zk), servers(servers), timeout(timeout), watcher(watcher)
   {
@@ -171,7 +173,7 @@ public:
 
     // TODO(benh): Link with WatcherProcess PID?
 
-    zh = zookeeper_init(servers.c_str(), event, timeout, NULL, this, 0);
+    zh = zookeeper_init(servers.c_str(), event, timeout.value, NULL, this, 0);
     if (zh == NULL) {
       fatalerror("failed to create ZooKeeper (zookeeper_init)");
     }
@@ -515,17 +517,19 @@ private:
   friend class ZooKeeper;
 
   const string servers; // ZooKeeper host:port pairs.
-  const int timeout; // ZooKeeper session timeout.
+  const milliseconds timeout; // ZooKeeper session timeout.
 
   ZooKeeper* zk; // ZooKeeper instance.
   zhandle_t* zh; // ZooKeeper connection handle.
-  
-  Watcher* watcher; // Associated Watcher instance. 
+
+  Watcher* watcher; // Associated Watcher instance.
   PID<WatcherProcess> pid; // PID of WatcherProcess that invokes Watcher.
 };
 
 
-ZooKeeper::ZooKeeper(const string& servers, int timeout, Watcher* watcher)
+ZooKeeper::ZooKeeper(const string& servers,
+                     const milliseconds& timeout,
+                     Watcher* watcher)
 {
   impl = new ZooKeeperImpl(this, servers, timeout, watcher);
 #ifndef USE_THREADED_ZOOKEEPER

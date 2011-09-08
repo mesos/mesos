@@ -325,7 +325,7 @@ void ZooKeeperMasterDetector::initialize(bool quiet,
   credentials = _credentials;
 
   // Start up the ZooKeeper connection!
-  zk = new ZooKeeper(servers, 10000, this);
+  zk = new ZooKeeper(servers, milliseconds(10000), this);
 }
 
 ZooKeeperMasterDetector::~ZooKeeperMasterDetector()
@@ -484,7 +484,7 @@ void ZooKeeperMasterDetector::expired()
   CHECK(zk != NULL);
   delete zk;
 
-  zk = new ZooKeeper(servers, 10000, this);
+  zk = new ZooKeeper(servers, milliseconds(10000), this);
 }
 
 

@@ -1,15 +1,9 @@
 /**
- * ZooKeeper C++ API. Originally created to be used with the
- * Libprocess library (http://www.eecs.berkeley.edu/~benh/libprocess),
- * these C++ classes could also use a different underlying
- * implementation, such as calling the synchronous functions exposed
- * by the ZooKeeper C API.
+ * ZooKeeper C++ API.
  *
  * To provide for varying underlying implementations the pimpl idiom
  * (also known as the compiler-firewall, bridge pattern, etc) was used
  * for the ZooKeeper class.
- *
- * Author: Benjamin Hindman <benh@berkeley.edu>
 */
 #ifndef ZOOKEEPER_HPP
 #define ZOOKEEPER_HPP
@@ -18,6 +12,8 @@
 
 #include <string>
 #include <vector>
+
+#include "common/seconds.hpp"
 
 
 /* Forward declarations of classes we are using. */
@@ -106,7 +102,9 @@ public:
    *    callbacks. When notifications are triggered the Watcher::process
    *    method will be invoked.
    */
-  ZooKeeper(const std::string &servers, int timeout, Watcher *watcher);
+  ZooKeeper(const std::string &servers,
+            const milliseconds& timeout,
+            Watcher *watcher);
 
   ~ZooKeeper();
 
