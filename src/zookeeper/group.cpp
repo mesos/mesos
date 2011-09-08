@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <map>
 #include <queue>
 #include <utility>
@@ -582,7 +583,7 @@ void GroupProcess::retry(double seconds)
   } else if (error.isNone() && state == CONNECTED) {
     bool synced = sync(); // Might get another retryable error.
     if (!synced) {
-      seconds = seconds >= 60.0 ? seconds : seconds * 2.0; // Backoff.
+      seconds = std::min(seconds * 2.0, 60.0); // Backoff.
       delay(seconds, self(), &GroupProcess::retry, seconds);
     } else {
       retrying = false;
