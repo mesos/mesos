@@ -4,7 +4,6 @@
 #include <string>
 
 #include <process/future.hpp>
-#include <process/promise.hpp>
 #include <process/protobuf.hpp>
 
 #include "common/option.hpp"

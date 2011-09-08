@@ -1,5 +1,7 @@
 #include <assert.h>
 
+#include <glog/logging.h>
+
 #include <iostream>
 #include <map>
 
@@ -640,7 +642,46 @@ int ZooKeeper::set(const string& path, const string& data, int version)
 }
 
 
-const char* ZooKeeper::error(int ret) const
+const char* ZooKeeper::message(int code) const
 {
-  return zerror(ret);
+  return zerror(code);
+}
+
+
+bool ZooKeeper::retryable(int code)
+{
+  switch (code) {
+    case ZCONNECTIONLOSS:
+    case ZOPERATIONTIMEOUT:
+    case ZSESSIONEXPIRED:
+    case ZSESSIONMOVED:
+      return true;
+
+    case ZOK: // No need to retry!
+
+    case ZSYSTEMERROR: // Should not be encountered, here for completeness.
+    case ZRUNTIMEINCONSISTENCY:
+    case ZDATAINCONSISTENCY:
+    case ZMARSHALLINGERROR:
+    case ZUNIMPLEMENTED:
+    case ZBADARGUMENTS:
+    case ZINVALIDSTATE:
+
+    case ZAPIERROR: // Should not be encountered, here for completeness.
+    case ZNONODE:
+    case ZNOAUTH:
+    case ZBADVERSION:
+    case ZNOCHILDRENFOREPHEMERALS:
+    case ZNODEEXISTS:
+    case ZNOTEMPTY:
+    case ZINVALIDCALLBACK:
+    case ZINVALIDACL:
+    case ZAUTHFAILED:
+    case ZCLOSING:
+    case ZNOTHING: // Is this used? It's not exposed in the Java API.
+      return false;
+
+    default:
+      LOG(FATAL) << "Unknown ZooKeeper code: " << code;
+  }
 }

@@ -589,6 +589,7 @@ void Future<T>::copy(const Future<T>& that)
   lock = that.lock;
   state = that.state;
   t = that.t;
+  message = that.message;
   onReadyCallbacks = that.onReadyCallbacks;
   onFailedCallbacks = that.onFailedCallbacks;
   onDiscardedCallbacks = that.onDiscardedCallbacks;

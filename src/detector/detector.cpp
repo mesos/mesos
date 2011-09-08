@@ -364,7 +364,7 @@ void ZooKeeperMasterDetector::connected()
     ret = zk->authenticate(username, password);
     if (ret != ZOK) {
       fatal("Failed to authenticate with ZooKeeper (%s) at : %s",
-            zk->error(ret), servers.c_str());
+            zk->message(ret), servers.c_str());
     }
   }
 
@@ -389,7 +389,7 @@ void ZooKeeperMasterDetector::connected()
     ret = zk->create(prefix, "", EVERYONE_READ_CREATOR_ALL, 0, &result);
 
     if (ret != ZOK && ret != ZNODEEXISTS) {
-      fatal("failed to create ZooKeeper znode! (%s)", zk->error(ret));
+      fatal("failed to create ZooKeeper znode! (%s)", zk->message(ret));
     }
   }
 
@@ -399,7 +399,7 @@ void ZooKeeperMasterDetector::connected()
   if (ret != ZOK) {
     fatal("ZooKeeper not responding correctly (%s). "
 	  "Make sure ZooKeeper is running on: %s",
-	  zk->error(ret), servers.c_str());
+	  zk->message(ret), servers.c_str());
   }
 
   if (contend) {
@@ -410,7 +410,7 @@ void ZooKeeperMasterDetector::connected()
     if (ret != ZOK) {
       fatal("ZooKeeper not responding correctly (%s). "
 	    "Make sure ZooKeeper is running on: %s",
-	    zk->error(ret), servers.c_str());
+	    zk->message(ret), servers.c_str());
     }
 
     // Save the sequence id but only grab the basename, e.g.,
@@ -465,7 +465,7 @@ void ZooKeeperMasterDetector::reconnected()
     if (ret != ZOK) {
       fatal("ZooKeeper not responding correctly (%s). "
 	    "Make sure ZooKeeper is running on: %s",
-	    zk->error(ret), servers.c_str());
+	    zk->message(ret), servers.c_str());
     }
 
     // We are still the master!
@@ -539,7 +539,7 @@ void ZooKeeperMasterDetector::detectMaster()
 
   if (ret != ZOK) {
     LOG(ERROR) << "Master detector failed to get masters: "
-	       << zk->error(ret);
+	       << zk->message(ret);
   } else {
     LOG(INFO) << "Master detector found " << results.size()
 	      << " registered masters";
@@ -567,7 +567,7 @@ void ZooKeeperMasterDetector::detectMaster()
       // This is possible because the master might have failed since
       // the invocation of ZooKeeper::getChildren above.
       LOG(ERROR) << "Master detector failed to fetch new master pid: "
-		 << zk->error(ret);
+		 << zk->message(ret);
       process::post(pid, NoMasterDetectedMessage());
     } else {
       // Now let's parse what we fetched from ZooKeeper.

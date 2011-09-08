@@ -156,7 +156,7 @@ Promise<bool> ZooKeeperSlavesManagerStorage::add(const string& hostname, uint16_
 
   if (ret != ZOK) {
     LOG(WARNING) << "Slaves manager storage failed to get '" << znode
-                 << "' in ZooKeeper! (" << zk->error(ret) << ")";
+                 << "' in ZooKeeper! (" << zk->message(ret) << ")";
     return false;
   }
 
@@ -192,7 +192,7 @@ Promise<bool> ZooKeeperSlavesManagerStorage::add(const string& hostname, uint16_
     LOG(WARNING) << "Slaves manager storage could not add slave "
 		 << hostname << ":" << port
                  << " to '" << znode << "' in ZooKeeper! ("
-                 << zk->error(ret) << ")";
+                 << zk->message(ret) << ")";
     return false;
   }
 
@@ -211,7 +211,7 @@ Promise<bool> ZooKeeperSlavesManagerStorage::remove(const string& hostname, uint
 
   if (ret != ZOK) {
     LOG(WARNING) << "Slaves manager storage failed to get '" << znode
-                 << "' in ZooKeeper! (" << zk->error(ret) << ")";
+                 << "' in ZooKeeper! (" << zk->message(ret) << ")";
     return false;
   }
 
@@ -247,7 +247,7 @@ Promise<bool> ZooKeeperSlavesManagerStorage::remove(const string& hostname, uint
     LOG(WARNING) << "Slaves manager storage could not remove slave "
 		 << hostname << ":" << port
                  << " from '" << znode << "' in ZooKeeper! ("
-                 << zk->error(ret) << ")";
+                 << zk->message(ret) << ")";
     return false;
   }
 
@@ -266,7 +266,7 @@ Promise<bool> ZooKeeperSlavesManagerStorage::activate(const string& hostname, ui
 
   if (ret != ZOK) {
     LOG(WARNING) << "Slaves manager storage failed to get '" << znode
-                 << "' in ZooKeeper! (" << zk->error(ret) << ")";
+                 << "' in ZooKeeper! (" << zk->message(ret) << ")";
     return false;
   }
 
@@ -328,7 +328,7 @@ Promise<bool> ZooKeeperSlavesManagerStorage::activate(const string& hostname, ui
     LOG(WARNING) << "Slaves manager storage could not activate slave "
 		 << hostname << ":" << port
                  << " in '" << znode << "' in ZooKeeper! ("
-                 << zk->error(ret) << ")";
+                 << zk->message(ret) << ")";
     return false;
   }
 
@@ -347,7 +347,7 @@ Promise<bool> ZooKeeperSlavesManagerStorage::deactivate(const string& hostname, 
 
   if (ret != ZOK) {
     LOG(WARNING) << "Slaves manager storage failed to get '" << znode
-                 << "' in ZooKeeper! (" << zk->error(ret) << ")";
+                 << "' in ZooKeeper! (" << zk->message(ret) << ")";
     return false;
   }
 
@@ -409,7 +409,7 @@ Promise<bool> ZooKeeperSlavesManagerStorage::deactivate(const string& hostname, 
     LOG(WARNING) << "Slaves manager storage could not activate slave "
 		 << hostname << ":" << port
                  << " in '" << znode << "' in ZooKeeper! ("
-                 << zk->error(ret) << ")";
+                 << zk->message(ret) << ")";
     return false;
   }
 
@@ -442,7 +442,7 @@ Promise<bool> ZooKeeperSlavesManagerStorage::connected()
       // to ZooKeeper), increment the failure count, log the issue,
       // and perhaps try again when ZooKeeper issues get sorted out.
       LOG(WARNING) << "Slaves manager storage failed to create '" << znode
-                   << "' in ZooKeeper! (" << zk->error(ret) << ")";
+                   << "' in ZooKeeper! (" << zk->message(ret) << ")";
       return false;
     }
   }
@@ -500,7 +500,7 @@ Promise<bool> ZooKeeperSlavesManagerStorage::updated(const string& path)
 
     if (ret != ZOK) {
       LOG(WARNING) << "Slaves manager storage failed to get '" << znode
-                   << "' in ZooKeeper! (" << zk->error(ret) << ")";
+                   << "' in ZooKeeper! (" << zk->message(ret) << ")";
       return false;
     }
 

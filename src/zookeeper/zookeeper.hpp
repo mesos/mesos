@@ -271,11 +271,21 @@ public:
   int set(const std::string &path, const std::string &data, int version);
 
   /**
-   * \brief return a string describing the last error.
-   * 
-   * \return string corresponding to the last error
+   * \brief return a message describing the return code.
+   *
+   * \return string message corresponding to return code.
    */
-  const char * error(int ret) const;
+  const char* message(int code) const;
+
+  /**
+   * \brief returns whether or not the specified return code implies
+   * the operation can be retried "as is" (i.e., without needing to
+   * change anything).
+   *
+   * \return bool indicating whether operation can be retried.
+   */
+  bool retryable(int code);
+
 
 protected:
   /* Underlying implementation (pimpl idiom). */

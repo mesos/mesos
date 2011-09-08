@@ -8,6 +8,11 @@ namespace process {
 class Timeout
 {
 public:
+  Timeout()
+  {
+    timeout = Clock::now();
+  }
+
   Timeout(double seconds)
   {
     timeout = Clock::now() + seconds;

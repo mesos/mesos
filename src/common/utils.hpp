@@ -74,13 +74,17 @@ std::string stringify(const std::set<T>& set)
   return out.str();
 }
 
+
 template <typename T>
-T numify(const std::string& s)
+Try<T> numify(const std::string& s)
 {
   try {
     return boost::lexical_cast<T>(s);
   } catch (const boost::bad_lexical_cast&) {
-    CHECK(false) << "Error converting string " + s + " to number";
+    const Try<std::string>& message = strings::format(
+        "Failed to convert '%s' to number", s.c_str());
+    return Try<T>::error(
+        message.isSome() ? message.get() : "Failed to convert to number");
   }
 }
 
