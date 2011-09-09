@@ -1479,8 +1479,6 @@ void Master::addSlave(Slave* slave, bool reregister)
 
   link(slave->pid);
 
-  allocator->slaveAdded(slave);
-
   if (!reregister) {
     SlaveRegisteredMessage message;
     message.mutable_slave_id()->MergeFrom(slave->id);
@@ -1500,6 +1498,8 @@ void Master::addSlave(Slave* slave, bool reregister)
   slave->observer = new SlaveObserver(slave->pid, slave->info,
                                       slave->id, slavesManager->self());
   spawn(slave->observer);
+
+  allocator->slaveAdded(slave);
 }
 
 

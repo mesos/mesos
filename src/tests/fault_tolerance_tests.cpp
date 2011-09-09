@@ -536,8 +536,6 @@ TEST(FaultToleranceTest, SlaveReRegister)
   MockScheduler sched;
   MesosSchedulerDriver driver(&sched, master);
 
-  vector<Offer> offers;
-
   trigger resourceOffersCall;
 
   EXPECT_CALL(sched, getFrameworkName(&driver))
@@ -550,8 +548,7 @@ TEST(FaultToleranceTest, SlaveReRegister)
     .Times(1);
 
   EXPECT_CALL(sched, resourceOffers(&driver, _))
-    .WillOnce(DoAll(SaveArg<1>(&offers),
-                    Trigger(&resourceOffersCall)))
+    .WillOnce(Trigger(&resourceOffersCall))
     .WillRepeatedly(Return());
 
   trigger slaveReRegisterMsg;
@@ -563,9 +560,7 @@ TEST(FaultToleranceTest, SlaveReRegister)
 
   WAIT_UNTIL(resourceOffersCall);
 
-  EXPECT_EQ(1, offers.size());
-
-  // Simulate a spurious newMasterDetected event (e.g., due to zookeeper
+  // Simulate a spurious newMasterDetected event (e.g., due to ZooKeeper
   // expiration) at the slave.
 
   process::dispatch(slave, &Slave::newMasterDetected, master);
