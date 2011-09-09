@@ -73,7 +73,7 @@ message RegisterFrameworkMessage {
 message ReregisterFrameworkMessage {
   required FrameworkID framework_id = 1;
   required FrameworkInfo framework = 2;
-  required int32 generation = 3;
+  required bool failover = 3;
 }
 
 
@@ -81,6 +81,9 @@ message FrameworkRegisteredMessage {
   required FrameworkID framework_id = 1;
 }
 
+message FrameworkReregisteredMessage {
+  required FrameworkID framework_id = 1;
+}
 
 message UnregisterFrameworkMessage {
   required FrameworkID framework_id = 1;

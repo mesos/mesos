@@ -64,14 +64,14 @@ class SchedulerProcess : public ProtobufProcess<SchedulerProcess>
 public:
   SchedulerProcess(MesosSchedulerDriver* _driver,
                    Scheduler* _sched,
-		   const FrameworkID& _frameworkId,
+                   const FrameworkID& _frameworkId,
                    const FrameworkInfo& _framework)
     : driver(_driver),
       sched(_sched),
       frameworkId(_frameworkId),
       framework(_framework),
-      generation(0),
-      master(UPID())
+      master(UPID()),
+      failover(!(_frameworkId == ""))
   {
     installProtobufHandler<NewMasterDetectedMessage>(
         &SchedulerProcess::newMasterDetected,
@@ -83,6 +83,10 @@ public:
     installProtobufHandler<FrameworkRegisteredMessage>(
         &SchedulerProcess::registered,
         &FrameworkRegisteredMessage::framework_id);
+
+    installProtobufHandler<FrameworkReregisteredMessage>(
+        &SchedulerProcess::reregistered,
+        &FrameworkReregisteredMessage::framework_id);
 
     installProtobufHandler<ResourceOffersMessage>(
         &SchedulerProcess::resourceOffers,
@@ -137,8 +141,9 @@ protected:
       ReregisterFrameworkMessage message;
       message.mutable_framework()->MergeFrom(framework);
       message.mutable_framework_id()->MergeFrom(frameworkId);
-      message.set_generation(generation++);
+      message.set_failover(failover);
       send(master, message);
+      failover = false; // Only failover the first time.
     }
 
     active = true;
@@ -159,6 +164,12 @@ protected:
     invoke(bind(&Scheduler::registered, sched, driver, cref(frameworkId)));
   }
 
+  void reregistered(const FrameworkID& frameworkId)
+  {
+    VLOG(1) << "Framework re-registered with " << frameworkId;
+    CHECK(this->frameworkId == frameworkId);
+  }
+
   void resourceOffers(const vector<Offer>& offers,
                       const vector<string>& pids)
   {
@@ -172,10 +183,10 @@ protected:
       UPID pid(pids[i]);
       // Check if parse failed (e.g., due to DNS).
       if (pid != UPID()) {
-	VLOG(2) << "Saving PID '" << pids[i] << "'";
-	savedOffers[offers[i].id()][offers[i].slave_id()] = pid;
+        VLOG(2) << "Saving PID '" << pids[i] << "'";
+        savedOffers[offers[i].id()][offers[i].slave_id()] = pid;
       } else {
-	VLOG(2) << "Failed to parse PID '" << pids[i] << "'";
+        VLOG(2) << "Failed to parse PID '" << pids[i] << "'";
       }
     }
 
@@ -375,7 +386,7 @@ private:
   Scheduler* sched;
   FrameworkID frameworkId;
   FrameworkInfo framework;
-  int32_t generation;
+  bool failover;
   UPID master;
 
   volatile bool active;

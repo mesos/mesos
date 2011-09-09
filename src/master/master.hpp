@@ -55,7 +55,7 @@ public:
   void registerFramework(const FrameworkInfo& frameworkInfo);
   void reregisterFramework(const FrameworkID& frameworkId,
                            const FrameworkInfo& frameworkInfo,
-                           int32_t generation);
+                           bool failover);
   void unregisterFramework(const FrameworkID& frameworkId);
   void resourceRequest(const FrameworkID& frameworkId,
                        const std::vector<ResourceRequest>& requests);

@@ -246,6 +246,70 @@ TEST(FaultToleranceTest, SchedulerFailover)
 }
 
 
+TEST(FaultToleranceTest, FrameworkReregister)
+{
+  ASSERT_TRUE(GTEST_IS_THREADSAFE);
+
+  MockFilter filter;
+  process::filter(&filter);
+
+  EXPECT_MSG(filter, _, _, _)
+    .WillRepeatedly(Return(false));
+
+  PID<Master> master = local::launch(1, 2, 1 * Gigabyte, false, false);
+
+  MockScheduler sched;
+  MesosSchedulerDriver driver(&sched, master);
+
+  trigger schedRegisteredCall;
+
+  EXPECT_CALL(sched, getFrameworkName(&driver))
+    .WillOnce(Return(""));
+
+  EXPECT_CALL(sched, getExecutorInfo(&driver))
+    .WillOnce(Return(DEFAULT_EXECUTOR_INFO));
+
+  EXPECT_CALL(sched, registered(&driver, _))
+    .WillOnce(Trigger(&schedRegisteredCall));
+
+  EXPECT_CALL(sched, resourceOffers(&driver, _))
+    .WillRepeatedly(Return());
+
+  EXPECT_CALL(sched, offerRescinded(&driver, _))
+    .Times(AtMost(1));
+
+  process::Message message;
+  trigger schedReregisteredMsg;
+
+  EXPECT_MSG(filter, Eq(FrameworkRegisteredMessage().GetTypeName()), _, _)
+    .WillOnce(DoAll(SaveArgPointee<0>(&message),
+                    Return(false)));
+
+  EXPECT_MSG(filter, Eq(FrameworkReregisteredMessage().GetTypeName()), _, _)
+    .WillOnce(DoAll(Trigger(&schedReregisteredMsg),
+                    Return(false)));
+
+  driver.start();
+
+  WAIT_UNTIL(schedRegisteredCall); // Ensures registered message is received.
+
+  // Simulate a spurious newMasterDetected event (e.g., due to ZooKeeper
+  // expiration) at the scheduler.
+  NewMasterDetectedMessage newMasterDetectedMsg;
+  newMasterDetectedMsg.set_pid(master);
+
+  process::post(message.to, newMasterDetectedMsg);
+
+  WAIT_UNTIL(schedReregisteredMsg);
+
+  driver.stop();
+  driver.join();
+
+  local::shutdown();
+
+  process::filter(NULL);
+}
+
 TEST(FaultToleranceTest, SchedulerFailoverStatusUpdate)
 {
   ASSERT_TRUE(GTEST_IS_THREADSAFE);
@@ -510,7 +574,7 @@ TEST(FaultToleranceTest, SchedulerFailoverFrameworkMessage)
 }
 
 
-TEST(FaultToleranceTest, SlaveReRegister)
+TEST(FaultToleranceTest, SlaveReregister)
 {
   ASSERT_TRUE(GTEST_IS_THREADSAFE);
 
@@ -563,7 +627,10 @@ TEST(FaultToleranceTest, SlaveReRegister)
   // Simulate a spurious newMasterDetected event (e.g., due to ZooKeeper
   // expiration) at the slave.
 
-  process::dispatch(slave, &Slave::newMasterDetected, master);
+  NewMasterDetectedMessage message;
+  message.set_pid(master);
+
+  process::post(slave, message);
 
   WAIT_UNTIL(slaveReRegisterMsg);
 

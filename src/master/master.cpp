@@ -324,7 +324,7 @@ void Master::initialize()
       &Master::reregisterFramework,
       &ReregisterFrameworkMessage::framework_id,
       &ReregisterFrameworkMessage::framework,
-      &ReregisterFrameworkMessage::generation);
+      &ReregisterFrameworkMessage::failover);
 
   installProtobufHandler<UnregisterFrameworkMessage>(
       &Master::unregisterFramework,
@@ -483,7 +483,7 @@ void Master::registerFramework(const FrameworkInfo& frameworkInfo)
 
 void Master::reregisterFramework(const FrameworkID& frameworkId,
                                  const FrameworkInfo& frameworkInfo,
-                                 int32_t generation)
+                                 bool failover)
 {
   if (frameworkId == "") {
     LOG(ERROR) << "Framework re-registering without an id!";
@@ -503,7 +503,7 @@ void Master::reregisterFramework(const FrameworkID& frameworkId,
               << " at " << from();
 
     if (frameworks.count(frameworkId) > 0) {
-      // Using the "generation" of the scheduler allows us to keep a
+      // Using the "failover" of the scheduler allows us to keep a
       // scheduler that got partitioned but didn't die (in ZooKeeper
       // speak this means didn't lose their session) and then
       // eventually tried to connect to this master even though
@@ -512,18 +512,17 @@ void Master::reregisterFramework(const FrameworkID& frameworkId,
       // master/allocator launches the scheduler can get restarted
       // (if necessary) by the master and the master will always
       // know which scheduler is the correct one.
-      if (generation == 0) {
+      if (failover) {
         // TODO: Should we check whether the new scheduler has given
         // us a different framework name, user name or executor info?
         LOG(INFO) << "Framework " << frameworkId << " failed over";
         failoverFramework(frameworks[frameworkId], from());
       } else {
-        LOG(INFO) << "Framework " << frameworkId
-                  << " re-registering with an already used id "
-                  << " and not failing over!";
-        FrameworkErrorMessage message;
-        message.set_code(1);
-        message.set_message("Framework id in use");
+        LOG(INFO) << "Allowing the Framework " << frameworkId
+                  << " to re-register with an already used id";
+
+        FrameworkReregisteredMessage message;
+        message.mutable_framework_id()->MergeFrom(frameworkId);
         send(from(), message);
         return;
       }
