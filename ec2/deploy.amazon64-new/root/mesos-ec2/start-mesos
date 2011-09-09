@@ -29,7 +29,7 @@ if [[ $NUM_ZOOS != 0 ]]; then
   wait
 else
   echo "Starting master on $ACTIVE_MASTER"
-  ssh $SSH_OPTS $ACTIVE_MASTER "/root/mesos-ec2/mesos-daemon mesos-master -p 5050 $@ </dev/null >/dev/null"
+  ssh $SSH_OPTS $ACTIVE_MASTER "/root/mesos-ec2/mesos-daemon mesos-master --failover_timeout=1 -p 5050 $@ </dev/null >/dev/null"
 fi
 
 sleep 5
