@@ -90,7 +90,7 @@ TEST(ReplicaTest, Promise)
   future = protocol::promise(replica, request);
 
   future.await(2.0);
-  ASSERT_TRUE(future.ready());
+  ASSERT_TRUE(future.isReady());
 
   response = future.get();
   EXPECT_TRUE(response.okay());
@@ -104,7 +104,7 @@ TEST(ReplicaTest, Promise)
   future = protocol::promise(replica, request);
 
   future.await(2.0);
-  ASSERT_TRUE(future.ready());
+  ASSERT_TRUE(future.isReady());
 
   response = future.get();
   EXPECT_FALSE(response.okay());
@@ -117,7 +117,7 @@ TEST(ReplicaTest, Promise)
   future = protocol::promise(replica, request);
 
   future.await(2.0);
-  ASSERT_TRUE(future.ready());
+  ASSERT_TRUE(future.isReady());
 
   response = future.get();
   EXPECT_TRUE(response.okay());
@@ -150,7 +150,7 @@ TEST(ReplicaTest, Append)
   Future<PromiseResponse> future1 = protocol::promise(replica, request1);
 
   future1.await(2.0);
-  ASSERT_TRUE(future1.ready());
+  ASSERT_TRUE(future1.isReady());
 
   PromiseResponse response1 = future1.get();
   EXPECT_TRUE(response1.okay());
@@ -168,7 +168,7 @@ TEST(ReplicaTest, Append)
   Future<WriteResponse> future2 = protocol::write(replica, request2);
 
   future2.await(2.0);
-  ASSERT_TRUE(future2.ready());
+  ASSERT_TRUE(future2.isReady());
 
   WriteResponse response2 = future2.get();
   EXPECT_TRUE(response2.okay());
@@ -215,7 +215,7 @@ TEST(ReplicaTest, Recover)
   Future<PromiseResponse> future1 = protocol::promise(replica1, request1);
 
   future1.await(2.0);
-  ASSERT_TRUE(future1.ready());
+  ASSERT_TRUE(future1.isReady());
 
   PromiseResponse response1 = future1.get();
   EXPECT_TRUE(response1.okay());
@@ -233,7 +233,7 @@ TEST(ReplicaTest, Recover)
   Future<WriteResponse> future2 = protocol::write(replica1, request2);
 
   future2.await(2.0);
-  ASSERT_TRUE(future2.ready());
+  ASSERT_TRUE(future2.isReady());
 
   WriteResponse response2 = future2.get();
   EXPECT_TRUE(response2.okay());
@@ -306,7 +306,7 @@ TEST(ReplicaTest, RecoverAfterCrash)
   Future<PromiseResponse> future1 = protocol::promise(replica1, request1);
 
   future1.await(2.0);
-  ASSERT_TRUE(future1.ready());
+  ASSERT_TRUE(future1.isReady());
 
   PromiseResponse response1 = future1.get();
   EXPECT_TRUE(response1.okay());
@@ -324,7 +324,7 @@ TEST(ReplicaTest, RecoverAfterCrash)
   Future<WriteResponse> future2 = protocol::write(replica1, request2);
 
   future2.await(2.0);
-  ASSERT_TRUE(future2.ready());
+  ASSERT_TRUE(future2.isReady());
 
   WriteResponse response2 = future2.get();
   EXPECT_TRUE(response2.okay());

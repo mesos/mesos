@@ -53,7 +53,7 @@ Result<uint64_t> Coordinator::elect(uint64_t _id)
   do {
     option = select(futures, timeout.remaining());
     if (option.isSome()) {
-      CHECK(option.get().ready());
+      CHECK(option.get().isReady());
       const PromiseResponse& response = option.get().get();
       if (!response.okay()) {
         return Result<uint64_t>::error("Coordinator demoted");
@@ -196,7 +196,7 @@ Result<list<pair<uint64_t, string> > > Coordinator::read(
 
   foreach (const Future<Result<Action> >& future, futures) {
     future.await(); // TODO(benh): Timeout?
-    CHECK(future.ready());
+    CHECK(future.isReady());
     const Result<Action>& result = future.get();
     if (result.isError()) {
       return Result<list<pair<uint64_t, string> > >::error(result.error());
@@ -286,7 +286,7 @@ Result<uint64_t> Coordinator::write(const Action& action)
   do {
     option = select(futures, timeout.remaining());
     if (option.isSome()) {
-      CHECK(option.get().ready());
+      CHECK(option.get().isReady());
       const WriteResponse& response = option.get().get();
       CHECK(response.id() == request.id());
       CHECK(response.position() == request.position());
@@ -400,7 +400,7 @@ Result<Action> Coordinator::fill(uint64_t position)
   do {
     option = select(futures, timeout.remaining());
     if (option.isSome()) {
-      CHECK(option.get().ready());
+      CHECK(option.get().isReady());
       const PromiseResponse& response = option.get().get();
       CHECK(response.id() == request.id());
       if (!response.okay()) {

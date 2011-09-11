@@ -382,16 +382,16 @@ public:
   {
     send(pid, req);
     std::tr1::function<void(const process::Future<Res>&)> callback =
-      std::tr1::bind(&ReqResProcess<Req, Res>::discard,
+      std::tr1::bind(&ReqResProcess<Req, Res>::terminate,
                      std::tr1::placeholders::_1, Super::self());
-    promise.future().onDiscarded(callback);
+    promise.future().onAny(callback);
     return promise;
   }
 
 private:
   void response(const Res& res) { promise.set(res); }
 
-  static void discard(
+  static void terminate(
       const process::Future<Res>& future,
       const process::PID<ReqResProcess<Req, Res> >& pid)
   {

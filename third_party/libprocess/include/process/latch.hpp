@@ -13,6 +13,9 @@ public:
   Latch();
   virtual ~Latch();
 
+  bool operator == (const Latch& that) const { return latch == that.latch; }
+  bool operator < (const Latch& that) const { return latch < that.latch; }
+
   void trigger();
   bool await(double secs = 0);
 

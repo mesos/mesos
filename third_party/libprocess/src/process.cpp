@@ -1283,7 +1283,7 @@ void HttpProxy::handle(const Future<HttpResponse>& future, bool persist)
 
 void HttpProxy::ready(const Future<HttpResponse>& future, bool persist)
 {
-  CHECK(future.ready());
+  CHECK(future.isReady());
 
   const HttpResponse& response = future.get();
 

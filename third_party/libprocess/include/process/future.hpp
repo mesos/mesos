@@ -39,10 +39,10 @@ public:
   bool operator < (const Future<T>& that) const;
 
   // Helpers to get the current state of this future.
-  bool pending() const;
-  bool ready() const;
-  bool discarded() const;
-  bool failed() const;
+  bool isPending() const;
+  bool isReady() const;
+  bool isDiscarded() const;
+  bool isFailed() const;
 
   // Discards this future. This is similar to cancelling a future,
   // however it also occurs when the last reference to this future
@@ -57,20 +57,22 @@ public:
   // until a value gets associated or until the future is discarded.
   T get() const;
 
-  // Returns the failure message associated with this future if it was
-  // discarded because it failed, or none if this future has not yet
-  // been set or has been discarded without a failure message.
-  Option<std::string> failure() const;
+  // Returns the failure message associated with this future.
+  std::string failure() const;
 
-  // Type of the callback function that can get invoked when the
+  // Type of the callback functions that can get invoked when the
   // future gets set, fails, or is discarded.
-  typedef std::tr1::function<void(const Future<T>&)> Callback;
+  typedef std::tr1::function<void(const T&)> ReadyCallback;
+  typedef std::tr1::function<void(const std::string&)> FailedCallback;
+  typedef std::tr1::function<void()> DiscardedCallback;
+  typedef std::tr1::function<void(const Future<T>&)> AnyCallback;
 
   // Installs callbacks for the specified events and returns a const
   // reference to 'this' in order to easily support chaining.
-  const Future<T>& onReady(const Callback& callback) const;
-  const Future<T>& onFailed(const Callback& callback) const;
-  const Future<T>& onDiscarded(const Callback& callback) const;
+  const Future<T>& onReady(const ReadyCallback& callback) const;
+  const Future<T>& onFailed(const FailedCallback& callback) const;
+  const Future<T>& onDiscarded(const DiscardedCallback& callback) const;
+  const Future<T>& onAny(const AnyCallback& callback) const;
 
 private:
   friend class Promise<T>;
@@ -98,9 +100,10 @@ private:
   State* state;
   T** t;
   std::string** message; // Message associated with failure.
-  std::queue<Callback>* onReadyCallbacks;
-  std::queue<Callback>* onFailedCallbacks;
-  std::queue<Callback>* onDiscardedCallbacks;
+  std::queue<ReadyCallback>* onReadyCallbacks;
+  std::queue<FailedCallback>* onFailedCallbacks;
+  std::queue<DiscardedCallback>* onDiscardedCallbacks;
+  std::queue<AnyCallback>* onAnyCallbacks;
   Latch* latch;
 };
 
@@ -199,15 +202,13 @@ namespace callbacks {
 template <typename T>
 void select(const Future<T>& future, Promise<Future<T> > promise)
 {
-  assert(future.ready());
-
   // We never fail the future associated with our promise.
-  assert(!promise.future().failed());
+  assert(!promise.future().isFailed());
 
-  // Check if the promise is already ready or discarded, this avoids
-  // acquiring a lock when invoking Future::set.
-  if (!promise.future().ready() && !promise.future().discarded()) {
-    promise.set(future);
+  if (promise.future().isPending()) { // Avoid acquiring a lock.
+    if (future.isReady()) { // We only set the promise if a future is ready.
+      promise.set(future);
+    }
   }
 }
 
@@ -232,7 +233,7 @@ Option<Future<T> > select(const std::set<Future<T> >& futures, double secs)
   typename std::set<Future<T> >::iterator iterator;
   for (iterator = futures.begin(); iterator != futures.end(); ++iterator) {
     const Future<T>& future = *iterator;
-    future.onReady(callback);
+    future.onAny(callback);
   }
 
   Future<Future<T> > future = promise.future();
@@ -264,9 +265,10 @@ Future<T>::Future()
     state(new State(PENDING)),
     t(new T*(NULL)),
     message(new std::string*(NULL)),
-    onReadyCallbacks(new std::queue<Callback>()),
-    onFailedCallbacks(new std::queue<Callback>()),
-    onDiscardedCallbacks(new std::queue<Callback>()),
+    onReadyCallbacks(new std::queue<ReadyCallback>()),
+    onFailedCallbacks(new std::queue<FailedCallback>()),
+    onDiscardedCallbacks(new std::queue<DiscardedCallback>()),
+    onAnyCallbacks(new std::queue<AnyCallback>()),
     latch(new Latch()) {}
 
 
@@ -277,9 +279,10 @@ Future<T>::Future(const T& _t)
     state(new State(PENDING)),
     t(new T*(NULL)),
     message(new std::string*(NULL)),
-    onReadyCallbacks(new std::queue<Callback>()),
-    onFailedCallbacks(new std::queue<Callback>()),
-    onDiscardedCallbacks(new std::queue<Callback>()),
+    onReadyCallbacks(new std::queue<ReadyCallback>()),
+    onFailedCallbacks(new std::queue<FailedCallback>()),
+    onDiscardedCallbacks(new std::queue<DiscardedCallback>()),
+    onAnyCallbacks(new std::queue<AnyCallback>()),
     latch(new Latch())
 {
   set(_t);
@@ -316,7 +319,7 @@ bool Future<T>::operator == (const Future<T>& that) const
 {
   assert(latch != NULL);
   assert(that.latch != NULL);
-  return latch == that.latch;
+  return *latch == *that.latch;
 }
 
 
@@ -325,7 +328,7 @@ bool Future<T>::operator < (const Future<T>& that) const
 {
   assert(latch != NULL);
   assert(that.latch != NULL);
-  return latch < that.latch;
+  return *latch < *that.latch;
 }
 
 
@@ -351,10 +354,15 @@ bool Future<T>::discard()
   // DISCARDED so there should not be any concurrent modications.
   if (result) {
     while (!onDiscardedCallbacks->empty()) {
-      const Callback& callback = onDiscardedCallbacks->front();
       // TODO(*): Invoke callbacks in another execution context.
-      callback(*this);
+      onDiscardedCallbacks->front()();
       onDiscardedCallbacks->pop();
+    }
+
+    while (!onAnyCallbacks->empty()) {
+      // TODO(*): Invoke callbacks in another execution context.
+      onAnyCallbacks->front()(*this);
+      onAnyCallbacks->pop();
     }
   }
 
@@ -363,7 +371,7 @@ bool Future<T>::discard()
 
 
 template <typename T>
-bool Future<T>::pending() const
+bool Future<T>::isPending() const
 {
   assert(state != NULL);
   return *state == PENDING;
@@ -371,7 +379,7 @@ bool Future<T>::pending() const
 
 
 template <typename T>
-bool Future<T>::ready() const
+bool Future<T>::isReady() const
 {
   assert(state != NULL);
   return *state == READY;
@@ -379,7 +387,7 @@ bool Future<T>::ready() const
 
 
 template <typename T>
-bool Future<T>::discarded() const
+bool Future<T>::isDiscarded() const
 {
   assert(state != NULL);
   return *state == DISCARDED;
@@ -387,7 +395,7 @@ bool Future<T>::discarded() const
 
 
 template <typename T>
-bool Future<T>::failed() const
+bool Future<T>::isFailed() const
 {
   assert(state != NULL);
   return *state == FAILED;
@@ -397,7 +405,7 @@ bool Future<T>::failed() const
 template <typename T>
 bool Future<T>::await(double secs) const
 {
-  if (!ready() && !discarded() && !failed()) {
+  if (!isReady() && !isDiscarded() && !isFailed()) {
     assert(latch != NULL);
     return latch->await(secs);
   }
@@ -408,11 +416,11 @@ bool Future<T>::await(double secs) const
 template <typename T>
 T Future<T>::get() const
 {
-  if (!ready()) {
+  if (!isReady()) {
     await();
   }
 
-  if (!ready()) {
+  if (!isReady()) {
     abort();
   }
 
@@ -423,19 +431,19 @@ T Future<T>::get() const
 
 
 template <typename T>
-Option<std::string> Future<T>::failure() const
+std::string Future<T>::failure() const
 {
   assert(message != NULL);
   if (*message != NULL) {
     return **message;
   }
 
-  return Option<std::string>::none();
+  return "";
 }
 
 
 template <typename T>
-const Future<T>& Future<T>::onReady(const Callback& callback) const
+const Future<T>& Future<T>::onReady(const ReadyCallback& callback) const
 {
   bool run = false;
 
@@ -453,7 +461,7 @@ const Future<T>& Future<T>::onReady(const Callback& callback) const
 
   // TODO(*): Invoke callback in another execution context.
   if (run) {
-    callback(*this);
+    callback(**t);
   }
 
   return *this;
@@ -461,7 +469,7 @@ const Future<T>& Future<T>::onReady(const Callback& callback) const
 
 
 template <typename T>
-const Future<T>& Future<T>::onFailed(const Callback& callback) const
+const Future<T>& Future<T>::onFailed(const FailedCallback& callback) const
 {
   bool run = false;
 
@@ -479,7 +487,7 @@ const Future<T>& Future<T>::onFailed(const Callback& callback) const
 
   // TODO(*): Invoke callback in another execution context.
   if (run) {
-    callback(*this);
+    callback(**message);
   }
 
   return *this;
@@ -487,7 +495,8 @@ const Future<T>& Future<T>::onFailed(const Callback& callback) const
 
 
 template <typename T>
-const Future<T>& Future<T>::onDiscarded(const Callback& callback) const
+const Future<T>& Future<T>::onDiscarded(
+    const DiscardedCallback& callback) const
 {
   bool run = false;
 
@@ -499,6 +508,32 @@ const Future<T>& Future<T>::onDiscarded(const Callback& callback) const
       run = true;
     } else if (*state == PENDING) {
       onDiscardedCallbacks->push(callback);
+    }
+  }
+  internal::release(lock);
+
+  // TODO(*): Invoke callback in another execution context.
+  if (run) {
+    callback();
+  }
+
+  return *this;
+}
+
+
+template <typename T>
+const Future<T>& Future<T>::onAny(const AnyCallback& callback) const
+{
+  bool run = false;
+
+  assert(lock != NULL);
+  internal::acquire(lock);
+  {
+    assert(state != NULL);
+    if (*state != PENDING) {
+      run = true;
+    } else if (*state == PENDING) {
+      onAnyCallbacks->push(callback);
     }
   }
   internal::release(lock);
@@ -535,10 +570,15 @@ bool Future<T>::set(const T& _t)
   // should not be any concurrent modications.
   if (result) {
     while (!onReadyCallbacks->empty()) {
-      const Callback& callback = onReadyCallbacks->front();
       // TODO(*): Invoke callbacks in another execution context.
-      callback(*this);
+      onReadyCallbacks->front()(**t);
       onReadyCallbacks->pop();
+    }
+
+    while (!onAnyCallbacks->empty()) {
+      // TODO(*): Invoke callbacks in another execution context.
+      onAnyCallbacks->front()(*this);
+      onAnyCallbacks->pop();
     }
   }
 
@@ -569,10 +609,15 @@ bool Future<T>::fail(const std::string& _message)
   // should not be any concurrent modications.
   if (result) {
     while (!onFailedCallbacks->empty()) {
-      const Callback& callback = onFailedCallbacks->front();
       // TODO(*): Invoke callbacks in another execution context.
-      callback(*this);
+      onFailedCallbacks->front()(**message);
       onFailedCallbacks->pop();
+    }
+
+    while (!onAnyCallbacks->empty()) {
+      // TODO(*): Invoke callbacks in another execution context.
+      onAnyCallbacks->front()(*this);
+      onAnyCallbacks->pop();
     }
   }
 
@@ -593,6 +638,7 @@ void Future<T>::copy(const Future<T>& that)
   onReadyCallbacks = that.onReadyCallbacks;
   onFailedCallbacks = that.onFailedCallbacks;
   onDiscardedCallbacks = that.onDiscardedCallbacks;
+  onAnyCallbacks = that.onAnyCallbacks;
   latch = that.latch;
 }
 
@@ -644,6 +690,9 @@ void Future<T>::cleanup()
       assert(onDiscardedCallbacks != NULL);
       delete onDiscardedCallbacks;
       onDiscardedCallbacks = NULL;
+      assert(onAnyCallbacks != NULL);
+      delete onAnyCallbacks;
+      onAnyCallbacks = NULL;
       assert(latch != NULL);
       delete latch;
       latch = NULL;

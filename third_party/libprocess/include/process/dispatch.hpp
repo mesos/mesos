@@ -914,14 +914,16 @@ void __associate(const Future<T>& future, Promise<T> promise)
   // The future associated with this promise is either pending
   // (because we haven't set it, failed it, or discarded it) or it's
   // discarded (because the receiver of the future has discarded it).
-  assert(promise.future().pending() || promise.future().discarded());
+  assert(promise.future().isPending() || promise.future().isDiscarded());
 
-  if (future.ready()) {
-    promise.set(future.get());
-  } else if (future.failed()) {
-    promise.fail(future.failure().get());
-  } else if (future.discarded()) {
-    promise.future().discard();
+  if (promise.future().isPending()) { // Avoid acquiring a lock.
+    if (future.isReady()) {
+      promise.set(future.get());
+    } else if (future.isFailed()) {
+      promise.fail(future.failure());
+    } else if (future.isDiscarded()) {
+      promise.future().discard();
+    }
   }
 }
 
@@ -931,10 +933,7 @@ void associate(const Promise<T>& from, const Promise<T>& to)
 {
   std::tr1::function<void(const Future<T>&)> callback =
     std::tr1::bind(__associate<T>, std::tr1::placeholders::_1, to);
-  from.future()
-    .onReady(callback)
-    .onFailed(callback)
-    .onDiscarded(callback);
+  from.future().onAny(callback);
 }
 
 

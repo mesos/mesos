@@ -72,16 +72,16 @@ TEST_F(ZooKeeperTest, Group)
 
   membership.await();
 
-  ASSERT_FALSE(membership.failed()) << membership.failure().get();
-  ASSERT_FALSE(membership.discarded());
-  ASSERT_TRUE(membership.ready());
+  ASSERT_FALSE(membership.isFailed()) << membership.failure();
+  ASSERT_FALSE(membership.isDiscarded());
+  ASSERT_TRUE(membership.isReady());
 
   process::Future<std::set<zookeeper::Group::Membership> > memberships =
     group.watch();
 
   memberships.await();
 
-  ASSERT_TRUE(memberships.ready());
+  ASSERT_TRUE(memberships.isReady());
   EXPECT_EQ(1, memberships.get().size());
   EXPECT_EQ(1, memberships.get().count(membership.get()));
 
@@ -89,25 +89,25 @@ TEST_F(ZooKeeperTest, Group)
 
   info.await();
 
-  ASSERT_FALSE(info.failed()) << info.failure().get();
-  ASSERT_FALSE(info.discarded());
-  ASSERT_TRUE(info.ready());
+  ASSERT_FALSE(info.isFailed()) << info.failure();
+  ASSERT_FALSE(info.isDiscarded());
+  ASSERT_TRUE(info.isReady());
   EXPECT_EQ("hello world", info.get());
 
   process::Future<bool> cancellation = group.cancel(membership.get());
 
   cancellation.await();
 
-  ASSERT_FALSE(cancellation.failed()) << cancellation.failure().get();
-  ASSERT_FALSE(cancellation.discarded());
-  ASSERT_TRUE(cancellation.ready());
+  ASSERT_FALSE(cancellation.isFailed()) << cancellation.failure();
+  ASSERT_FALSE(cancellation.isDiscarded());
+  ASSERT_TRUE(cancellation.isReady());
   EXPECT_TRUE(cancellation.get());
 
   memberships = group.watch(memberships.get());
 
   memberships.await();
 
-  ASSERT_TRUE(memberships.ready());
+  ASSERT_TRUE(memberships.isReady());
   EXPECT_EQ(0, memberships.get().size());
 }
 
@@ -121,22 +121,22 @@ TEST_F(ZooKeeperTest, GroupJoinWithDisconnect)
   process::Future<zookeeper::Group::Membership> membership =
     group.join("hello world");
 
-  EXPECT_TRUE(membership.pending());
+  EXPECT_TRUE(membership.isPending());
 
   zks->startNetwork();
 
   membership.await();
 
-  ASSERT_FALSE(membership.failed()) << membership.failure().get();
-  ASSERT_FALSE(membership.discarded());
-  ASSERT_TRUE(membership.ready());
+  ASSERT_FALSE(membership.isFailed()) << membership.failure();
+  ASSERT_FALSE(membership.isDiscarded());
+  ASSERT_TRUE(membership.isReady());
 
   process::Future<std::set<zookeeper::Group::Membership> > memberships =
     group.watch();
 
   memberships.await();
 
-  ASSERT_TRUE(memberships.ready());
+  ASSERT_TRUE(memberships.isReady());
   EXPECT_EQ(1, memberships.get().size());
   EXPECT_EQ(1, memberships.get().count(membership.get()));
 }
@@ -151,16 +151,16 @@ TEST_F(ZooKeeperTest, GroupInfoWithDisconnect)
 
   membership.await();
 
-  ASSERT_FALSE(membership.failed()) << membership.failure().get();
-  ASSERT_FALSE(membership.discarded());
-  ASSERT_TRUE(membership.ready());
+  ASSERT_FALSE(membership.isFailed()) << membership.failure();
+  ASSERT_FALSE(membership.isDiscarded());
+  ASSERT_TRUE(membership.isReady());
 
   process::Future<std::set<zookeeper::Group::Membership> > memberships =
     group.watch();
 
   memberships.await();
 
-  ASSERT_TRUE(memberships.ready());
+  ASSERT_TRUE(memberships.isReady());
   EXPECT_EQ(1, memberships.get().size());
   EXPECT_EQ(1, memberships.get().count(membership.get()));
 
@@ -168,15 +168,15 @@ TEST_F(ZooKeeperTest, GroupInfoWithDisconnect)
 
   process::Future<std::string> info = group.info(membership.get());
 
-  EXPECT_TRUE(info.pending());
+  EXPECT_TRUE(info.isPending());
 
   zks->startNetwork();
 
   info.await();
 
-  ASSERT_FALSE(info.failed()) << info.failure().get();
-  ASSERT_FALSE(info.discarded());
-  ASSERT_TRUE(info.ready());
+  ASSERT_FALSE(info.isFailed()) << info.failure();
+  ASSERT_FALSE(info.isDiscarded());
+  ASSERT_TRUE(info.isReady());
   EXPECT_EQ("hello world", info.get());
 }
 
@@ -190,50 +190,50 @@ TEST_F(ZooKeeperTest, GroupCancelWithDisconnect)
 
   membership.await();
 
-  ASSERT_FALSE(membership.failed()) << membership.failure().get();
-  ASSERT_FALSE(membership.discarded());
-  ASSERT_TRUE(membership.ready());
+  ASSERT_FALSE(membership.isFailed()) << membership.failure();
+  ASSERT_FALSE(membership.isDiscarded());
+  ASSERT_TRUE(membership.isReady());
 
   process::Future<std::set<zookeeper::Group::Membership> > memberships =
     group.watch();
 
   memberships.await();
 
-  ASSERT_TRUE(memberships.ready());
+  ASSERT_TRUE(memberships.isReady());
   EXPECT_EQ(1, memberships.get().size());
   EXPECT_EQ(1, memberships.get().count(membership.get()));
 
   process::Future<std::string> info = group.info(membership.get());
 
-  EXPECT_TRUE(info.pending());
+  EXPECT_TRUE(info.isPending());
 
   info.await();
 
-  ASSERT_FALSE(info.failed()) << info.failure().get();
-  ASSERT_FALSE(info.discarded());
-  ASSERT_TRUE(info.ready());
+  ASSERT_FALSE(info.isFailed()) << info.failure();
+  ASSERT_FALSE(info.isDiscarded());
+  ASSERT_TRUE(info.isReady());
   EXPECT_EQ("hello world", info.get());
 
   zks->shutdownNetwork();
 
   process::Future<bool> cancellation = group.cancel(membership.get());
 
-  EXPECT_TRUE(cancellation.pending());
+  EXPECT_TRUE(cancellation.isPending());
 
   zks->startNetwork();
 
   cancellation.await();
 
-  ASSERT_FALSE(cancellation.failed()) << cancellation.failure().get();
-  ASSERT_FALSE(cancellation.discarded());
-  ASSERT_TRUE(cancellation.ready());
+  ASSERT_FALSE(cancellation.isFailed()) << cancellation.failure();
+  ASSERT_FALSE(cancellation.isDiscarded());
+  ASSERT_TRUE(cancellation.isReady());
   EXPECT_TRUE(cancellation.get());
 
   memberships = group.watch(memberships.get());
 
   memberships.await();
 
-  ASSERT_TRUE(memberships.ready());
+  ASSERT_TRUE(memberships.isReady());
   EXPECT_EQ(0, memberships.get().size());
 }
 
@@ -247,16 +247,16 @@ TEST_F(ZooKeeperTest, GroupWatchWithSessionExpiration)
 
   membership.await();
 
-  ASSERT_FALSE(membership.failed()) << membership.failure().get();
-  ASSERT_FALSE(membership.discarded());
-  ASSERT_TRUE(membership.ready());
+  ASSERT_FALSE(membership.isFailed()) << membership.failure();
+  ASSERT_FALSE(membership.isDiscarded());
+  ASSERT_TRUE(membership.isReady());
 
   process::Future<std::set<zookeeper::Group::Membership> > memberships =
     group.watch();
 
   memberships.await();
 
-  ASSERT_TRUE(memberships.ready());
+  ASSERT_TRUE(memberships.isReady());
   EXPECT_EQ(1, memberships.get().size());
   EXPECT_EQ(1, memberships.get().count(membership.get()));
 
@@ -264,9 +264,9 @@ TEST_F(ZooKeeperTest, GroupWatchWithSessionExpiration)
 
   session.await();
 
-  ASSERT_FALSE(session.failed()) << session.failure().get();
-  ASSERT_FALSE(session.discarded());
-  ASSERT_TRUE(session.ready());
+  ASSERT_FALSE(session.isFailed()) << session.failure();
+  ASSERT_FALSE(session.isDiscarded());
+  ASSERT_TRUE(session.isReady());
   ASSERT_TRUE(session.get().isSome());
 
   memberships = group.watch(memberships.get());
@@ -275,6 +275,6 @@ TEST_F(ZooKeeperTest, GroupWatchWithSessionExpiration)
 
   memberships.await();
 
-  ASSERT_TRUE(memberships.ready());
+  ASSERT_TRUE(memberships.isReady());
   EXPECT_EQ(0, memberships.get().size());
 }
