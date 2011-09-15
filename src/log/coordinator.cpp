@@ -32,11 +32,20 @@ Coordinator::Coordinator(int _quorum,
 Coordinator::~Coordinator() {}
 
 
-Result<uint64_t> Coordinator::elect(uint64_t _id)
+Result<uint64_t> Coordinator::elect()
 {
   CHECK(!elected);
 
-  id = _id;
+  // Get the highest known promise from our local replica.
+  Result<uint64_t> result = call(replica, &ReplicaProcess::promise);
+
+  if (result.isError()) {
+    return Result<uint64_t>::error(result.error());
+  } else if (result.isNone()) {
+    return Result<uint64_t>::none();
+  }
+
+  id = std::max(id, result.get()) + 1; // Try the next highest!
 
   PromiseRequest request;
   request.set_id(id);
@@ -56,7 +65,7 @@ Result<uint64_t> Coordinator::elect(uint64_t _id)
       CHECK(option.get().isReady());
       const PromiseResponse& response = option.get().get();
       if (!response.okay()) {
-        return Result<uint64_t>::error("Coordinator demoted");
+        return Result<uint64_t>::none(); // Lost an election, but can retry.
       } else if (response.okay()) {
         CHECK(response.has_position());
         index = std::max(index, response.position());
@@ -195,8 +204,14 @@ Result<list<pair<uint64_t, string> > > Coordinator::read(
   list<Action> actions;
 
   foreach (const Future<Result<Action> >& future, futures) {
-    future.await(); // TODO(benh): Timeout?
+    future.await();
+
+    if (future.isFailed()) {
+      return Result<list<pair<uint64_t, string> > >::error(future.failure());
+    }
+
     CHECK(future.isReady());
+
     const Result<Action>& result = future.get();
     if (result.isError()) {
       return Result<list<pair<uint64_t, string> > >::error(result.error());
@@ -292,6 +307,7 @@ Result<uint64_t> Coordinator::write(const Action& action)
       CHECK(response.position() == request.position());
 
       if (!response.okay()) {
+        elected = false;
         return Result<uint64_t>::error("Coordinator demoted");
       } else if (response.okay()) {
         if (++okays >= (quorum - 1)) { // N.B. Using (quorum - 1) here!
@@ -321,11 +337,16 @@ Result<uint64_t> Coordinator::write(const Action& action)
 
 Result<uint64_t> Coordinator::commit(const Action& action)
 {
+  LOG(INFO) << "Coordinator attempting to commit "
+            << Action::Type_Name(action.type())
+            << " action at position " << action.position();
+
   CHECK(elected);
 
-  CommitRequest request;
+  WriteRequest request;
   request.set_id(id);
   request.set_position(action.position());
+  request.set_learned(true); // A commit is just a learned write.
   request.set_type(action.type());
   switch (action.type()) {
     case Action::NOP:
@@ -344,20 +365,28 @@ Result<uint64_t> Coordinator::commit(const Action& action)
       LOG(FATAL) << "Unknown Action::Type!";
   }
 
-  Future<CommitResponse> future = protocol::commit(replica->self(), request);
+  // We communicate with the *local* replica just as the others:
+  // asynchronously via messages. However, rather than add the
+  // complications of dealing with timeouts for local operations
+  // (especially since we are trying to commit something), we make
+  // things simpler and block on the response from the local replica.
 
-  Timeout timeout = 1.0;
+  Future<WriteResponse> future = protocol::write(replica->self(), request);
 
-  if (!future.await(timeout.remaining())) {
-    future.discard();
-    return Result<uint64_t>::none();
+  future.await();
+
+  if (future.isFailed()) {
+    return Result<uint64_t>::error(future.failure());
   }
 
-  const CommitResponse& response = future.get();
+  CHECK(future.isReady());
+
+  const WriteResponse& response = future.get();
   CHECK(response.id() == request.id());
   CHECK(response.position() == request.position());
 
   if (!response.okay()) {
+    elected = false;
     return Result<uint64_t>::error("Coordinator demoted");
   }
 
@@ -404,6 +433,7 @@ Result<Action> Coordinator::fill(uint64_t position)
       const PromiseResponse& response = option.get().get();
       CHECK(response.id() == request.id());
       if (!response.okay()) {
+        elected = false;
         return Result<Action>::error("Coordinator demoted");
       } else if (response.okay()) {
         responses.push_back(response);

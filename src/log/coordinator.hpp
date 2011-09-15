@@ -33,7 +33,7 @@ public:
   // coordinator failed to achieve a quorum (e.g., due to timeout) but
   // can be retried. A some result returns the last committed log
   // position.
-  Result<uint64_t> elect(uint64_t id);
+  Result<uint64_t> elect();
   Result<uint64_t> demote();
 
   // Returns the result of trying to append the specified bytes. A
@@ -60,9 +60,10 @@ private:
   // can be retried.
   Result<uint64_t> write(const Action& action);
 
-  // Helper that handles commiting an action.
+  // Helper that handles commiting an action (i.e., writing to the
+  // local replica and then sending out learned messages).
   Result<uint64_t> commit(const Action& action);
- 
+
   // Helper that tries to fill a position in the log.
   Result<Action> fill(uint64_t position);
 

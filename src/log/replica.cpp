@@ -19,7 +19,6 @@ namespace protocol {
 // Some replica protocol definitions.
 Protocol<PromiseRequest, PromiseResponse> promise;
 Protocol<WriteRequest, WriteResponse> write;
-Protocol<CommitRequest, CommitResponse> commit;
 Protocol<LearnRequest, LearnResponse> learn;
 
 } // namespace protocol {
@@ -52,9 +51,6 @@ ReplicaProcess::ReplicaProcess(const string& _path, int capacity)
 
   installProtobufHandler<WriteRequest>(
       &ReplicaProcess::write);
-
-  installProtobufHandler<CommitRequest>(
-      &ReplicaProcess::commit);
 
   installProtobufHandler<LearnedMessage>(
       &ReplicaProcess::learned,
@@ -89,8 +85,8 @@ ReplicaProcess::~ReplicaProcess()
 void ReplicaProcess::promise(const PromiseRequest& request)
 {
   if (request.has_position()) {
-    LOG(INFO) << "Replica received explicit promise request from"
-              << " coordinator " << request.id()
+    LOG(INFO) << "Replica received explicit promise request for "
+              << request.id() << " from " << from()
               << " for position " << request.position();
 
     // Need to get the action for the specified position.
@@ -140,10 +136,10 @@ void ReplicaProcess::promise(const PromiseRequest& request)
       }
     }
   } else {
-    LOG(INFO) << "Replica received implicit promise request from"
-              << " coordinator " << request.id();
+    LOG(INFO) << "Replica received implicit promise request for "
+              << request.id() << " from " << from();
 
-    if (request.id() < promised) {
+    if (request.id() <= promised) { // N.B. Only make an implicit promise once!
       PromiseResponse response;
       response.set_okay(false);
       response.set_id(request.id());
@@ -188,6 +184,7 @@ void ReplicaProcess::write(const WriteRequest& request)
       action.set_position(request.position());
       action.set_promised(promised);
       action.set_performed(request.id());
+      if (request.has_learned()) action.set_learned(request.learned());
       action.set_type(request.type());
 
       switch (request.type()) {
@@ -232,6 +229,7 @@ void ReplicaProcess::write(const WriteRequest& request)
       // and if so, check that we are re-writing the same value!
       action.set_performed(request.id());
       action.clear_learned();
+      if (request.has_learned()) action.set_learned(request.learned());
       action.clear_type();
       action.clear_nop();
       action.clear_append();
@@ -259,106 +257,6 @@ void ReplicaProcess::write(const WriteRequest& request)
         LOG(ERROR) << "Error persisting action to log";
       } else {
         WriteResponse response;
-        response.set_okay(true);
-        response.set_id(request.id());
-        response.set_position(request.position());
-        send(from(), response);
-      }
-    }
-  }
-}
-
-
-void ReplicaProcess::commit(const CommitRequest& request)
-{
-  Result<Action> result = read(request.position());
-
-  if (result.isError()) {
-    LOG(ERROR) << "Error getting log record at " << request.position()
-               << " : " << result.error();
-  } else if (result.isNone()) {
-    if (request.id() < promised) {
-      CommitResponse response;
-      response.set_okay(false);
-      response.set_id(request.id());
-      response.set_position(request.position());
-      send(from(), response);
-    } else {
-      Action action;
-      action.set_position(request.position());
-      action.set_promised(promised);
-      action.set_performed(request.id());
-      action.set_learned(true);
-      action.set_type(request.type());
-
-      switch (request.type()) {
-        case Action::NOP:
-          CHECK(request.has_nop());
-          action.mutable_nop();
-          break;
-        case Action::APPEND:
-          CHECK(request.has_append());
-          action.mutable_append()->MergeFrom(request.append());
-          break;
-        case Action::TRUNCATE:
-          CHECK(request.has_truncate());
-          action.mutable_truncate()->MergeFrom(request.truncate());
-          break;
-        default:
-          LOG(FATAL) << "Unknown Action::Type!";
-      }
-
-      if (!persist(action)) {
-        LOG(ERROR) << "Error persisting action to log";
-      } else {
-        CommitResponse response;
-        response.set_okay(true);
-        response.set_id(request.id());
-        response.set_position(request.position());
-        send(from(), response);
-      }
-    }
-  } else if (result.isSome()) {
-    Action action = result.get();
-
-    if (request.id() < action.promised()) {
-      CommitResponse response;
-      response.set_okay(false);
-      response.set_id(request.id());
-      response.set_position(request.position());
-      send(from(), response);
-    } else {
-      // TODO(benh): Check if this position has already been learned,
-      // and if so, check that we are re-writing the same value!
-      action.set_performed(request.id());
-      action.set_learned(true);
-      action.clear_type();
-      action.clear_nop();
-      action.clear_append();
-      action.clear_truncate();
-      action.set_type(request.type());
-
-      switch (request.type()) {
-        case Action::NOP:
-          CHECK(request.has_nop());
-          action.mutable_nop();
-          break;
-        case Action::APPEND:
-          CHECK(request.has_append());
-          action.mutable_append()->MergeFrom(request.append());
-          break;
-        case Action::TRUNCATE:
-          CHECK(request.has_truncate());
-          action.mutable_truncate()->MergeFrom(request.truncate());
-          break;
-        default:
-          LOG(FATAL) << "Unknown Action::Type!";
-      }
-
-      if (!persist(action)) {
-        LOG(ERROR) << "Error persisting action to log";
-      } else {
-        CommitResponse response;
         response.set_okay(true);
         response.set_id(request.id());
         response.set_position(request.position());
@@ -502,6 +400,12 @@ Result<uint64_t> ReplicaProcess::beginning()
 Result<uint64_t> ReplicaProcess::ending()
 {
   return end;
+}
+
+
+Result<uint64_t> ReplicaProcess::promise()
+{
+  return promised;
 }
 
 
