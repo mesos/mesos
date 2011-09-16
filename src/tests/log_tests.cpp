@@ -409,14 +409,12 @@ TEST(CoordinatorTest, AppendRead)
   ReplicaProcess replica2(file2);
   spawn(replica2);
 
-  // TODO(benh): Use utils::set<n>(replica1.self(), replica2.self())
-  GroupProcess group;
-  spawn(group);
+  Network network;
 
-  dispatch(group, &GroupProcess::add, replica1.self());
-  dispatch(group, &GroupProcess::add, replica2.self());
+  network.add(replica1.self());
+  network.add(replica2.self());
 
-  Coordinator coord(2, &replica1, &group);
+  Coordinator coord(2, &replica1, &network);
 
   {
     Result<uint64_t> result = coord.elect();
@@ -441,9 +439,6 @@ TEST(CoordinatorTest, AppendRead)
     EXPECT_EQ(position, result.get().front().first);
     EXPECT_EQ("hello world", result.get().front().second);
   }
-
-  terminate(group);
-  wait(group);
 
   terminate(replica1);
   wait(replica1);
@@ -470,13 +465,12 @@ TEST(CoordinatorTest, AppendReadError)
   ReplicaProcess replica2(file2);
   spawn(replica2);
 
-  GroupProcess group;
-  spawn(group);
+  Network network;
 
-  dispatch(group, &GroupProcess::add, replica1.self());
-  dispatch(group, &GroupProcess::add, replica2.self());
+  network.add(replica1.self());
+  network.add(replica2.self());
 
-  Coordinator coord(2, &replica1, &group);
+  Coordinator coord(2, &replica1, &network);
 
   {
     Result<uint64_t> result = coord.elect();
@@ -500,9 +494,6 @@ TEST(CoordinatorTest, AppendReadError)
     ASSERT_TRUE(result.isError());
     EXPECT_EQ("Bad read range (index <= from)", result.error());
   }
-
-  terminate(group);
-  wait(group);
 
   terminate(replica1);
   wait(replica1);
@@ -540,20 +531,16 @@ TEST(CoordinatorTest, DISABLED_ElectNoQuorum)
   ReplicaProcess replica(file);
   spawn(replica);
 
-  GroupProcess group;
-  spawn(group);
+  Network network;
 
-  dispatch(group, &GroupProcess::add, replica.self());
+  network.add(replica.self());
 
-  Coordinator coord(2, &replica, &group);
+  Coordinator coord(2, &replica, &network);
 
   {
     Result<uint64_t> result = coord.elect();
     ASSERT_TRUE(result.isNone());
   }
-
-  terminate(group);
-  wait(group);
 
   terminate(replica);
   wait(replica);
@@ -576,13 +563,12 @@ TEST(CoordinatorTest, DISABLED_AppendNoQuorum)
   ReplicaProcess replica2(file2);
   spawn(replica2);
 
-  GroupProcess group;
-  spawn(group);
+  Network network;
 
-  dispatch(group, &GroupProcess::add, replica1.self());
-  dispatch(group, &GroupProcess::add, replica2.self());
+  network.add(replica1.self());
+  network.add(replica2.self());
 
-  Coordinator coord(2, &replica1, &group);
+  Coordinator coord(2, &replica1, &network);
 
   {
     Result<uint64_t> result = coord.elect();
@@ -597,9 +583,6 @@ TEST(CoordinatorTest, DISABLED_AppendNoQuorum)
     Result<uint64_t> result = coord.append("hello world");
     ASSERT_TRUE(result.isNone());
   }
-
-  terminate(group);
-  wait(group);
 
   terminate(replica2);
   wait(replica2);
@@ -623,13 +606,12 @@ TEST(CoordinatorTest, Failover)
   ReplicaProcess replica2(file2);
   spawn(replica2);
 
-  GroupProcess group1;
-  spawn(group1);
+  Network network1;
 
-  dispatch(group1, &GroupProcess::add, replica1.self());
-  dispatch(group1, &GroupProcess::add, replica2.self());
+  network1.add(replica1.self());
+  network1.add(replica2.self());
 
-  Coordinator coord1(2, &replica1, &group1);
+  Coordinator coord1(2, &replica1, &network1);
 
   {
     Result<uint64_t> result = coord1.elect();
@@ -646,16 +628,12 @@ TEST(CoordinatorTest, Failover)
     EXPECT_EQ(1, position);
   }
 
-  terminate(group1);
-  wait(group1);
+  Network network2;
 
-  GroupProcess group2;
-  spawn(group2);
+  network2.add(replica1.self());
+  network2.add(replica2.self());
 
-  dispatch(group2, &GroupProcess::add, replica1.self());
-  dispatch(group2, &GroupProcess::add, replica2.self());
-
-  Coordinator coord2(2, &replica2, &group2);
+  Coordinator coord2(2, &replica2, &network2);
 
   {
     Result<uint64_t> result = coord2.elect();
@@ -671,9 +649,6 @@ TEST(CoordinatorTest, Failover)
     EXPECT_EQ(position, result.get().front().first);
     EXPECT_EQ("hello world", result.get().front().second);
   }
-
-  terminate(group2);
-  wait(group2);
 
   terminate(replica1);
   wait(replica1);
@@ -700,13 +675,12 @@ TEST(CoordinatorTest, Demoted)
   ReplicaProcess replica2(file2);
   spawn(replica2);
 
-  GroupProcess group1;
-  spawn(group1);
+  Network network1;
 
-  dispatch(group1, &GroupProcess::add, replica1.self());
-  dispatch(group1, &GroupProcess::add, replica2.self());
+  network1.add(replica1.self());
+  network1.add(replica2.self());
 
-  Coordinator coord1(2, &replica1, &group1);
+  Coordinator coord1(2, &replica1, &network1);
 
   {
     Result<uint64_t> result = coord1.elect();
@@ -723,13 +697,12 @@ TEST(CoordinatorTest, Demoted)
     EXPECT_EQ(1, position);
   }
 
-  GroupProcess group2;
-  spawn(group2);
+  Network network2;
 
-  dispatch(group2, &GroupProcess::add, replica1.self());
-  dispatch(group2, &GroupProcess::add, replica2.self());
+  network2.add(replica1.self());
+  network2.add(replica2.self());
 
-  Coordinator coord2(2, &replica2, &group2);
+  Coordinator coord2(2, &replica2, &network2);
 
   {
     Result<uint64_t> result = coord2.elect();
@@ -759,12 +732,6 @@ TEST(CoordinatorTest, Demoted)
     EXPECT_EQ("hello hello", result.get().front().second);
   }
 
-  terminate(group1);
-  wait(group1);
-
-  terminate(group2);
-  wait(group2);
-
   terminate(replica1);
   wait(replica1);
 
@@ -792,13 +759,12 @@ TEST(CoordinatorTest, Fill)
   ReplicaProcess replica2(file2);
   spawn(replica2);
 
-  GroupProcess group1;
-  spawn(group1);
+  Network network1;
 
-  dispatch(group1, &GroupProcess::add, replica1.self());
-  dispatch(group1, &GroupProcess::add, replica2.self());
+  network1.add(replica1.self());
+  network1.add(replica2.self());
 
-  Coordinator coord1(2, &replica1, &group1);
+  Coordinator coord1(2, &replica1, &network1);
 
   {
     Result<uint64_t> result = coord1.elect();
@@ -815,22 +781,18 @@ TEST(CoordinatorTest, Fill)
     EXPECT_EQ(1, position);
   }
 
-  terminate(group1);
-  wait(group1);
-
   terminate(replica1);
   wait(replica1);
 
   ReplicaProcess replica3(file3);
   spawn(replica3);
 
-  GroupProcess group2;
-  spawn(group2);
+  Network network2;
 
-  dispatch(group2, &GroupProcess::add, replica2.self());
-  dispatch(group2, &GroupProcess::add, replica3.self());
+  network2.add(replica2.self());
+  network2.add(replica3.self());
 
-  Coordinator coord2(2, &replica3, &group2);
+  Coordinator coord2(2, &replica3, &network2);
 
   {
     Result<uint64_t> result = coord2.elect();
@@ -848,9 +810,6 @@ TEST(CoordinatorTest, Fill)
     EXPECT_EQ(position, result.get().front().first);
     EXPECT_EQ("hello world", result.get().front().second);
   }
-
-  terminate(group2);
-  wait(group2);
 
   terminate(replica2);
   wait(replica2);
@@ -889,13 +848,12 @@ TEST(CoordinatorTest, NotLearnedFill)
   ReplicaProcess replica2(file2);
   spawn(replica2);
 
-  GroupProcess group1;
-  spawn(group1);
+  Network network1;
 
-  dispatch(group1, &GroupProcess::add, replica1.self());
-  dispatch(group1, &GroupProcess::add, replica2.self());
+  network1.add(replica1.self());
+  network1.add(replica2.self());
 
-  Coordinator coord1(2, &replica1, &group1);
+  Coordinator coord1(2, &replica1, &network1);
 
   {
     Result<uint64_t> result = coord1.elect();
@@ -912,22 +870,18 @@ TEST(CoordinatorTest, NotLearnedFill)
     EXPECT_EQ(1, position);
   }
 
-  terminate(group1);
-  wait(group1);
-
   terminate(replica1);
   wait(replica1);
 
   ReplicaProcess replica3(file3);
   spawn(replica3);
 
-  GroupProcess group2;
-  spawn(group2);
+  Network network2;
 
-  dispatch(group2, &GroupProcess::add, replica2.self());
-  dispatch(group2, &GroupProcess::add, replica3.self());
+  network2.add(replica2.self());
+  network2.add(replica3.self());
 
-  Coordinator coord2(2, &replica3, &group2);
+  Coordinator coord2(2, &replica3, &network2);
 
   {
     Result<uint64_t> result = coord2.elect();
@@ -945,9 +899,6 @@ TEST(CoordinatorTest, NotLearnedFill)
     EXPECT_EQ(position, result.get().front().first);
     EXPECT_EQ("hello world", result.get().front().second);
   }
-
-  terminate(group2);
-  wait(group2);
 
   terminate(replica2);
   wait(replica2);
@@ -977,13 +928,12 @@ TEST(CoordinatorTest, MultipleAppends)
   ReplicaProcess replica2(file2);
   spawn(replica2);
 
-  GroupProcess group;
-  spawn(group);
+  Network network;
 
-  dispatch(group, &GroupProcess::add, replica1.self());
-  dispatch(group, &GroupProcess::add, replica2.self());
+  network.add(replica1.self());
+  network.add(replica2.self());
 
-  Coordinator coord(2, &replica1, &group);
+  Coordinator coord(2, &replica1, &network);
 
   {
     Result<uint64_t> result = coord.elect();
@@ -1008,9 +958,6 @@ TEST(CoordinatorTest, MultipleAppends)
       EXPECT_EQ(utils::stringify(iterator->first), iterator->second);
     }
   }
-
-  terminate(group);
-  wait(group);
 
   terminate(replica1);
   wait(replica1);
@@ -1048,13 +995,12 @@ TEST(CoordinatorTest, MultipleAppendsNotLearnedFill)
   ReplicaProcess replica2(file2);
   spawn(replica2);
 
-  GroupProcess group1;
-  spawn(group1);
+  Network network1;
 
-  dispatch(group1, &GroupProcess::add, replica1.self());
-  dispatch(group1, &GroupProcess::add, replica2.self());
+  network1.add(replica1.self());
+  network1.add(replica2.self());
 
-  Coordinator coord1(2, &replica1, &group1);
+  Coordinator coord1(2, &replica1, &network1);
 
   {
     Result<uint64_t> result = coord1.elect();
@@ -1068,22 +1014,18 @@ TEST(CoordinatorTest, MultipleAppendsNotLearnedFill)
     EXPECT_EQ(position, result.get());
   }
 
-  terminate(group1);
-  wait(group1);
-
   terminate(replica1);
   wait(replica1);
 
   ReplicaProcess replica3(file3);
   spawn(replica3);
 
-  GroupProcess group2;
-  spawn(group2);
+  Network network2;
 
-  dispatch(group2, &GroupProcess::add, replica2.self());
-  dispatch(group2, &GroupProcess::add, replica3.self());
+  network2.add(replica2.self());
+  network2.add(replica3.self());
 
-  Coordinator coord2(2, &replica3, &group2);
+  Coordinator coord2(2, &replica3, &network2);
 
   {
     Result<uint64_t> result = coord2.elect();
@@ -1104,9 +1046,6 @@ TEST(CoordinatorTest, MultipleAppendsNotLearnedFill)
       EXPECT_EQ(utils::stringify(iterator->first), iterator->second);
     }
   }
-
-  terminate(group2);
-  wait(group2);
 
   terminate(replica2);
   wait(replica2);
@@ -1140,13 +1079,12 @@ TEST(CoordinatorTest, Truncate)
   pids.insert(replica1.self());
   pids.insert(replica2.self());
 
-  GroupProcess group;
-  spawn(group);
+  Network network;
 
-  dispatch(group, &GroupProcess::add, replica1.self());
-  dispatch(group, &GroupProcess::add, replica2.self());
+  network.add(replica1.self());
+  network.add(replica2.self());
 
-  Coordinator coord(2, &replica1, &group);
+  Coordinator coord(2, &replica1, &network);
 
   {
     Result<uint64_t> result = coord.elect();
@@ -1184,9 +1122,6 @@ TEST(CoordinatorTest, Truncate)
       EXPECT_EQ(utils::stringify(iterator->first), iterator->second);
     }
   }
-
-  terminate(group);
-  wait(group);
 
   terminate(replica1);
   wait(replica1);
@@ -1227,13 +1162,12 @@ TEST(CoordinatorTest, TruncateNotLearnedFill)
   pids.insert(replica1.self());
   pids.insert(replica2.self());
 
-  GroupProcess group1;
-  spawn(group1);
+  Network network1;
 
-  dispatch(group1, &GroupProcess::add, replica1.self());
-  dispatch(group1, &GroupProcess::add, replica2.self());
+  network1.add(replica1.self());
+  network1.add(replica2.self());
 
-  Coordinator coord1(2, &replica1, &group1);
+  Coordinator coord1(2, &replica1, &network1);
 
   {
     Result<uint64_t> result = coord1.elect();
@@ -1253,22 +1187,18 @@ TEST(CoordinatorTest, TruncateNotLearnedFill)
     EXPECT_EQ(11, result.get());
   }
 
-  terminate(group1);
-  wait(group1);
-
   terminate(replica1);
   wait(replica1);
 
   ReplicaProcess replica3(file3);
   spawn(replica3);
 
-  GroupProcess group2;
-  spawn(group2);
+  Network network2;
 
-  dispatch(group2, &GroupProcess::add, replica2.self());
-  dispatch(group2, &GroupProcess::add, replica3.self());
+  network2.add(replica2.self());
+  network2.add(replica3.self());
 
-  Coordinator coord2(2, &replica3, &group2);
+  Coordinator coord2(2, &replica3, &network2);
 
   {
     Result<uint64_t> result = coord2.elect();
@@ -1296,9 +1226,6 @@ TEST(CoordinatorTest, TruncateNotLearnedFill)
       EXPECT_EQ(utils::stringify(iterator->first), iterator->second);
     }
   }
-
-  terminate(group2);
-  wait(group2);
 
   terminate(replica2);
   wait(replica2);

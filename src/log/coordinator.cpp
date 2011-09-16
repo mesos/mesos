@@ -16,15 +16,17 @@ using std::set;
 using std::string;
 
 
-namespace mesos { namespace internal { namespace log {
+namespace mesos {
+namespace internal {
+namespace log {
 
 Coordinator::Coordinator(int _quorum,
                          ReplicaProcess* _replica,
-                         GroupProcess* _group)
+                         Network* _network)
   : elected(false),
     quorum(_quorum),
     replica(_replica),
-    group(_group),
+    network(_network),
     id(0),
     index(0) {}
 
@@ -50,7 +52,7 @@ Result<uint64_t> Coordinator::elect()
   PromiseRequest request;
   request.set_id(id);
 
-  // Broadcast the request to the group.
+  // Broadcast the request to the network.
   set<Future<PromiseResponse> > futures =
     broadcast(protocol::promise, request);
 
@@ -289,7 +291,7 @@ Result<uint64_t> Coordinator::write(const Action& action)
       LOG(FATAL) << "Unknown Action::Type!";
   }
 
-  // Broadcast the request to the group *excluding* the local replica.
+  // Broadcast the request to the network *excluding* the local replica.
   set<Future<WriteResponse> > futures =
     remotecast(protocol::write, request);
 
@@ -390,7 +392,7 @@ Result<uint64_t> Coordinator::commit(const Action& action)
     return Result<uint64_t>::error("Coordinator demoted");
   }
 
-  // Commit successful, send a learned message to the group
+  // Commit successful, send a learned message to the network
   // *excluding* the local replica and return the position.
 
   LearnedMessage message;
@@ -417,7 +419,7 @@ Result<Action> Coordinator::fill(uint64_t position)
   request.set_id(id);
   request.set_position(position);
 
-  // Broadcast the request to the group.
+  // Broadcast the request to the network.
   set<Future<PromiseResponse> > futures =
     broadcast(protocol::promise, request);
 
@@ -512,12 +514,11 @@ set<Future<Res> > Coordinator::broadcast(
     const Protocol<Req, Res>& protocol,
     const Req& req)
 {
-  // TODO(benh): Dispatch and timed wait on future instead?
-  return call(group,
-              &GroupProcess::template broadcast<Req, Res>,
-              protocol,
-              req,
-              set<UPID>());
+  Future<set<Future<Res> > > futures =
+    network->broadcast(protocol, req);
+  futures.await();
+  CHECK(futures.isReady());
+  return futures.get();
 }
 
 
@@ -528,13 +529,11 @@ set<Future<Res> > Coordinator::remotecast(
 {
   set<UPID> filter;
   filter.insert(replica->self());
-
-  // TODO(benh): Dispatch and timed wait on future instead?
-  return call(group,
-              &GroupProcess::template broadcast<Req, Res>,
-              protocol,
-              req,
-              filter);
+  Future<set<Future<Res> > > futures =
+    network->broadcast(protocol, req, filter);
+  futures.await();
+  CHECK(futures.isReady());
+  return futures.get();
 }
 
 
@@ -543,12 +542,9 @@ void Coordinator::remotecast(const M& m)
 {
   set<UPID> filter;
   filter.insert(replica->self());
-
-  // Need to disambiguate overloaded function.
-  void (GroupProcess::*broadcast) (const M&, const std::set<process::UPID>&);
-  broadcast = &GroupProcess::broadcast<M>;
-
-  dispatch(group, broadcast, m, filter);
+  network->broadcast(m, filter);
 }
 
-}}} // namespace mesos { namespace internal { namespace log {
+} // namespace log {
+} // namespace internal {
+} // namespace mesos {
