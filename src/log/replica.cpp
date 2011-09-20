@@ -1,18 +1,24 @@
 #include <process/dispatch.hpp>
-
-#include "replica.hpp"
+#include <process/protobuf.hpp>
 
 #include "common/utils.hpp"
+
+#include "log/replica.hpp"
 
 #include "messages/log.hpp"
 
 using namespace process;
 
+using process::wait; // Necessary on some OS's to disambiguate.
+
+using std::list;
 using std::set;
 using std::string;
 
 
-namespace mesos { namespace internal { namespace log {
+namespace mesos {
+namespace internal {
+namespace log {
 
 namespace protocol {
 
@@ -24,10 +30,9 @@ Protocol<LearnRequest, LearnResponse> learn;
 } // namespace protocol {
 
 
-ReplicaProcess::ReplicaProcess(const string& _path, int capacity)
-  : path(_path),
-    fd(-1),
-    promised(0),
+ReplicaProcess::ReplicaProcess(const string& path, int capacity)
+  : fd(-1),
+    coordinator(0),
     begin(0),
     end(0),
     cache(capacity)
@@ -65,6 +70,154 @@ ReplicaProcess::ReplicaProcess(const string& _path, int capacity)
 ReplicaProcess::~ReplicaProcess()
 {
   utils::os::close(fd);
+}
+
+
+Result<Action> ReplicaProcess::read(uint64_t position)
+{
+  if (position == 0) { // TODO(benh): Remove this hack.
+    return Result<Action>::none();
+  } else if (position < begin) {
+    return Result<Action>::error("Attempted to read truncated position");
+  } else if (end < position) {
+    return Result<Action>::none(); // These semantics are assumed above!
+  } else if (holes.count(position) > 0) {
+    return Result<Action>::none();
+  }
+
+  Option<Action> option = cache.get(position);
+
+  if (option.isSome()) {
+    return option.get();
+  } else {
+    CHECK(fd != -1);
+
+    // TODO(benh): Is there a more efficient way to look up data in
+    // the log? At the point we start implementing something like this
+    // it will probably be time to move to leveldb, or at least
+    // completely abstract this bit outside of the replcia.
+
+    // Make sure we start at the beginning of the log.
+    if (lseek(fd, 0, SEEK_SET) < 0) {
+      LOG(FATAL) << "Failed to seek to the beginning of the log";
+    }
+
+    Result<bool> result = Result<bool>::none();
+
+    do {
+      Record record;
+      result = utils::protobuf::read(fd, &record);
+      if (result.isError()) {
+        return Result<Action>::error(result.error());
+      } else if (result.isSome()) {
+        // A result of 'false' here should not be possible since any
+        // inconsistencies in the file should have been taken care of
+        // during recovery by doing a file truncate.
+        CHECK(result.get());
+        if (record.type() == Record::ACTION) {
+          CHECK(record.has_action());
+          if (record.action().position() == position) {
+            // Cache this action, even though as we keep reading through
+            // the file we may find a more recently written one.
+            cache.put(position, record.action());
+          }
+        }
+      }
+    } while (result.isSome());
+
+    // Must have reached EOF.
+    CHECK(result.isNone());
+
+    // Okay, the action *must* be in the cache. If it's not that means
+    // that we aren't recording our holes correctly.
+    option = cache.get(position);
+    CHECK(option.isSome());
+    return option.get();
+  }
+}
+
+
+// TODO(benh): Make this function actually return a Try once we change
+// the future semantics to not include failures.
+process::Promise<list<Action> > ReplicaProcess::read(
+    uint64_t from,
+    uint64_t to)
+{
+  if (from == 0) { // TODO(benh): Remove this hack.
+    process::Promise<list<Action> > promise;
+    promise.fail("Bad read range (from == 0)");
+    return promise;
+  } else if (to < from) {
+    process::Promise<list<Action> > promise;
+    promise.fail("Bad read range (to < from)");
+    return promise;
+  } else if (from < begin) {
+    process::Promise<list<Action> > promise;
+    promise.fail("Bad read range (truncated position)");
+    return promise;
+  } else if (end < to) {
+    process::Promise<list<Action> > promise;
+    promise.fail("Bad read range (past end of log)");
+    return promise;
+  }
+
+  list<Action> actions;
+
+  for (uint64_t position = from; position <= to; position++) {
+    Result<Action> result = read(position);
+
+    if (result.isError()) {
+      process::Promise<list<Action> > promise;
+      promise.fail(result.error());
+      return promise;
+    } else if (result.isSome()) {
+      actions.push_back(result.get());
+    }
+  }
+
+  return actions;
+}
+
+
+set<uint64_t> ReplicaProcess::missing(uint64_t index)
+{
+  // Start off with all the unlearned positions.
+  set<uint64_t> positions = unlearned;
+
+  // Add in a spoonful of holes.
+  foreach (uint64_t hole, holes) {
+    positions.insert(hole);
+  }
+
+  // And finally add all the unknown positions beyond our end.
+  for (; index >= end; index--) {
+    positions.insert(index);
+
+    // Don't wrap around 0!
+    if (index == 0) {
+      break;
+    }
+  }
+
+  return positions;
+}
+
+
+uint64_t ReplicaProcess::beginning()
+{
+  return begin;
+}
+
+
+uint64_t ReplicaProcess::ending()
+{
+  return end;
+}
+
+
+uint64_t ReplicaProcess::promised()
+{
+  return coordinator;
 }
 
 
@@ -139,7 +292,7 @@ void ReplicaProcess::promise(const PromiseRequest& request)
     LOG(INFO) << "Replica received implicit promise request for "
               << request.id() << " from " << from();
 
-    if (request.id() <= promised) { // N.B. Only make an implicit promise once!
+    if (request.id() <= coordinator) { // Only make an implicit promise once!
       PromiseResponse response;
       response.set_okay(false);
       response.set_id(request.id());
@@ -151,7 +304,7 @@ void ReplicaProcess::promise(const PromiseRequest& request)
       if (!persist(promise)) {
         LOG(ERROR) << "Error persisting promise to log";
       } else {
-        promised = request.id();
+        coordinator = request.id();
 
         // Return the last position written.
         PromiseResponse response;
@@ -173,7 +326,7 @@ void ReplicaProcess::write(const WriteRequest& request)
     LOG(ERROR) << "Error getting log record at " << request.position()
                << " : " << result.error();
   } else if (result.isNone()) {
-    if (request.id() < promised) {
+    if (request.id() < coordinator) {
       WriteResponse response;
       response.set_okay(false);
       response.set_id(request.id());
@@ -182,7 +335,7 @@ void ReplicaProcess::write(const WriteRequest& request)
     } else {
       Action action;
       action.set_position(request.position());
-      action.set_promised(promised);
+      action.set_promised(coordinator);
       action.set_performed(request.id());
       if (request.has_learned()) action.set_learned(request.learned());
       action.set_type(request.type());
@@ -303,112 +456,6 @@ void ReplicaProcess::learn(uint64_t position)
 }
 
 
-Result<Action> ReplicaProcess::read(uint64_t position)
-{
-  if (position == 0) { // TODO(benh): Remove this hack.
-    return Result<Action>::none();
-  } else if (position < begin) {
-    return Result<Action>::error("Attempted to read truncated position");
-  } else if (end < position) {
-    return Result<Action>::none();
-  } else if (holes.count(position) > 0) {
-    return Result<Action>::none();
-  }
-
-  Option<Action> option = cache.get(position);
-
-  if (option.isSome()) {
-    return option.get();
-  } else {
-    CHECK(fd != -1);
-
-    // TODO(benh): Is there a more efficient way to look up data in
-    // the log? At the point we start implementing something like this
-    // it will probably be time to move to leveldb, or at least
-    // completely abstract this bit outside of the replcia.
-
-    // Make sure we start at the beginning of the log.
-    if (lseek(fd, 0, SEEK_SET) < 0) {
-      LOG(FATAL) << "Failed to seek to the beginning of the log";
-    }
-
-    Result<bool> result = Result<bool>::none();
-
-    do {
-      Record record;
-      result = utils::protobuf::read(fd, &record);
-      if (result.isError()) {
-        return Result<Action>::error(result.error());
-      } else if (result.isSome()) {
-        // A result of 'false' here should not be possible since any
-        // inconsistencies in the file should have been taken care of
-        // during recovery by doing a file truncate.
-        CHECK(result.get());
-        if (record.type() == Record::ACTION) {
-          CHECK(record.has_action());
-          if (record.action().position() == position) {
-            // Cache this action, even though as we keep reading through
-            // the file we may find a more recently written one.
-            cache.put(position, record.action());
-          }
-        }
-      }
-    } while (result.isSome());
-
-    // Must have reached EOF.
-    CHECK(result.isNone());
-
-    // Okay, the action *must* be in the cache. If it's not that means
-    // that we aren't recording our holes correctly.
-    option = cache.get(position);
-    CHECK(option.isSome());
-    return option.get();
-  }
-}
-
-
-set<uint64_t> ReplicaProcess::missing(uint64_t index)
-{
-  // Start off with all the unlearned positions.
-  set<uint64_t> positions = unlearned;
-
-  // Add in a spoonful of holes.
-  foreach (uint64_t hole, holes) {
-    positions.insert(hole);
-  }
-
-  // And finally add all the unknown positions beyond our end.
-  for (; index >= end; index--) {
-    positions.insert(index);
-
-    // Don't wrap around 0!
-    if (index == 0) {
-      break;
-    }
-  }
-
-  return positions;
-}
-
-
-Result<uint64_t> ReplicaProcess::beginning()
-{
-  return begin;
-}
-
-
-Result<uint64_t> ReplicaProcess::ending()
-{
-  return end;
-}
-
-
-Result<uint64_t> ReplicaProcess::promise()
-{
-  return promised;
-}
-
-
 bool ReplicaProcess::persist(const Promise& promise)
 {
   Record record;
@@ -492,7 +539,7 @@ void ReplicaProcess::recover()
       if (result.get()) {
         if (record.type() == Record::PROMISE) {
           CHECK(record.has_promise());
-          promised = record.promise().id();
+          coordinator = record.promise().id();
         } else {
           CHECK(record.type() == Record::ACTION);
           CHECK(record.has_action());
@@ -542,4 +589,6 @@ void ReplicaProcess::recover()
             << " and unlearned " << utils::stringify(unlearned);
 }
 
-}}} // namespace mesos { namespace internal { namespace log {
+} // namespace log {
+} // namespace internal {
+} // namespace mesos {

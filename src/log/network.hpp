@@ -34,6 +34,7 @@ class Network
 {
 public:
   Network();
+  Network(const std::set<process::UPID>& pids);
   virtual ~Network();
 
   // Adds a PID to this network.
@@ -102,6 +103,11 @@ class NetworkProcess : public ProtobufProcess<NetworkProcess>
 public:
   NetworkProcess() {}
 
+  NetworkProcess(const std::set<process::UPID>& pids)
+  {
+    set(pids);
+  }
+
   void add(const process::UPID& pid)
   {
     link(pid); // Try and keep a socket open (more efficient).
@@ -167,6 +173,13 @@ private:
 inline Network::Network()
 {
   process = new NetworkProcess();
+  process::spawn(process);
+}
+
+
+inline Network::Network(const std::set<process::UPID>& pids)
+{
+  process = new NetworkProcess(pids);
   process::spawn(process);
 }
 
@@ -278,13 +291,13 @@ inline void ZooKeeperNetwork::ready(
 }
 
 
-inline void failed(const std::string& message)
+inline void ZooKeeperNetwork::failed(const std::string& message)
 {
   LOG(FATAL) << "Failed to watch ZooKeeper group: "<< message;
 }
 
 
-inline void discarded()
+inline void ZooKeeperNetwork::discarded()
 {
   LOG(FATAL) << "Unexpected discarded future while watching ZooKeeper group";
 }

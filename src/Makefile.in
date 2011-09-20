@@ -180,7 +180,8 @@ MESOS_LIBS = $(MESOS_LIB) $(MESOS_SCHED_LIB) $(MESOS_EXEC_LIB)
 
 MESOS_JAVA_LIB_OBJ = java/jni/convert.o java/jni/construct.o		\
 	             java/jni/org_apache_mesos_MesosSchedulerDriver.o	\
-	             java/jni/org_apache_mesos_MesosExecutorDriver.o
+	             java/jni/org_apache_mesos_MesosExecutorDriver.o    \
+	             java/jni/org_apache_mesos_Log.o
 
 # Java and Python shared libraries which contain everything in
 # MESOS_LIB (note, Java requires the use of the .dylib suffix on Mac
@@ -323,6 +324,7 @@ ifdef JAVA_HOME
 	$(JAVA_HOME)/bin/jar cf $@ -C java/classes org
 	$(JAVA_HOME)/bin/javah -d java/jni -classpath @top_builddir@/$(PROTOBUF)/java/src/main/java:java/classes org.apache.mesos.MesosSchedulerDriver
 	$(JAVA_HOME)/bin/javah -d java/jni -classpath @top_builddir@/$(PROTOBUF)/java/src/main/java:java/classes org.apache.mesos.MesosExecutorDriver
+	$(JAVA_HOME)/bin/javah -d java/jni -classpath @top_builddir@/$(PROTOBUF)/java/src/main/java:java/classes org.apache.mesos.Log
 endif
 
 $(MESOS_JAVA_LIB_OBJ): %.o: $(SRCDIR)/%.cpp $(MESOS_JAVA_JAR)
