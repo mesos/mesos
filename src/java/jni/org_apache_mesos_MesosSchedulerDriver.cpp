@@ -188,7 +188,7 @@ void JNIScheduler::resourceOffers(SchedulerDriver* driver,
 
   jmethodID add = env->GetMethodID(clazz, "add", "(Ljava/lang/Object;)Z");
 
-  // Loop through C++ vector and add each offer to the Java vector.
+  // Loop through C++ vector and add each offer to the Java list.
   foreach (const Offer& offer, offers) {
     jobject joffer = convert<Offer>(env, offer);
     env->CallBooleanMethod(joffers, add, joffer);

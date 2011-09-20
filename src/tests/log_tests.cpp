@@ -11,6 +11,7 @@
 #include "common/utils.hpp"
 
 #include "log/coordinator.hpp"
+#include "log/log.hpp"
 #include "log/replica.hpp"
 
 #include "messages/messages.hpp"
@@ -78,8 +79,7 @@ TEST(ReplicaTest, Promise)
 
   utils::os::rm(file);
 
-  ReplicaProcess replica(file);
-  spawn(replica);
+  Replica replica(file);
 
   PromiseRequest request;
   PromiseResponse response;
@@ -87,7 +87,7 @@ TEST(ReplicaTest, Promise)
 
   request.set_id(2);
 
-  future = protocol::promise(replica, request);
+  future = protocol::promise(replica.pid(), request);
 
   future.await(2.0);
   ASSERT_TRUE(future.isReady());
@@ -101,7 +101,7 @@ TEST(ReplicaTest, Promise)
 
   request.set_id(1);
 
-  future = protocol::promise(replica, request);
+  future = protocol::promise(replica.pid(), request);
 
   future.await(2.0);
   ASSERT_TRUE(future.isReady());
@@ -114,7 +114,7 @@ TEST(ReplicaTest, Promise)
 
   request.set_id(3);
 
-  future = protocol::promise(replica, request);
+  future = protocol::promise(replica.pid(), request);
 
   future.await(2.0);
   ASSERT_TRUE(future.isReady());
@@ -126,9 +126,6 @@ TEST(ReplicaTest, Promise)
   EXPECT_EQ(0, response.position());
   EXPECT_FALSE(response.has_action());
 
-  terminate(replica);
-  wait(replica);
-
   utils::os::rm(file);
 }
 
@@ -139,15 +136,15 @@ TEST(ReplicaTest, Append)
 
   utils::os::rm(file);
 
-  ReplicaProcess replica(file);
-  spawn(replica);
+  Replica replica(file);
 
   const int id = 1;
 
   PromiseRequest request1;
   request1.set_id(id);
 
-  Future<PromiseResponse> future1 = protocol::promise(replica, request1);
+  Future<PromiseResponse> future1 =
+    protocol::promise(replica.pid(), request1);
 
   future1.await(2.0);
   ASSERT_TRUE(future1.isReady());
@@ -165,7 +162,8 @@ TEST(ReplicaTest, Append)
   request2.set_type(Action::APPEND);
   request2.mutable_append()->set_bytes("hello world");
 
-  Future<WriteResponse> future2 = protocol::write(replica, request2);
+  Future<WriteResponse> future2 =
+    protocol::write(replica.pid(), request2);
 
   future2.await(2.0);
   ASSERT_TRUE(future2.isReady());
@@ -175,10 +173,12 @@ TEST(ReplicaTest, Append)
   EXPECT_EQ(id, response2.id());
   EXPECT_EQ(1, response2.position());
 
-  Result<Action> result = call(replica, &ReplicaProcess::read, 1);
-  ASSERT_TRUE(result.isSome());
+  Future<std::list<Action> > actions = replica.read(1, 1);
+  ASSERT_TRUE(actions.await(2.0));
+  ASSERT_TRUE(actions.isReady());
+  ASSERT_EQ(1, actions.get().size());
 
-  Action action = result.get();
+  Action action = actions.get().front();
   EXPECT_EQ(1, action.position());
   EXPECT_EQ(1, action.promised());
   EXPECT_TRUE(action.has_performed());
@@ -191,9 +191,6 @@ TEST(ReplicaTest, Append)
   EXPECT_FALSE(action.has_truncate());
   EXPECT_EQ("hello world", action.append().bytes());
 
-  terminate(replica);
-  wait(replica);
-
   utils::os::rm(file);
 }
 
@@ -204,15 +201,15 @@ TEST(ReplicaTest, Recover)
 
   utils::os::rm(file);
 
-  ReplicaProcess replica1(file);
-  spawn(replica1);
+  Replica replica1(file);
 
   const int id = 1;
 
   PromiseRequest request1;
   request1.set_id(id);
 
-  Future<PromiseResponse> future1 = protocol::promise(replica1, request1);
+  Future<PromiseResponse> future1 =
+    protocol::promise(replica1.pid(), request1);
 
   future1.await(2.0);
   ASSERT_TRUE(future1.isReady());
@@ -230,7 +227,8 @@ TEST(ReplicaTest, Recover)
   request2.set_type(Action::APPEND);
   request2.mutable_append()->set_bytes("hello world");
 
-  Future<WriteResponse> future2 = protocol::write(replica1, request2);
+  Future<WriteResponse> future2 =
+    protocol::write(replica1.pid(), request2);
 
   future2.await(2.0);
   ASSERT_TRUE(future2.isReady());
@@ -240,11 +238,13 @@ TEST(ReplicaTest, Recover)
   EXPECT_EQ(id, response2.id());
   EXPECT_EQ(1, response2.position());
 
-  Result<Action> result1 = call(replica1, &ReplicaProcess::read, 1);
-  ASSERT_TRUE(result1.isSome());
+  Future<std::list<Action> > actions1 = replica1.read(1, 1);
+  ASSERT_TRUE(actions1.await(2.0));
+  ASSERT_TRUE(actions1.isReady());
+  ASSERT_EQ(1, actions1.get().size());
 
   {
-    Action action = result1.get();
+    Action action = actions1.get().front();
     EXPECT_EQ(1, action.position());
     EXPECT_EQ(1, action.promised());
     EXPECT_TRUE(action.has_performed());
@@ -258,17 +258,15 @@ TEST(ReplicaTest, Recover)
     EXPECT_EQ("hello world", action.append().bytes());
   }
 
-  terminate(replica1);
-  wait(replica1);
+  Replica replica2(file);
 
-  ReplicaProcess replica2(file);
-  spawn(replica2);
-
-  Result<Action> result2 = call(replica2, &ReplicaProcess::read, 1);
-  ASSERT_TRUE(result2.isSome());
+  Future<std::list<Action> > actions2 = replica2.read(1, 1);
+  ASSERT_TRUE(actions2.await(2.0));
+  ASSERT_TRUE(actions2.isReady());
+  ASSERT_EQ(1, actions2.get().size());
 
   {
-    Action action = result2.get();
+    Action action = actions2.get().front();
     EXPECT_EQ(1, action.position());
     EXPECT_EQ(1, action.promised());
     EXPECT_TRUE(action.has_performed());
@@ -281,9 +279,6 @@ TEST(ReplicaTest, Recover)
     EXPECT_FALSE(action.has_truncate());
     EXPECT_EQ("hello world", action.append().bytes());
   }
-
-  terminate(replica2);
-  wait(replica2);  
 
   utils::os::rm(file);
 }
@@ -295,15 +290,15 @@ TEST(ReplicaTest, RecoverAfterCrash)
 
   utils::os::rm(file);
 
-  ReplicaProcess replica1(file);
-  spawn(replica1);
+  Replica replica1(file);
 
   const int id = 1;
 
   PromiseRequest request1;
   request1.set_id(id);
 
-  Future<PromiseResponse> future1 = protocol::promise(replica1, request1);
+  Future<PromiseResponse> future1 =
+    protocol::promise(replica1.pid(), request1);
 
   future1.await(2.0);
   ASSERT_TRUE(future1.isReady());
@@ -321,7 +316,8 @@ TEST(ReplicaTest, RecoverAfterCrash)
   request2.set_type(Action::APPEND);
   request2.mutable_append()->set_bytes("hello world");
 
-  Future<WriteResponse> future2 = protocol::write(replica1, request2);
+  Future<WriteResponse> future2 =
+    protocol::write(replica1.pid(), request2);
 
   future2.await(2.0);
   ASSERT_TRUE(future2.isReady());
@@ -331,11 +327,13 @@ TEST(ReplicaTest, RecoverAfterCrash)
   EXPECT_EQ(id, response2.id());
   EXPECT_EQ(1, response2.position());
 
-  Result<Action> result1 = call(replica1, &ReplicaProcess::read, 1);
-  ASSERT_TRUE(result1.isSome());
+  Future<std::list<Action> > actions1 = replica1.read(1, 1);
+  ASSERT_TRUE(actions1.await(2.0));
+  ASSERT_TRUE(actions1.isReady());
+  ASSERT_EQ(1, actions1.get().size());
 
   {
-    Action action = result1.get();
+    Action action = actions1.get().front();
     EXPECT_EQ(1, action.position());
     EXPECT_EQ(1, action.promised());
     EXPECT_TRUE(action.has_performed());
@@ -348,9 +346,6 @@ TEST(ReplicaTest, RecoverAfterCrash)
     EXPECT_FALSE(action.has_truncate());
     EXPECT_EQ("hello world", action.append().bytes());
   }
-
-  terminate(replica1);
-  wait(replica1);
 
   // Write some random bytes to the end of the file.
   {
@@ -367,14 +362,15 @@ TEST(ReplicaTest, RecoverAfterCrash)
     utils::os::close(fd);
   }
 
-  ReplicaProcess replica2(file);
-  spawn(replica2);
+  Replica replica2(file);
 
-  Result<Action> result2 = call(replica2, &ReplicaProcess::read, 1);
-  ASSERT_TRUE(result2.isSome());
+  Future<std::list<Action> > actions2 = replica2.read(1, 1);
+  ASSERT_TRUE(actions2.await(2.0));
+  ASSERT_TRUE(actions2.isReady());
+  ASSERT_EQ(1, actions2.get().size());
 
   {
-    Action action = result2.get();
+    Action action = actions2.get().front();
     EXPECT_EQ(1, action.position());
     EXPECT_EQ(1, action.promised());
     EXPECT_TRUE(action.has_performed());
@@ -388,10 +384,46 @@ TEST(ReplicaTest, RecoverAfterCrash)
     EXPECT_EQ("hello world", action.append().bytes());
   }
 
-  terminate(replica2);
-  wait(replica2);  
-
   utils::os::rm(file);
+}
+
+
+TEST(CoordinatorTest, Elect)
+{
+  const std::string file1 = ".log_tests_elect1";
+  const std::string file2 = ".log_tests_elect2";
+
+  utils::os::rm(file1);
+  utils::os::rm(file2);
+
+  Replica replica1(file1);
+  Replica replica2(file2);
+
+  Network network;
+
+  network.add(replica1.pid());
+  network.add(replica2.pid());
+
+  Coordinator coord(2, &replica1, &network);
+
+  {
+    Result<uint64_t> result = coord.elect();
+    ASSERT_TRUE(result.isSome());
+    EXPECT_EQ(0, result.get());
+  }
+
+  {
+    Future<std::list<Action> > actions = replica1.read(0, 0);
+    ASSERT_TRUE(actions.await(2.0));
+    ASSERT_TRUE(actions.isReady());
+    ASSERT_EQ(1, actions.get().size());
+    EXPECT_EQ(0, actions.get().front().position());
+    ASSERT_TRUE(actions.get().front().has_type());
+    ASSERT_EQ(Action::NOP, actions.get().front().type());
+  }
+
+  utils::os::rm(file1);
+  utils::os::rm(file2);
 }
 
 
@@ -403,16 +435,13 @@ TEST(CoordinatorTest, AppendRead)
   utils::os::rm(file1);
   utils::os::rm(file2);
 
-  ReplicaProcess replica1(file1);
-  spawn(replica1);
-
-  ReplicaProcess replica2(file2);
-  spawn(replica2);
+  Replica replica1(file1);
+  Replica replica2(file2);
 
   Network network;
 
-  network.add(replica1.self());
-  network.add(replica2.self());
+  network.add(replica1.pid());
+  network.add(replica2.pid());
 
   Coordinator coord(2, &replica1, &network);
 
@@ -432,19 +461,15 @@ TEST(CoordinatorTest, AppendRead)
   }
 
   {
-    Result<std::list<std::pair<uint64_t, std::string> > > result =
-      coord.read(position, position);
-    ASSERT_TRUE(result.isSome());
-    ASSERT_EQ(1, result.get().size());
-    EXPECT_EQ(position, result.get().front().first);
-    EXPECT_EQ("hello world", result.get().front().second);
+    Future<std::list<Action> > actions = replica1.read(position, position);
+    ASSERT_TRUE(actions.await(2.0));
+    ASSERT_TRUE(actions.isReady());
+    ASSERT_EQ(1, actions.get().size());
+    EXPECT_EQ(position, actions.get().front().position());
+    ASSERT_TRUE(actions.get().front().has_type());
+    ASSERT_EQ(Action::APPEND, actions.get().front().type());
+    EXPECT_EQ("hello world", actions.get().front().append().bytes());
   }
-
-  terminate(replica1);
-  wait(replica1);
-
-  terminate(replica2);
-  wait(replica2);
 
   utils::os::rm(file1);
   utils::os::rm(file2);
@@ -459,16 +484,13 @@ TEST(CoordinatorTest, AppendReadError)
   utils::os::rm(file1);
   utils::os::rm(file2);
 
-  ReplicaProcess replica1(file1);
-  spawn(replica1);
-
-  ReplicaProcess replica2(file2);
-  spawn(replica2);
+  Replica replica1(file1);
+  Replica replica2(file2);
 
   Network network;
 
-  network.add(replica1.self());
-  network.add(replica2.self());
+  network.add(replica1.pid());
+  network.add(replica2.pid());
 
   Coordinator coord(2, &replica1, &network);
 
@@ -489,17 +511,11 @@ TEST(CoordinatorTest, AppendReadError)
 
   {
     position += 1;
-    Result<std::list<std::pair<uint64_t, std::string> > > result =
-      coord.read(position, position);
-    ASSERT_TRUE(result.isError());
-    EXPECT_EQ("Bad read range (index <= from)", result.error());
+    Future<std::list<Action> > actions = replica1.read(position, position);
+    ASSERT_TRUE(actions.await(2.0));
+    ASSERT_TRUE(actions.isFailed());
+    EXPECT_EQ("Bad read range (past end of log)", actions.failure());
   }
-
-  terminate(replica1);
-  wait(replica1);
-
-  terminate(replica2);
-  wait(replica2);
 
   utils::os::rm(file1);
   utils::os::rm(file2);
@@ -528,12 +544,11 @@ TEST(CoordinatorTest, DISABLED_ElectNoQuorum)
 
   utils::os::rm(file);
 
-  ReplicaProcess replica(file);
-  spawn(replica);
+  Replica replica(file);
 
   Network network;
 
-  network.add(replica.self());
+  network.add(replica.pid());
 
   Coordinator coord(2, &replica, &network);
 
@@ -541,9 +556,6 @@ TEST(CoordinatorTest, DISABLED_ElectNoQuorum)
     Result<uint64_t> result = coord.elect();
     ASSERT_TRUE(result.isNone());
   }
-
-  terminate(replica);
-  wait(replica);
 
   utils::os::rm(file);
 }
@@ -557,16 +569,13 @@ TEST(CoordinatorTest, DISABLED_AppendNoQuorum)
   utils::os::rm(file1);
   utils::os::rm(file2);
 
-  ReplicaProcess replica1(file1);
-  spawn(replica1);
-
-  ReplicaProcess replica2(file2);
-  spawn(replica2);
+  Replica replica1(file1);
+  Replica replica2(file2);
 
   Network network;
 
-  network.add(replica1.self());
-  network.add(replica2.self());
+  network.add(replica1.pid());
+  network.add(replica2.pid());
 
   Coordinator coord(2, &replica1, &network);
 
@@ -576,16 +585,12 @@ TEST(CoordinatorTest, DISABLED_AppendNoQuorum)
     EXPECT_EQ(0, result.get());
   }
 
-  terminate(replica1);
-  wait(replica1);
+  network.remove(replica1.pid());
 
   {
     Result<uint64_t> result = coord.append("hello world");
     ASSERT_TRUE(result.isNone());
   }
-
-  terminate(replica2);
-  wait(replica2);
 
   utils::os::rm(file1);
   utils::os::rm(file2);
@@ -600,16 +605,13 @@ TEST(CoordinatorTest, Failover)
   utils::os::rm(file1);
   utils::os::rm(file2);
 
-  ReplicaProcess replica1(file1);
-  spawn(replica1);
-
-  ReplicaProcess replica2(file2);
-  spawn(replica2);
+  Replica replica1(file1);
+  Replica replica2(file2);
 
   Network network1;
 
-  network1.add(replica1.self());
-  network1.add(replica2.self());
+  network1.add(replica1.pid());
+  network1.add(replica2.pid());
 
   Coordinator coord1(2, &replica1, &network1);
 
@@ -630,8 +632,8 @@ TEST(CoordinatorTest, Failover)
 
   Network network2;
 
-  network2.add(replica1.self());
-  network2.add(replica2.self());
+  network2.add(replica1.pid());
+  network2.add(replica2.pid());
 
   Coordinator coord2(2, &replica2, &network2);
 
@@ -642,19 +644,15 @@ TEST(CoordinatorTest, Failover)
   }
 
   {
-    Result<std::list<std::pair<uint64_t, std::string> > > result =
-      coord2.read(position, position);
-    ASSERT_TRUE(result.isSome());
-    ASSERT_EQ(1, result.get().size());
-    EXPECT_EQ(position, result.get().front().first);
-    EXPECT_EQ("hello world", result.get().front().second);
+    Future<std::list<Action> > actions = replica2.read(position, position);
+    ASSERT_TRUE(actions.await(2.0));
+    ASSERT_TRUE(actions.isReady());
+    ASSERT_EQ(1, actions.get().size());
+    EXPECT_EQ(position, actions.get().front().position());
+    ASSERT_TRUE(actions.get().front().has_type());
+    ASSERT_EQ(Action::APPEND, actions.get().front().type());
+    EXPECT_EQ("hello world", actions.get().front().append().bytes());
   }
-
-  terminate(replica1);
-  wait(replica1);
-
-  terminate(replica2);
-  wait(replica2);
 
   utils::os::rm(file1);
   utils::os::rm(file2);
@@ -669,16 +667,13 @@ TEST(CoordinatorTest, Demoted)
   utils::os::rm(file1);
   utils::os::rm(file2);
 
-  ReplicaProcess replica1(file1);
-  spawn(replica1);
-
-  ReplicaProcess replica2(file2);
-  spawn(replica2);
+  Replica replica1(file1);
+  Replica replica2(file2);
 
   Network network1;
 
-  network1.add(replica1.self());
-  network1.add(replica2.self());
+  network1.add(replica1.pid());
+  network1.add(replica2.pid());
 
   Coordinator coord1(2, &replica1, &network1);
 
@@ -699,8 +694,8 @@ TEST(CoordinatorTest, Demoted)
 
   Network network2;
 
-  network2.add(replica1.self());
-  network2.add(replica2.self());
+  network2.add(replica1.pid());
+  network2.add(replica2.pid());
 
   Coordinator coord2(2, &replica2, &network2);
 
@@ -724,19 +719,15 @@ TEST(CoordinatorTest, Demoted)
   }
 
   {
-    Result<std::list<std::pair<uint64_t, std::string> > > result =
-      coord2.read(position, position);
-    ASSERT_TRUE(result.isSome());
-    ASSERT_EQ(1, result.get().size());
-    EXPECT_EQ(position, result.get().front().first);
-    EXPECT_EQ("hello hello", result.get().front().second);
+    Future<std::list<Action> > actions = replica2.read(position, position);
+    ASSERT_TRUE(actions.await(2.0));
+    ASSERT_TRUE(actions.isReady());
+    ASSERT_EQ(1, actions.get().size());
+    EXPECT_EQ(position, actions.get().front().position());
+    ASSERT_TRUE(actions.get().front().has_type());
+    ASSERT_EQ(Action::APPEND, actions.get().front().type());
+    EXPECT_EQ("hello hello", actions.get().front().append().bytes());
   }
-
-  terminate(replica1);
-  wait(replica1);
-
-  terminate(replica2);
-  wait(replica2);
 
   utils::os::rm(file1);
   utils::os::rm(file2);
@@ -753,16 +744,13 @@ TEST(CoordinatorTest, Fill)
   utils::os::rm(file2);
   utils::os::rm(file3);
 
-  ReplicaProcess replica1(file1);
-  spawn(replica1);
-
-  ReplicaProcess replica2(file2);
-  spawn(replica2);
+  Replica replica1(file1);
+  Replica replica2(file2);
 
   Network network1;
 
-  network1.add(replica1.self());
-  network1.add(replica2.self());
+  network1.add(replica1.pid());
+  network1.add(replica2.pid());
 
   Coordinator coord1(2, &replica1, &network1);
 
@@ -781,16 +769,12 @@ TEST(CoordinatorTest, Fill)
     EXPECT_EQ(1, position);
   }
 
-  terminate(replica1);
-  wait(replica1);
-
-  ReplicaProcess replica3(file3);
-  spawn(replica3);
+  Replica replica3(file3);
 
   Network network2;
 
-  network2.add(replica2.self());
-  network2.add(replica3.self());
+  network2.add(replica2.pid());
+  network2.add(replica3.pid());
 
   Coordinator coord2(2, &replica3, &network2);
 
@@ -803,19 +787,15 @@ TEST(CoordinatorTest, Fill)
   }
 
   {
-    Result<std::list<std::pair<uint64_t, std::string> > > result =
-      coord2.read(position, position);
-    ASSERT_TRUE(result.isSome());
-    ASSERT_EQ(1, result.get().size());
-    EXPECT_EQ(position, result.get().front().first);
-    EXPECT_EQ("hello world", result.get().front().second);
+    Future<std::list<Action> > actions = replica3.read(position, position);
+    ASSERT_TRUE(actions.await(2.0));
+    ASSERT_TRUE(actions.isReady());
+    ASSERT_EQ(1, actions.get().size());
+    EXPECT_EQ(position, actions.get().front().position());
+    ASSERT_TRUE(actions.get().front().has_type());
+    ASSERT_EQ(Action::APPEND, actions.get().front().type());
+    EXPECT_EQ("hello world", actions.get().front().append().bytes());
   }
-
-  terminate(replica2);
-  wait(replica2);
-
-  terminate(replica3);
-  wait(replica3);
 
   utils::os::rm(file1);
   utils::os::rm(file2);
@@ -842,16 +822,13 @@ TEST(CoordinatorTest, NotLearnedFill)
   utils::os::rm(file2);
   utils::os::rm(file3);
 
-  ReplicaProcess replica1(file1);
-  spawn(replica1);
-
-  ReplicaProcess replica2(file2);
-  spawn(replica2);
+  Replica replica1(file1);
+  Replica replica2(file2);
 
   Network network1;
 
-  network1.add(replica1.self());
-  network1.add(replica2.self());
+  network1.add(replica1.pid());
+  network1.add(replica2.pid());
 
   Coordinator coord1(2, &replica1, &network1);
 
@@ -870,16 +847,12 @@ TEST(CoordinatorTest, NotLearnedFill)
     EXPECT_EQ(1, position);
   }
 
-  terminate(replica1);
-  wait(replica1);
-
-  ReplicaProcess replica3(file3);
-  spawn(replica3);
+  Replica replica3(file3);
 
   Network network2;
 
-  network2.add(replica2.self());
-  network2.add(replica3.self());
+  network2.add(replica2.pid());
+  network2.add(replica3.pid());
 
   Coordinator coord2(2, &replica3, &network2);
 
@@ -892,19 +865,15 @@ TEST(CoordinatorTest, NotLearnedFill)
   }
 
   {
-    Result<std::list<std::pair<uint64_t, std::string> > > result =
-      coord2.read(position, position);
-    ASSERT_TRUE(result.isSome());
-    ASSERT_EQ(1, result.get().size());
-    EXPECT_EQ(position, result.get().front().first);
-    EXPECT_EQ("hello world", result.get().front().second);
+    Future<std::list<Action> > actions = replica3.read(position, position);
+    ASSERT_TRUE(actions.await(2.0));
+    ASSERT_TRUE(actions.isReady());
+    ASSERT_EQ(1, actions.get().size());
+    EXPECT_EQ(position, actions.get().front().position());
+    ASSERT_TRUE(actions.get().front().has_type());
+    ASSERT_EQ(Action::APPEND, actions.get().front().type());
+    EXPECT_EQ("hello world", actions.get().front().append().bytes());
   }
-
-  terminate(replica2);
-  wait(replica2);
-
-  terminate(replica3);
-  wait(replica3);
 
   utils::os::rm(file1);
   utils::os::rm(file2);
@@ -922,16 +891,13 @@ TEST(CoordinatorTest, MultipleAppends)
   utils::os::rm(file1);
   utils::os::rm(file2);
 
-  ReplicaProcess replica1(file1);
-  spawn(replica1);
-
-  ReplicaProcess replica2(file2);
-  spawn(replica2);
+  Replica replica1(file1);
+  Replica replica2(file2);
 
   Network network;
 
-  network.add(replica1.self());
-  network.add(replica2.self());
+  network.add(replica1.pid());
+  network.add(replica2.pid());
 
   Coordinator coord(2, &replica1, &network);
 
@@ -948,22 +914,16 @@ TEST(CoordinatorTest, MultipleAppends)
   }
 
   {
-    Result<std::list<std::pair<uint64_t, std::string> > > result =
-      coord.read(1, 10);
-    ASSERT_TRUE(result.isSome());
-    const std::list<std::pair<uint64_t, std::string> >& list = result.get();
-    EXPECT_EQ(10, list.size());
-    std::list<std::pair<uint64_t, std::string> >::const_iterator iterator;
-    for (iterator = list.begin(); iterator != list.end(); ++iterator) {
-      EXPECT_EQ(utils::stringify(iterator->first), iterator->second);
+    Future<std::list<Action> > actions = replica1.read(1, 10);
+    ASSERT_TRUE(actions.await(2.0));
+    ASSERT_TRUE(actions.isReady());
+    EXPECT_EQ(10, actions.get().size());
+    foreach (const Action& action, actions.get()) {
+      ASSERT_TRUE(action.has_type());
+      ASSERT_EQ(Action::APPEND, action.type());
+      EXPECT_EQ(utils::stringify(action.position()), action.append().bytes());
     }
   }
-
-  terminate(replica1);
-  wait(replica1);
-
-  terminate(replica2);
-  wait(replica2);
 
   utils::os::rm(file1);
   utils::os::rm(file2);
@@ -989,16 +949,13 @@ TEST(CoordinatorTest, MultipleAppendsNotLearnedFill)
   utils::os::rm(file2);
   utils::os::rm(file3);
 
-  ReplicaProcess replica1(file1);
-  spawn(replica1);
-
-  ReplicaProcess replica2(file2);
-  spawn(replica2);
+  Replica replica1(file1);
+  Replica replica2(file2);
 
   Network network1;
 
-  network1.add(replica1.self());
-  network1.add(replica2.self());
+  network1.add(replica1.pid());
+  network1.add(replica2.pid());
 
   Coordinator coord1(2, &replica1, &network1);
 
@@ -1014,16 +971,12 @@ TEST(CoordinatorTest, MultipleAppendsNotLearnedFill)
     EXPECT_EQ(position, result.get());
   }
 
-  terminate(replica1);
-  wait(replica1);
-
-  ReplicaProcess replica3(file3);
-  spawn(replica3);
+  Replica replica3(file3);
 
   Network network2;
 
-  network2.add(replica2.self());
-  network2.add(replica3.self());
+  network2.add(replica2.pid());
+  network2.add(replica3.pid());
 
   Coordinator coord2(2, &replica3, &network2);
 
@@ -1036,22 +989,16 @@ TEST(CoordinatorTest, MultipleAppendsNotLearnedFill)
   }
 
   {
-    Result<std::list<std::pair<uint64_t, std::string> > > result =
-      coord2.read(1, 10);
-    ASSERT_TRUE(result.isSome());
-    const std::list<std::pair<uint64_t, std::string> >& list = result.get();
-    EXPECT_EQ(10, list.size());
-    std::list<std::pair<uint64_t, std::string> >::const_iterator iterator;
-    for (iterator = list.begin(); iterator != list.end(); ++iterator) {
-      EXPECT_EQ(utils::stringify(iterator->first), iterator->second);
+    Future<std::list<Action> > actions = replica3.read(1, 10);
+    ASSERT_TRUE(actions.await(2.0));
+    ASSERT_TRUE(actions.isReady());
+    EXPECT_EQ(10, actions.get().size());
+    foreach (const Action& action, actions.get()) {
+      ASSERT_TRUE(action.has_type());
+      ASSERT_EQ(Action::APPEND, action.type());
+      EXPECT_EQ(utils::stringify(action.position()), action.append().bytes());
     }
   }
-
-  terminate(replica2);
-  wait(replica2);
-
-  terminate(replica3);
-  wait(replica3);
 
   utils::os::rm(file1);
   utils::os::rm(file2);
@@ -1069,20 +1016,13 @@ TEST(CoordinatorTest, Truncate)
   utils::os::rm(file1);
   utils::os::rm(file2);
 
-  ReplicaProcess replica1(file1);
-  spawn(replica1);
-
-  ReplicaProcess replica2(file2);
-  spawn(replica2);
-
-  std::set<UPID> pids;
-  pids.insert(replica1.self());
-  pids.insert(replica2.self());
+  Replica replica1(file1);
+  Replica replica2(file2);
 
   Network network;
 
-  network.add(replica1.self());
-  network.add(replica2.self());
+  network.add(replica1.pid());
+  network.add(replica2.pid());
 
   Coordinator coord(2, &replica1, &network);
 
@@ -1105,29 +1045,23 @@ TEST(CoordinatorTest, Truncate)
   }
 
   {
-    Result<std::list<std::pair<uint64_t, std::string> > > result =
-      coord.read(6, 10);
-    EXPECT_TRUE(result.isError());
-    EXPECT_EQ("Attempted to read truncated position", result.error());
+    Future<std::list<Action> > actions = replica1.read(6, 10);
+    ASSERT_TRUE(actions.await(2.0));
+    ASSERT_TRUE(actions.isFailed());
+    EXPECT_EQ("Bad read range (truncated position)", actions.failure());
   }
 
   {
-    Result<std::list<std::pair<uint64_t, std::string> > > result =
-      coord.read(7, 10);
-    ASSERT_TRUE(result.isSome());
-    const std::list<std::pair<uint64_t, std::string> >& list = result.get();
-    EXPECT_EQ(4, list.size());
-    std::list<std::pair<uint64_t, std::string> >::const_iterator iterator;
-    for (iterator = list.begin(); iterator != list.end(); ++iterator) {
-      EXPECT_EQ(utils::stringify(iterator->first), iterator->second);
+    Future<std::list<Action> > actions = replica1.read(7, 10);
+    ASSERT_TRUE(actions.await(2.0));
+    ASSERT_TRUE(actions.isReady());
+    EXPECT_EQ(4, actions.get().size());
+    foreach (const Action& action, actions.get()) {
+      ASSERT_TRUE(action.has_type());
+      ASSERT_EQ(Action::APPEND, action.type());
+      EXPECT_EQ(utils::stringify(action.position()), action.append().bytes());
     }
   }
-
-  terminate(replica1);
-  wait(replica1);
-
-  terminate(replica2);
-  wait(replica2);
 
   utils::os::rm(file1);
   utils::os::rm(file2);
@@ -1151,21 +1085,15 @@ TEST(CoordinatorTest, TruncateNotLearnedFill)
 
   utils::os::rm(file1);
   utils::os::rm(file2);
+  utils::os::rm(file3);
 
-  ReplicaProcess replica1(file1);
-  spawn(replica1);
-
-  ReplicaProcess replica2(file2);
-  spawn(replica2);
-
-  std::set<UPID> pids;
-  pids.insert(replica1.self());
-  pids.insert(replica2.self());
+  Replica replica1(file1);
+  Replica replica2(file2);
 
   Network network1;
 
-  network1.add(replica1.self());
-  network1.add(replica2.self());
+  network1.add(replica1.pid());
+  network1.add(replica2.pid());
 
   Coordinator coord1(2, &replica1, &network1);
 
@@ -1187,16 +1115,12 @@ TEST(CoordinatorTest, TruncateNotLearnedFill)
     EXPECT_EQ(11, result.get());
   }
 
-  terminate(replica1);
-  wait(replica1);
-
-  ReplicaProcess replica3(file3);
-  spawn(replica3);
+  Replica replica3(file3);
 
   Network network2;
 
-  network2.add(replica2.self());
-  network2.add(replica3.self());
+  network2.add(replica2.pid());
+  network2.add(replica3.pid());
 
   Coordinator coord2(2, &replica3, &network2);
 
@@ -1209,35 +1133,93 @@ TEST(CoordinatorTest, TruncateNotLearnedFill)
   }
 
   {
-    Result<std::list<std::pair<uint64_t, std::string> > > result =
-      coord2.read(6, 10);
-    EXPECT_TRUE(result.isError());
-    EXPECT_EQ("Attempted to read truncated position", result.error());
+    Future<std::list<Action> > actions = replica3.read(6, 10);
+    ASSERT_TRUE(actions.await(2.0));
+    ASSERT_TRUE(actions.isFailed());
+    EXPECT_EQ("Bad read range (truncated position)", actions.failure());
   }
 
   {
-    Result<std::list<std::pair<uint64_t, std::string> > > result =
-      coord2.read(7, 11);
-    ASSERT_TRUE(result.isSome());
-    const std::list<std::pair<uint64_t, std::string> >& list = result.get();
-    EXPECT_EQ(4, list.size());
-    std::list<std::pair<uint64_t, std::string> >::const_iterator iterator;
-    for (iterator = list.begin(); iterator != list.end(); ++iterator) {
-      EXPECT_EQ(utils::stringify(iterator->first), iterator->second);
+    Future<std::list<Action> > actions = replica3.read(7, 10);
+    ASSERT_TRUE(actions.await(2.0));
+    ASSERT_TRUE(actions.isReady());
+    EXPECT_EQ(4, actions.get().size());
+    foreach (const Action& action, actions.get()) {
+      ASSERT_TRUE(action.has_type());
+      ASSERT_EQ(Action::APPEND, action.type());
+      EXPECT_EQ(utils::stringify(action.position()), action.append().bytes());
     }
   }
-
-  terminate(replica2);
-  wait(replica2);
-
-  terminate(replica3);
-  wait(replica3);
 
   utils::os::rm(file1);
   utils::os::rm(file2);
   utils::os::rm(file3);
 
   process::filter(NULL);
+}
+
+
+TEST(LogTest, WriteRead)
+{
+  const std::string file1 = ".log_tests_write_read1";
+  const std::string file2 = ".log_tests_write_read2";
+
+  utils::os::rm(file1);
+  utils::os::rm(file2);
+
+  Replica replica1(file1);
+
+  std::set<UPID> pids;
+  pids.insert(replica1.pid());
+
+  Log log(2, file2, pids);
+
+  Log::Writer writer(&log);
+
+  Result<Log::Position> position = writer.append("hello world");
+
+  ASSERT_TRUE(position.isSome());
+
+  Log::Reader reader(&log);
+
+  Result<std::list<Log::Entry> > entries =
+    reader.read(position.get(), position.get());
+
+  ASSERT_TRUE(entries.isSome());
+  ASSERT_EQ(1, entries.get().size());
+  EXPECT_EQ(position.get(), entries.get().front().position);
+  EXPECT_EQ("hello world", entries.get().front().data);
+
+  utils::os::rm(file1);
+  utils::os::rm(file2);
+}
+
+
+TEST(LogTest, Position)
+{
+  const std::string file1 = ".log_tests_write_read1";
+  const std::string file2 = ".log_tests_write_read2";
+
+  utils::os::rm(file1);
+  utils::os::rm(file2);
+
+  Replica replica1(file1);
+
+  std::set<UPID> pids;
+  pids.insert(replica1.pid());
+
+  Log log(2, file2, pids);
+
+  Log::Writer writer(&log);
+
+  Result<Log::Position> position = writer.append("hello world");
+
+  ASSERT_TRUE(position.isSome());
+
+  ASSERT_EQ(position.get(), log.position(position.get().identity()));
+
+  utils::os::rm(file1);
+  utils::os::rm(file2);
 }
 
 

@@ -1,7 +1,6 @@
 #ifndef __LOG_COORDINATOR_HPP__
 #define __LOG_COORDINATOR_HPP__
 
-#include <list>
 #include <string>
 
 #include <process/process.hpp>
@@ -20,14 +19,14 @@ namespace log {
 
 using namespace process;
 
-// TODO(benh): Abstract away the concept of a "group" so that we can
-// inject a ZooKeeper based group.
+// TODO(benh): Pass timeouts into the coordinator functions rather
+// than have hard coded timeouts within.
 
 class Coordinator
 {
 public:
   Coordinator(int quorum,
-              ReplicaProcess* replica,
+              Replica* replica,
               Network* group);
 
   ~Coordinator();
@@ -49,13 +48,6 @@ public:
   // none means the truncate failed (e.g., due to timeout), but can be
   // retried.
   Result<uint64_t> truncate(uint64_t to);
-
-  // Returns the result of trying to read entries between from and to,
-  // with no-ops and truncates filtered out. A result of none means
-  // the read failed (e.g., due to timeout), but can be retried.
-  Result<std::list<std::pair<uint64_t, std::string> > > read(
-      uint64_t from,
-      uint64_t to);
 
 private:
   // Helper that tries to achieve consensus of the specified action. A
@@ -91,7 +83,7 @@ private:
 
   int quorum; // Quorum size.
 
-  ReplicaProcess* replica; // Local log replica.
+  Replica* replica; // Local log replica.
 
   Network* network; // Used to broadcast requests and messages to replicas.
 

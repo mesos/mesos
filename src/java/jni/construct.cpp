@@ -35,12 +35,12 @@ T parse(const void* data, int size)
 template <>
 string construct(JNIEnv* env, jobject jobj)
 {
-  string s;
-  jstring jstr = (jstring) jobj;
-  const char *str = (const char *) env->GetStringUTFChars(jstr, NULL);
-  s = str;
-  env->ReleaseStringUTFChars(jstr, str);
-  return s;
+  jstring js = (jstring) jobj;
+  const char* s = env->GetStringUTFChars(js, NULL);
+  CHECK(s != NULL) << "Out of memory!";
+  string result(s);
+  env->ReleaseStringUTFChars(js, s);
+  return result;
 }
 
 
