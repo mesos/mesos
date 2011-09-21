@@ -419,7 +419,7 @@ TEST(CoordinatorTest, AppendRead)
   Coordinator coord(2, &replica1, &group);
 
   {
-    Result<uint64_t> result = coord.elect(1);
+    Result<uint64_t> result = coord.elect();
     ASSERT_TRUE(result.isSome());
     EXPECT_EQ(0, result.get());
   }
@@ -479,7 +479,7 @@ TEST(CoordinatorTest, AppendReadError)
   Coordinator coord(2, &replica1, &group);
 
   {
-    Result<uint64_t> result = coord.elect(1);
+    Result<uint64_t> result = coord.elect();
     ASSERT_TRUE(result.isSome());
     EXPECT_EQ(0, result.get());
   }
@@ -548,7 +548,7 @@ TEST(CoordinatorTest, DISABLED_ElectNoQuorum)
   Coordinator coord(2, &replica, &group);
 
   {
-    Result<uint64_t> result = coord.elect(1);
+    Result<uint64_t> result = coord.elect();
     ASSERT_TRUE(result.isNone());
   }
 
@@ -585,7 +585,7 @@ TEST(CoordinatorTest, DISABLED_AppendNoQuorum)
   Coordinator coord(2, &replica1, &group);
 
   {
-    Result<uint64_t> result = coord.elect(1);
+    Result<uint64_t> result = coord.elect();
     ASSERT_TRUE(result.isSome());
     EXPECT_EQ(0, result.get());
   }
@@ -632,7 +632,7 @@ TEST(CoordinatorTest, Failover)
   Coordinator coord1(2, &replica1, &group1);
 
   {
-    Result<uint64_t> result = coord1.elect(1);
+    Result<uint64_t> result = coord1.elect();
     ASSERT_TRUE(result.isSome());
     EXPECT_EQ(0, result.get());
   }
@@ -658,7 +658,7 @@ TEST(CoordinatorTest, Failover)
   Coordinator coord2(2, &replica2, &group2);
 
   {
-    Result<uint64_t> result = coord2.elect(2);
+    Result<uint64_t> result = coord2.elect();
     ASSERT_TRUE(result.isSome());
     EXPECT_EQ(position, result.get());
   }
@@ -709,7 +709,7 @@ TEST(CoordinatorTest, Demoted)
   Coordinator coord1(2, &replica1, &group1);
 
   {
-    Result<uint64_t> result = coord1.elect(1);
+    Result<uint64_t> result = coord1.elect();
     ASSERT_TRUE(result.isSome());
     EXPECT_EQ(0, result.get());
   }
@@ -732,7 +732,7 @@ TEST(CoordinatorTest, Demoted)
   Coordinator coord2(2, &replica2, &group2);
 
   {
-    Result<uint64_t> result = coord2.elect(2);
+    Result<uint64_t> result = coord2.elect();
     ASSERT_TRUE(result.isSome());
     EXPECT_EQ(position, result.get());
   }
@@ -801,7 +801,7 @@ TEST(CoordinatorTest, Fill)
   Coordinator coord1(2, &replica1, &group1);
 
   {
-    Result<uint64_t> result = coord1.elect(1);
+    Result<uint64_t> result = coord1.elect();
     ASSERT_TRUE(result.isSome());
     EXPECT_EQ(0, result.get());
   }
@@ -833,7 +833,9 @@ TEST(CoordinatorTest, Fill)
   Coordinator coord2(2, &replica3, &group2);
 
   {
-    Result<uint64_t> result = coord2.elect(2);
+    Result<uint64_t> result = coord2.elect();
+    ASSERT_TRUE(result.isNone());
+    result = coord2.elect();
     ASSERT_TRUE(result.isSome());
     EXPECT_EQ(position, result.get());
   }
@@ -896,7 +898,7 @@ TEST(CoordinatorTest, NotLearnedFill)
   Coordinator coord1(2, &replica1, &group1);
 
   {
-    Result<uint64_t> result = coord1.elect(1);
+    Result<uint64_t> result = coord1.elect();
     ASSERT_TRUE(result.isSome());
     EXPECT_EQ(0, result.get());
   }
@@ -928,7 +930,9 @@ TEST(CoordinatorTest, NotLearnedFill)
   Coordinator coord2(2, &replica3, &group2);
 
   {
-    Result<uint64_t> result = coord2.elect(2);
+    Result<uint64_t> result = coord2.elect();
+    ASSERT_TRUE(result.isNone());
+    result = coord2.elect();
     ASSERT_TRUE(result.isSome());
     EXPECT_EQ(position, result.get());
   }
@@ -982,7 +986,7 @@ TEST(CoordinatorTest, MultipleAppends)
   Coordinator coord(2, &replica1, &group);
 
   {
-    Result<uint64_t> result = coord.elect(1);
+    Result<uint64_t> result = coord.elect();
     ASSERT_TRUE(result.isSome());
     EXPECT_EQ(0, result.get());
   }
@@ -1053,7 +1057,7 @@ TEST(CoordinatorTest, MultipleAppendsNotLearnedFill)
   Coordinator coord1(2, &replica1, &group1);
 
   {
-    Result<uint64_t> result = coord1.elect(1);
+    Result<uint64_t> result = coord1.elect();
     ASSERT_TRUE(result.isSome());
     EXPECT_EQ(0, result.get());
   }
@@ -1082,7 +1086,9 @@ TEST(CoordinatorTest, MultipleAppendsNotLearnedFill)
   Coordinator coord2(2, &replica3, &group2);
 
   {
-    Result<uint64_t> result = coord2.elect(2);
+    Result<uint64_t> result = coord2.elect();
+    ASSERT_TRUE(result.isNone());
+    result = coord2.elect();
     ASSERT_TRUE(result.isSome());
     EXPECT_EQ(10, result.get());
   }
@@ -1143,7 +1149,7 @@ TEST(CoordinatorTest, Truncate)
   Coordinator coord(2, &replica1, &group);
 
   {
-    Result<uint64_t> result = coord.elect(1);
+    Result<uint64_t> result = coord.elect();
     ASSERT_TRUE(result.isSome());
     EXPECT_EQ(0, result.get());
   }
@@ -1230,7 +1236,7 @@ TEST(CoordinatorTest, TruncateNotLearnedFill)
   Coordinator coord1(2, &replica1, &group1);
 
   {
-    Result<uint64_t> result = coord1.elect(1);
+    Result<uint64_t> result = coord1.elect();
     ASSERT_TRUE(result.isSome());
     EXPECT_EQ(0, result.get());
   }
@@ -1265,7 +1271,9 @@ TEST(CoordinatorTest, TruncateNotLearnedFill)
   Coordinator coord2(2, &replica3, &group2);
 
   {
-    Result<uint64_t> result = coord2.elect(2);
+    Result<uint64_t> result = coord2.elect();
+    ASSERT_TRUE(result.isNone());
+    result = coord2.elect();
     ASSERT_TRUE(result.isSome());
     EXPECT_EQ(11, result.get());
   }

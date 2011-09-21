@@ -22,7 +22,6 @@ namespace protocol {
 // Some replica protocol declarations.
 extern Protocol<PromiseRequest, PromiseResponse> promise;
 extern Protocol<WriteRequest, WriteResponse> write;
-extern Protocol<CommitRequest, CommitResponse> commit;
 extern Protocol<LearnRequest, LearnResponse> learn;
 
 } // namespace protocol {
@@ -45,9 +44,6 @@ public:
 
   // Handles a request from a coordinator to write an action.
   void write(const WriteRequest& request);
-
-  // Handles a request from a coordinator to commit an action.
-  void commit(const CommitRequest& request);
 
   // Handles a request from a coordinator (or replica) to learn the
   // specified position in the log.
@@ -73,6 +69,9 @@ public:
 
   // Returns the last written position in the log.
   Result<uint64_t> ending();
+
+  // Returns the highest implicit promise this replica has given.
+  Result<uint64_t> promise();
 
 private:
   // Helper routines that write a record corresponding to the
