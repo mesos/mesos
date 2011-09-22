@@ -5,6 +5,8 @@
 
 #include "common/seconds.hpp"
 
+#include "zookeeper/credentials.hpp"
+
 namespace zookeeper {
 
 // Forward declaration.
@@ -63,7 +65,8 @@ public:
   // of host:port) with the given timeout at the specified znode.
   Group(const std::string& servers,
         const seconds& timeout,
-        const std::string& znode);
+        const std::string& znode,
+        const Option<Credentials>& credentials = Option<Credentials>());
   ~Group();
 
   // Returns the result of trying to join a "group" in ZooKeeper. If

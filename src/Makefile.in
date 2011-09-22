@@ -126,7 +126,8 @@ COMMON_OBJ = common/fatal.o common/lock.o detector/detector.o		\
 	     common/utils.o
 
 ifeq ($(WITH_ZOOKEEPER),1)
-  COMMON_OBJ += zookeeper/zookeeper.o zookeeper/group.o
+  COMMON_OBJ += zookeeper/zookeeper.o zookeeper/credentials.o	\
+                zookeeper/group.o
 endif
 
 EXEC_LIB_OBJ = exec/exec.o

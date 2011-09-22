@@ -11,6 +11,7 @@
 #include "common/strings.hpp"
 #include "common/utils.hpp"
 
+#include "zookeeper/credentials.hpp"
 #include "zookeeper/group.hpp"
 #include "zookeeper/watcher.hpp"
 #include "zookeeper/zookeeper.hpp"
@@ -33,12 +34,14 @@ namespace zookeeper {
 
 const double RETRY_SECONDS = 2.0; // Time to wait after retryable errors.
 
+
 class GroupProcess : public Process<GroupProcess>
 {
 public:
   GroupProcess(const string& servers,
                const seconds& timeout,
-               const string& znode);
+               const string& znode,
+               const Option<Credentials>& credentials = Option<Credentials>());
   ~GroupProcess();
 
   void initialize();
@@ -60,25 +63,38 @@ public:
   void deleted(const string& path);
 
 private:
-  Result<Group::Membership> doJoin(const std::string& info);
+  Result<Group::Membership> doJoin(const string& info);
   Result<bool> doCancel(const Group::Membership& membership);
   Result<string> doInfo(const Group::Membership& membership);
 
-  // Synchronizes pending operations with ZooKeeper (i.e., performs
-  // joins, cancels, infos, etc).
+  // Attempts to cache the current set of memberships.
+  bool cache();
+
+  // Updates any pending watches.
+  void update();
+
+  // Synchronizes pending operations with ZooKeeper and also attempts
+  // to cache the current set of memberships if necessary.
   bool sync();
 
   // Generic retry method. This mechanism is "generic" in the sense
   // that it is not specific to any particular operation, but rather
-  // attempts to perform all pending operations.
+  // attempts to perform all pending operations (including caching
+  // memberships if necessary).
   void retry(double seconds);
 
-  Option<std::string> error; // Potential non-retryable error.
+  // Fails all pending operations.
+  void abort();
 
-  const std::string servers;
+  Option<string> error; // Potential non-retryable error.
+
+  const string servers;
   const seconds timeout;
-  const std::string znode;
-  const ACL_vector acl;
+  const string znode;
+
+  Option<Credentials> credentials; // ZooKeeper credentials.
+
+  const ACL_vector acl; // Default ACL to use.
 
   Watcher* watcher;
   ZooKeeper* zk;
@@ -114,6 +130,9 @@ private:
 
   struct Watch
   {
+    Watch(const set<Group::Membership>& _expected)
+      : expected(_expected) {}
+    set<Group::Membership> expected;
     Promise<set<Group::Membership> > promise;
   };
 
@@ -128,18 +147,22 @@ private:
 
   map<Group::Membership, string> owned;
 
-  set<Group::Membership> memberships; // Cache of "all" memberships.
+  Option<set<Group::Membership> > memberships; // The cache.
 };
 
 
 GroupProcess::GroupProcess(
     const string& _servers,
     const seconds& _timeout,
-    const string& _znode)
+    const string& _znode,
+    const Option<Credentials>& _credentials)
   : servers(_servers),
     timeout(_timeout),
     znode(strings::remove(_znode, "/", strings::SUFFIX)),
-    acl(ZOO_OPEN_ACL_UNSAFE),
+    credentials(_credentials),
+    acl(_credentials.isSome()
+        ? EVERYONE_READ_CREATOR_ALL
+        : ZOO_OPEN_ACL_UNSAFE),
     state(DISCONNECTED),
     retrying(false)
 {}
@@ -177,6 +200,10 @@ Promise<Group::Membership> GroupProcess::join(const string& info)
   // TODO(benh): Write a test to see how ZooKeeper fails setting znode
   // data when the data is larger than 1 MB so we know whether or not
   // to check for that here.
+
+  // TODO(benh): Only attempt if the pending queue is empty so that a
+  // client can assume a happens-before ordering of operations (i.e.,
+  // the first request will happen before the second, etc).
 
   Result<Group::Membership> membership = doJoin(info);
 
@@ -216,6 +243,10 @@ Promise<bool> GroupProcess::cancel(const Group::Membership& membership)
     return cancel.promise;
   }
 
+  // TODO(benh): Only attempt if the pending queue is empty so that a
+  // client can assume a happens-before ordering of operations (i.e.,
+  // the first request will happen before the second, etc).
+
   Result<bool> cancellation = doCancel(membership);
 
   if (cancellation.isNone()) { // Try again later.
@@ -248,6 +279,10 @@ Promise<string> GroupProcess::info(const Group::Membership& membership)
     return info.promise;
   }
 
+  // TODO(benh): Only attempt if the pending queue is empty so that a
+  // client can assume a happens-before ordering of operations (i.e.,
+  // the first request will happen before the second, etc).
+
   Result<string> result = doInfo(membership);
 
   if (result.isNone()) { // Try again later.
@@ -271,13 +306,36 @@ Promise<set<Group::Membership> > GroupProcess::watch(
     Promise<set<Group::Membership> > promise;
     promise.fail(error.get());
     return promise;
-  } else if (memberships != expected) {
-    return memberships;
   }
 
-  Watch watch;
-  pending.watches.push(watch);
-  return watch.promise;
+  // To guarantee causality, we must invalidate our cache of
+  // memberships after any updates are made to the group (i.e., joins
+  // and cancels). This is because a client that just learned of a
+  // successful join shouldn't invoke watch and get a set of
+  // memberships without their membership present (which is possible
+  // if we return a cache of memberships that hasn't yet been updated
+  // via a ZooKeeper event) unless that membership has since expired
+  // (or been deleted, e.g., via operator error). Thus, we do a
+  // membership "roll call" for each watch in order to make sure all
+  // causal relationships are satisfied.
+
+  memberships.isSome() || cache();
+
+  if (memberships.isNone()) { // Try again later.
+    if (!retrying) {
+      delay(RETRY_SECONDS, self(), &GroupProcess::retry, RETRY_SECONDS);
+      retrying = true;
+    }
+    Watch watch(expected);
+    pending.watches.push(watch);
+    return watch.promise;
+  } else if (memberships.get() == expected) { // Just wait for updates.
+    Watch watch(expected);
+    pending.watches.push(watch);
+    return watch.promise;
+  }
+
+  return memberships.get();
 }
 
 
@@ -298,6 +356,28 @@ Promise<Option<int64_t> > GroupProcess::session()
 void GroupProcess::connected(bool reconnect)
 {
   if (!reconnect) {
+    // Authenticate if necessary.
+    if (credentials.isSome()) {
+      const string& username = credentials.get().username;
+      const string& password = credentials.get().password;
+
+      LOG(INFO) << "Authenticating with ZooKeeper using "
+                << username << ":XXXXX";
+
+      int code = zk->authenticate(username, password);
+
+      if (code != ZOK) { // TODO(benh): Authentication retries?
+        Try<string> message = strings::format(
+            "Failed to authenticate username '%s' with ZooKeeper: %s",
+            username.c_str(), zk->message(code));
+        error = message.isSome()
+          ? message.get()
+          : "Failed to authenticate with ZooKeeper";
+        abort(); // Cancels everything pending.
+        return;
+      }
+    }
+
     CHECK(znode.size() == 0 || znode.at(znode.size() - 1) != '/');
 
     // Create directory path znodes as necessary.
@@ -314,7 +394,6 @@ void GroupProcess::connected(bool reconnect)
       int code = zk->create(prefix, "", acl, 0, NULL);
 
       if (code == ZINVALIDSTATE || (code != ZOK && zk->retryable(code))) {
-        // TODO(benh): Handle authentication..
         CHECK(zk->getState() != ZOO_AUTH_FAILED_STATE);
         return; // Try again later.
       } else if (code != ZOK && code != ZNODEEXISTS) {
@@ -324,18 +403,15 @@ void GroupProcess::connected(bool reconnect)
         error = message.isSome()
           ? message.get()
           : "Failed to create node in ZooKeeper";
-        return; // TODO(benh): Everything pending is still pending!
+        abort(); // Cancels everything pending.
+        return;
       }
     }
   }
 
   state = CONNECTED;
 
-  LOG(INFO) << (reconnect ? "Re-c" : "C") << "onnected to ZooKeeper";
-
-  sync(); // Handle pending.
-
-  updated(znode); // Also sets a watch on the children.
+  sync(); // Handle pending (and cache memberships).
 }
 
 
@@ -347,8 +423,7 @@ void GroupProcess::reconnecting()
 
 void GroupProcess::expired()
 {
-  // No need to clear memberships, next time we are connected we'll
-  // re-run GroupProcess::updated and handle any changes.
+  memberships = Option<set<Group::Membership> >::none();
   owned.clear();
   state = DISCONNECTED;
   delete zk;
@@ -361,49 +436,15 @@ void GroupProcess::updated(const string& path)
 {
   CHECK(znode == path);
 
-  // Check for any new memberships.
-  vector<string> results;
+  cache(); // Update cache (will invalidate first).
 
-  int code = zk->getChildren(znode, true, &results); // Sets the watch!
-
-  if (code == ZINVALIDSTATE || (code != ZOK && zk->retryable(code))) {
-    // TODO(benh): Handle authentication..
-    CHECK(zk->getState() != ZOO_AUTH_FAILED_STATE);
-    return;
-  } else if (code != ZOK) {
-    Try<string> message = strings::format(
-        "Non-retryable error attempting to get children of '%s'"
-        " in ZooKeeper: %s", znode.c_str(), zk->message(code));
-    error = message.isSome()
-      ? message.get()
-      : "Non-retryable error attempting to get children in ZooKeeper";
-    return; // TODO(benh): Everything pending is still pending!
-  }
-
-  // Collect all the current memberships.
-  set<Group::Membership> current;
-
-  foreach (const string& result, results) {
-    Try<uint64_t> sequence = utils::numify<uint64_t>(result);
-
-    // Skip it if it couldn't be converted to a number.
-    if (sequence.isError()) {
-      LOG(WARNING) << "Found non-sequence node '" << result
-                   << "' at '" << znode << "' in ZooKeeper";
-      continue;
+  if (memberships.isNone()) { // Something changed so we must try again later.
+    if (!retrying) {
+      delay(RETRY_SECONDS, self(), &GroupProcess::retry, RETRY_SECONDS);
+      retrying = true;
     }
-
-    current.insert(Group::Membership(sequence.get()));
-  }
-
-  if (memberships != current) {
-    // Invoke the watches.
-    while (!pending.watches.empty()) {
-      pending.watches.front().promise.set(current);
-      pending.watches.pop();
-    }
-
-    memberships = current;
+  } else {
+    update(); // Update any pending watches.
   }
 }
 
@@ -433,7 +474,6 @@ Result<Group::Membership> GroupProcess::doJoin(const string& info)
                         ZOO_SEQUENCE | ZOO_EPHEMERAL, &result);
 
   if (code == ZINVALIDSTATE || (code != ZOK && zk->retryable(code))) {
-    // TODO(benh): Handle authentication..
     CHECK(zk->getState() != ZOO_AUTH_FAILED_STATE);
     return Result<Group::Membership>::none();
   } else if (code != ZOK) {
@@ -444,6 +484,9 @@ Result<Group::Membership> GroupProcess::doJoin(const string& info)
         message.isSome() ? message.get()
         : "Failed to create ephemeral node in ZooKeeper");
   }
+
+  // Invalidate the cache.
+  memberships = Option<set<Group::Membership> >::none();
 
   // Save the sequence number but only grab the basename. Example:
   // "/path/to/znode/0000000131" => "0000000131".
@@ -475,7 +518,6 @@ Result<bool> GroupProcess::doCancel(const Group::Membership& membership)
   int code = zk->remove(path, -1);
 
   if (code == ZINVALIDSTATE || (code != ZOK && zk->retryable(code))) {
-    // TODO(benh): Handle authentication..
     CHECK(zk->getState() != ZOO_AUTH_FAILED_STATE);
     return Result<bool>::none();
   } else if (code != ZOK) {
@@ -486,6 +528,9 @@ Result<bool> GroupProcess::doCancel(const Group::Membership& membership)
         message.isSome() ? message.get()
         : "Failed to remove ephemeral node in ZooKeeper");
   }
+
+  // Invalidate the cache.
+  memberships = Option<set<Group::Membership> >::none();
 
   owned.erase(membership);
 
@@ -512,7 +557,6 @@ Result<string> GroupProcess::doInfo(const Group::Membership& membership)
   int code = zk->get(path, false, &result, NULL);
 
   if (code == ZINVALIDSTATE || (code != ZOK && zk->retryable(code))) {
-    // TODO(benh): Handle authentication.
     CHECK(zk->getState() != ZOO_AUTH_FAILED_STATE);
     return Result<string>::none();
   } else if (code != ZOK) {
@@ -525,6 +569,67 @@ Result<string> GroupProcess::doInfo(const Group::Membership& membership)
   }
 
   return result;
+}
+
+
+bool GroupProcess::cache()
+{
+  // Invalidate first.
+  memberships = Option<set<Group::Membership> >::none();
+
+  // Get all children to determine current memberships.
+  vector<string> results;
+
+  int code = zk->getChildren(znode, true, &results); // Sets the watch!
+
+  if (code == ZINVALIDSTATE || (code != ZOK && zk->retryable(code))) {
+    CHECK(zk->getState() != ZOO_AUTH_FAILED_STATE);
+    return false;
+  } else if (code != ZOK) {
+    Try<string> message = strings::format(
+        "Non-retryable error attempting to get children of '%s'"
+        " in ZooKeeper: %s", znode.c_str(), zk->message(code));
+    error = message.isSome()
+      ? message.get()
+      : "Non-retryable error attempting to get children in ZooKeeper";
+    abort(); // Cancels everything pending.
+    return false;
+  }
+
+  // Convert results to memberships.
+  set<Group::Membership> current;
+
+  foreach (const string& result, results) {
+    Try<uint64_t> sequence = utils::numify<uint64_t>(result);
+
+    // Skip it if it couldn't be converted to a number.
+    if (sequence.isError()) {
+      LOG(WARNING) << "Found non-sequence node '" << result
+                   << "' at '" << znode << "' in ZooKeeper";
+      continue;
+    }
+
+    current.insert(Group::Membership(sequence.get()));
+  }
+
+  memberships = current;
+
+  return true;
+}
+
+
+void GroupProcess::update()
+{
+  CHECK(memberships.isSome());
+  size_t size = pending.watches.size();
+  for (int i = 0; i < size; i++) {
+    if (memberships.get() != pending.watches.front().expected) {
+      pending.watches.front().promise.set(memberships.get());
+    } else {
+      pending.watches.push(pending.watches.front());
+    }
+    pending.watches.pop();
+  }
 }
 
 
@@ -574,6 +679,15 @@ bool GroupProcess::sync()
     pending.infos.pop();
   }
 
+  // Get cache of memberships if we don't have one.
+  if (memberships.isNone()) {
+    if (!cache()) {
+      return false; // Try again later (if no error).
+    } else {
+      update(); // Update any pending watches.
+    }
+  }
+
   return true;
 }
 
@@ -584,7 +698,7 @@ void GroupProcess::retry(double seconds)
     retrying = false; // Stop retrying, we'll sync at reconnect (if no error).
   } else if (error.isNone() && state == CONNECTED) {
     bool synced = sync(); // Might get another retryable error.
-    if (!synced) {
+    if (!synced && error.isNone()) {
       seconds = std::min(seconds * 2.0, 60.0); // Backoff.
       delay(seconds, self(), &GroupProcess::retry, seconds);
     } else {
@@ -594,11 +708,33 @@ void GroupProcess::retry(double seconds)
 }
 
 
+template <typename T>
+void fail(queue<T>* queue, const string& message)
+{
+  while (!queue->empty()) {
+    queue->front().promise.fail(message);
+    queue->pop();
+  }
+}
+
+
+void GroupProcess::abort()
+{
+  CHECK(error.isSome());
+
+  fail(&pending.joins, error.get());
+  fail(&pending.cancels, error.get());
+  fail(&pending.infos, error.get());
+  fail(&pending.watches, error.get());
+}
+
+
 Group::Group(const string& servers,
              const seconds& timeout,
-             const string& znode)
+             const string& znode,
+             const Option<Credentials>& credentials)
 {
-  process = new GroupProcess(servers, timeout, znode);
+  process = new GroupProcess(servers, timeout, znode, credentials);
   spawn(process);
   dispatch(process, &GroupProcess::initialize);
 }
@@ -612,7 +748,7 @@ Group::~Group()
 }
 
 
-Future<Group::Membership> Group::join(const std::string& info)
+Future<Group::Membership> Group::join(const string& info)
 {
   return dispatch(process, &GroupProcess::join, info);
 }
