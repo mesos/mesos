@@ -8,12 +8,15 @@
 
 #include "common/result.hpp"
 
+#include "log/network.hpp"
 #include "log/replica.hpp"
 
 #include "messages/log.hpp"
 
 
-namespace mesos { namespace internal { namespace log {
+namespace mesos {
+namespace internal {
+namespace log {
 
 using namespace process;
 
@@ -25,7 +28,7 @@ class Coordinator
 public:
   Coordinator(int quorum,
               ReplicaProcess* replica,
-              GroupProcess* group);
+              Network* group);
 
   ~Coordinator();
 
@@ -90,13 +93,15 @@ private:
 
   ReplicaProcess* replica; // Local log replica.
 
-  GroupProcess* group; // Used to broadcast requests and messages to replicas.
+  Network* network; // Used to broadcast requests and messages to replicas.
 
   uint64_t id; // Coordinator ID.
 
   uint64_t index; // Last position written in the log.
 };
 
-}}} // namespace mesos { namespace internal { namespace log {
+} // namespace log {
+} // namespace internal {
+} // namespace mesos {
 
 #endif // __LOG_COORDINATOR_HPP__
