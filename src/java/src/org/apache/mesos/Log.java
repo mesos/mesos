@@ -27,6 +27,10 @@ public class Log {
       return "Position " + value;
     }
 
+    /**
+     * Returns an "identity" off this position, useful for serializing
+     * to logs or across communication mediums.
+     */
     public byte[] identity() {
       byte[] bytes = new byte[8];
       bytes[0] = (byte) (0xff & (value >> 56));
@@ -95,18 +99,26 @@ public class Log {
     }
 
     /**
-     * Attepts to read from the log between the specified
-     * positions. If either of the positions are invalid, an
+     * Attepts to read from the log between the specified positions
+     * (inclusive). If either of the positions are invalid, an
      * OperationFailedException will get thrown. Unfortunately, this
      * will also get thrown in other circumstances (e.g., disk
-     * failure) so unfortunately it is currently impossible to tell
-     * these two cases apart.
+     * failure) and therefore it is currently impossible to tell these
+     * two cases apart.
      */
     public native List<Entry> read(Position from, Position to)
       throws TimeoutException, OperationFailedException;
 
+    /**
+     * Returns the beginning position of the log (might be out of date
+     * with respect to another replica).
+     */
     public native Position beginning();
 
+    /**
+     * Returns the ending position of the log (might be out of date
+     * with respect to another replica).
+     */
     public native Position ending();
 
     protected native void initialize(Log log);
@@ -123,9 +135,25 @@ public class Log {
       initialize(log);
     }
 
+    /**
+     * Attepts to read from the log between the specified positions
+     * (inclusive). If either of the positions are invalid, an
+     * OperationFailedException will get thrown. Unfortunately, this
+     * will also get thrown in other circumstances (e.g., disk
+     * failure) and therefore it is currently impossible to tell these
+     * two cases apart.
+     */
     public native Position append(byte[] data)
       throws TimeoutException, WriterFailedException;
 
+    /**
+     * Attepts to truncate the log (from the beginning to the
+     * specified position exclusive) If the position is invalid, an
+     * OperationFailedException will get thrown. Unfortunately, this
+     * will also get thrown in other circumstances (e.g., disk
+     * failure) and therefore it is currently impossible to tell these
+     * two cases apart.
+     */
     public native Position truncate(Position to)
       throws TimeoutException, WriterFailedException;
 
@@ -152,6 +180,10 @@ public class Log {
     initialize(quorum, path, servers, timeout, unit, znode);
   }
 
+  /**
+   * Returns a position based off of the bytes recovered from
+   * Position.identity().
+   */
   public Position position(byte[] identity) {
     long value =
       ((long) (identity[0] & 0xff) << 56) |
