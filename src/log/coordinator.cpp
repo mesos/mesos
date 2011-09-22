@@ -98,7 +98,7 @@ Result<uint64_t> Coordinator::elect()
 
     Future<set<uint64_t> > positions = replica->missing(index);
 
-    positions.await();
+    positions.await();  // TODO(benh): Have timeout get passed in!
 
     if (positions.isFailed()) {
       return Result<uint64_t>::error(positions.failure());

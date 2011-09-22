@@ -2,6 +2,7 @@
 #define __LOG_COORDINATOR_HPP__
 
 #include <string>
+#include <vector>
 
 #include <process/process.hpp>
 
