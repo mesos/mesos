@@ -21,7 +21,7 @@ namespace internal {
 namespace log {
 
 Coordinator::Coordinator(int _quorum,
-                         ReplicaProcess* _replica,
+                         Replica* _replica,
                          Network* _network)
   : elected(false),
     quorum(_quorum),
@@ -39,15 +39,17 @@ Result<uint64_t> Coordinator::elect()
   CHECK(!elected);
 
   // Get the highest known promise from our local replica.
-  Result<uint64_t> result = call(replica, &ReplicaProcess::promise);
+  Future<uint64_t> promise = replica->promised();
 
-  if (result.isError()) {
-    return Result<uint64_t>::error(result.error());
-  } else if (result.isNone()) {
-    return Result<uint64_t>::none();
+  promise.await(); // TODO(benh): Take a timeout and use it here!
+
+  if (promise.isFailed()) {
+    return Result<uint64_t>::error(promise.failure());
   }
 
-  id = std::max(id, result.get()) + 1; // Try the next highest!
+  CHECK(promise.isReady()) << "Not expecting a discarded future!";
+
+  id = std::max(id, promise.get()) + 1; // Try the next highest!
 
   PromiseRequest request;
   request.set_id(id);
@@ -58,8 +60,8 @@ Result<uint64_t> Coordinator::elect()
 
   Option<Future<PromiseResponse> > option;
   int okays = 0;
-  
-  Timeout timeout = 1.0;
+
+  Timeout timeout = 1.0; // TODO(benh): Have timeout get passed in!
 
   do {
     option = select(futures, timeout.remaining());
@@ -92,11 +94,19 @@ Result<uint64_t> Coordinator::elect()
     // Usually we could do this lazily, however, a local learned
     // position might have been truncated, so we actually need to
     // catchup the local replica all the way to the end of the log
-    // before we can perform any local reads.
-    // TODO(benh): Dispatch and timed wait on future instead?
-    set<uint64_t> positions = call(replica, &ReplicaProcess::missing, index);
+    // before we can perform any up-to-date local reads.
 
-    foreach (uint64_t position, positions) {
+    Future<set<uint64_t> > positions = replica->missing(index);
+
+    positions.await();  // TODO(benh): Have timeout get passed in!
+
+    if (positions.isFailed()) {
+      return Result<uint64_t>::error(positions.failure());
+    }
+
+    CHECK(positions.isReady()) << "Not expecting a discarded future!";
+
+    foreach (uint64_t position, positions.get()) {
       Result<Action> result = fill(position);
       if (result.isError()) {
         return Result<uint64_t>::error(result.error());
@@ -174,78 +184,6 @@ Result<uint64_t> Coordinator::truncate(uint64_t to)
 }
 
 
-Result<list<pair<uint64_t, string> > > Coordinator::read(
-    uint64_t from,
-    uint64_t to)
-{
-  LOG(INFO) << "Coordinator requested read from " << from << " -> " << to;
-
-  if (!elected) {
-    return Result<list<pair<uint64_t, string> > >::error(
-        "Coordinator not elected");
-  } else if (from == 0) { // TODO(benh): Fix this hack!
-    return Result<list<pair<uint64_t, string> > >::error(
-        "Bad read range (from == 0)");
-  } else if (to < from) {
-    return Result<list<pair<uint64_t, string> > >::error(
-        "Bad read range (to < from)");
-  } else if (index <= from) {
-    return Result<list<pair<uint64_t, string> > >::error(
-        "Bad read range (index <= from)");
-  }
-
-  list<Future<Result<Action> > > futures;
-
-  for (uint64_t position = from; position <= to; position++) {
-    futures.push_back(dispatch(replica, &ReplicaProcess::read, position));
-  }
-
-  // TODO(benh): Implement 'collect' for lists of futures, use below.
-
-  // Collect actions for each position.
-  list<Action> actions;
-
-  foreach (const Future<Result<Action> >& future, futures) {
-    future.await();
-
-    if (future.isFailed()) {
-      return Result<list<pair<uint64_t, string> > >::error(future.failure());
-    }
-
-    CHECK(future.isReady());
-
-    const Result<Action>& result = future.get();
-    if (result.isError()) {
-      return Result<list<pair<uint64_t, string> > >::error(result.error());
-    } else if (result.isNone()) {
-      LOG(FATAL) << "Coordinator's local replica missing positions!";
-    } else {
-      CHECK(result.isSome());
-      const Action& action = result.get();
-      CHECK(action.has_learned() && action.learned())
-        << "Coordinator's local replica has unlearned positions!";
-      actions.push_back(action);
-    }
-  }
-
-  // Filter out all the no-ops and truncates. TODO(benh): Get
-  // convinced that there can't be a truncate action someplace else in
-  // the log which would eliminate what we are about to return!
-  list<pair<uint64_t, string> > appends;
-
-  foreach (const Action& action, actions) {
-    CHECK(action.has_performed());
-    CHECK(action.has_learned() && action.learned());
-    CHECK(action.has_type());
-    if (action.type() == Action::APPEND) {
-      appends.push_back(make_pair(action.position(), action.append().bytes()));
-    }
-  }
-
-  return appends;
-}
-
-
 Result<uint64_t> Coordinator::write(const Action& action)
 {
   LOG(INFO) << "Coordinator attempting to write "
@@ -298,7 +236,7 @@ Result<uint64_t> Coordinator::write(const Action& action)
   Option<Future<WriteResponse> > option;
   int okays = 0;
 
-  Timeout timeout = 1.0;
+  Timeout timeout = 1.0; // TODO(benh): Have timeout get passed in!
 
   do {
     option = select(futures, timeout.remaining());
@@ -367,21 +305,22 @@ Result<uint64_t> Coordinator::commit(const Action& action)
       LOG(FATAL) << "Unknown Action::Type!";
   }
 
-  // We communicate with the *local* replica just as the others:
-  // asynchronously via messages. However, rather than add the
+  // We send a write request to the *local* replica just as the
+  // others: asynchronously via messages. However, rather than add the
   // complications of dealing with timeouts for local operations
   // (especially since we are trying to commit something), we make
   // things simpler and block on the response from the local replica.
+  // TODO(benh): Add a non-message based way to do this write.
 
-  Future<WriteResponse> future = protocol::write(replica->self(), request);
+  Future<WriteResponse> future = protocol::write(replica->pid(), request);
 
-  future.await();
+  future.await(); // TODO(benh): Let it timeout, but consider it a failure.
 
   if (future.isFailed()) {
     return Result<uint64_t>::error(future.failure());
   }
 
-  CHECK(future.isReady());
+  CHECK(future.isReady()) << "Not expecting a discarded future!";
 
   const WriteResponse& response = future.get();
   CHECK(response.id() == request.id());
@@ -426,7 +365,7 @@ Result<Action> Coordinator::fill(uint64_t position)
   Option<Future<PromiseResponse> > option;
   list<PromiseResponse> responses;
 
-  Timeout timeout = 1.0;
+  Timeout timeout = 1.0; // TODO(benh): Have timeout get passed in!
 
   do {
     option = select(futures, timeout.remaining());
@@ -528,7 +467,7 @@ set<Future<Res> > Coordinator::remotecast(
     const Req& req)
 {
   set<UPID> filter;
-  filter.insert(replica->self());
+  filter.insert(replica->pid());
   Future<set<Future<Res> > > futures =
     network->broadcast(protocol, req, filter);
   futures.await();
@@ -541,7 +480,7 @@ template <typename M>
 void Coordinator::remotecast(const M& m)
 {
   set<UPID> filter;
-  filter.insert(replica->self());
+  filter.insert(replica->pid());
   network->broadcast(m, filter);
 }
 
