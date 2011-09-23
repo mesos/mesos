@@ -311,10 +311,10 @@ protected:
     VLOG(1) << "Stopping the framework";
 
     // Whether or not we send an unregister message, we want to
-    // terminate this process ...
+    // terminate this process.
     terminate(self());
 
-    if (!failover) {
+    if (connected && !failover) {
       UnregisterFrameworkMessage message;
       message.mutable_framework_id()->MergeFrom(frameworkId);
       send(master, message);
