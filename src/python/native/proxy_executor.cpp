@@ -19,10 +19,10 @@ void ProxyExecutor::init(ExecutorDriver* driver,
                          const ExecutorArgs& args)
 {
   InterpreterLock lock;
-  
+
   PyObject* argsObj = NULL;
   PyObject* res = NULL;
-  
+
   argsObj = createPythonProtobuf(args, "ExecutorArgs");
   if (argsObj == NULL) {
     goto cleanup; // createPythonProtobuf will have set an exception
@@ -41,7 +41,7 @@ void ProxyExecutor::init(ExecutorDriver* driver,
 cleanup:
   if (PyErr_Occurred()) {
     PyErr_Print();
-    driver->stop();
+    driver->abort();
   }
   Py_XDECREF(argsObj);
   Py_XDECREF(res);
@@ -52,10 +52,10 @@ void ProxyExecutor::launchTask(ExecutorDriver* driver,
                                const TaskDescription& task)
 {
   InterpreterLock lock;
-  
+
   PyObject* taskObj = NULL;
   PyObject* res = NULL;
-  
+
   taskObj = createPythonProtobuf(task, "TaskDescription");
   if (taskObj == NULL) {
     goto cleanup; // createPythonProtobuf will have set an exception
@@ -74,7 +74,7 @@ void ProxyExecutor::launchTask(ExecutorDriver* driver,
 cleanup:
   if (PyErr_Occurred()) {
     PyErr_Print();
-    driver->stop();
+    driver->abort();
   }
   Py_XDECREF(taskObj);
   Py_XDECREF(res);
@@ -85,10 +85,10 @@ void ProxyExecutor::killTask(ExecutorDriver* driver,
                              const TaskID& taskId)
 {
   InterpreterLock lock;
-  
+
   PyObject* taskIdObj = NULL;
   PyObject* res = NULL;
-  
+
   taskIdObj = createPythonProtobuf(taskId, "TaskID");
   if (taskIdObj == NULL) {
     goto cleanup; // createPythonProtobuf will have set an exception
@@ -107,7 +107,7 @@ void ProxyExecutor::killTask(ExecutorDriver* driver,
 cleanup:
   if (PyErr_Occurred()) {
     PyErr_Print();
-    driver->stop();
+    driver->abort();
   }
   Py_XDECREF(taskIdObj);
   Py_XDECREF(res);
@@ -118,9 +118,9 @@ void ProxyExecutor::frameworkMessage(ExecutorDriver* driver,
                                      const string& data)
 {
   InterpreterLock lock;
-  
+
   PyObject* res = NULL;
-  
+
   res = PyObject_CallMethod(impl->pythonExecutor,
                             (char*) "frameworkMessage",
                             (char*) "Os",
@@ -134,7 +134,7 @@ void ProxyExecutor::frameworkMessage(ExecutorDriver* driver,
 cleanup:
   if (PyErr_Occurred()) {
     PyErr_Print();
-    driver->stop();
+    driver->abort();
   }
   Py_XDECREF(res);
 }
@@ -154,7 +154,7 @@ void ProxyExecutor::shutdown(ExecutorDriver* driver)
 cleanup:
   if (PyErr_Occurred()) {
     PyErr_Print();
-    driver->stop();
+    driver->abort();
   }
   Py_XDECREF(res);
 }

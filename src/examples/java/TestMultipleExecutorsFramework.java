@@ -16,30 +16,14 @@ public class TestMultipleExecutorsFramework {
   static class MyScheduler implements Scheduler {
     int launchedTasks = 0;
     int finishedTasks = 0;
-    int totalTasks = 5;
+    final int totalTasks;
 
-    public MyScheduler() {}
+    public MyScheduler() {
+      this(5);
+    }
 
     public MyScheduler(int numTasks) {
       totalTasks = numTasks;
-    }
-
-    @Override
-    public String getFrameworkName(SchedulerDriver driver) {
-      return "Java test framework";
-    }
-
-    @Override
-    public ExecutorInfo getExecutorInfo(SchedulerDriver driver) {
-      try {
-        File file = new File("./test_executor");
-        return ExecutorInfo.newBuilder()
-          .setExecutorId(ExecutorID.newBuilder().setValue("default").build())
-          .setUri(file.getCanonicalPath())
-          .build();
-      } catch (Throwable t) {
-        throw new RuntimeException(t);
-      }
     }
 
     @Override
@@ -133,7 +117,7 @@ public class TestMultipleExecutorsFramework {
             barLaunched = true;
           }
 
-          driver.replyToOffer(offer.getId(), tasks);
+          driver.launchTasks(offer.getId(), tasks);
         }
       } catch (Throwable t) {
         throw new RuntimeException(t);
@@ -173,10 +157,21 @@ public class TestMultipleExecutorsFramework {
   public static void main(String[] args) throws Exception {
     if (args.length < 1 || args.length > 2) {
       System.out.println("Invalid use: please specify a master");
-    } else if (args.length == 1) {
-      new MesosSchedulerDriver(new MyScheduler(),args[0]).run();
     } else {
-      new MesosSchedulerDriver(new MyScheduler(Integer.parseInt(args[1])), args[0]).run();
+      ExecutorInfo executorInfo;
+
+      File file = new File("./test_executor");
+      executorInfo = ExecutorInfo.newBuilder()
+                       .setExecutorId(ExecutorID.newBuilder().setValue("default").build())
+                       .setUri(file.getCanonicalPath())
+                       .build();
+
+      if (args.length == 1) {
+        new MesosSchedulerDriver(new MyScheduler(), "Java test framework", executorInfo, args[0]).run();
+      } else {
+        new MesosSchedulerDriver(new MyScheduler(Integer.parseInt(args[1])),
+                                 "Java test framework", executorInfo, args[0]).run();
+      }
     }
   }
 }

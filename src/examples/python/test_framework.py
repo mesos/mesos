@@ -16,17 +16,6 @@ class MyScheduler(mesos.Scheduler):
     self.tasksLaunched = 0
     self.tasksFinished = 0
 
-  def getFrameworkName(self, driver):
-    return "Python test framework"
-
-  def getExecutorInfo(self, driver):
-    frameworkDir = os.path.abspath(os.path.dirname(sys.argv[0]))
-    execPath = os.path.join(frameworkDir, "test_executor")
-    execInfo = mesos_pb2.ExecutorInfo()
-    execInfo.executor_id.value = "default"
-    execInfo.uri = execPath
-    return execInfo
-
   def registered(self, driver, fid):
     print "Registered with framework ID %s" % fid.value
 
@@ -57,7 +46,7 @@ class MyScheduler(mesos.Scheduler):
         mem.scalar.value = TASK_MEM
 
         tasks.append(task)
-      driver.replyToOffer(offer.id, tasks)
+        driver.launchTasks(offer.id, tasks)
 
   def statusUpdate(self, driver, update):
     print "Task %s is in state %d" % (update.task_id.value, update.state)
@@ -69,4 +58,12 @@ class MyScheduler(mesos.Scheduler):
 
 if __name__ == "__main__":
   print "Connecting to %s" % sys.argv[1]
-  mesos.MesosSchedulerDriver(MyScheduler(), sys.argv[1]).run()
+
+  frameworkDir = os.path.abspath(os.path.dirname(sys.argv[0]))
+  execPath = os.path.join(frameworkDir, "test_executor")
+  execInfo = mesos_pb2.ExecutorInfo()
+  execInfo.executor_id.value = "default"
+  execInfo.uri = execPath
+
+  mesos.MesosSchedulerDriver(MyScheduler(), "Python test framework",
+                             execInfo, sys.argv[1]).run()

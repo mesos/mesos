@@ -15,74 +15,14 @@ using std::map;
 
 namespace mesos { namespace python {
 
-string ProxyScheduler::getFrameworkName(SchedulerDriver* driver) {
-  InterpreterLock lock;
-  PyObject* res = PyObject_CallMethod(impl->pythonScheduler,
-                                      (char*) "getFrameworkName",
-                                      (char*) "O",
-                                      impl);
-  if (res == NULL) {
-    cerr << "Failed to call scheduler's getFrameworkName" << endl;
-    PyErr_Print();
-    driver->stop();
-    return "";
-  }
-  if (res == Py_None) {
-    cerr << "Scheduler's getFrameworkName returned None" << endl;
-    driver->stop();
-    return "";
-  }
-  char* chars = PyString_AsString(res);
-  if (chars == NULL) {
-    cerr << "Scheduler's getFrameworkName did not return a string" << endl;
-    PyErr_Print();
-    driver->stop();
-    Py_DECREF(res);
-    return "";
-  }
-  string str(chars);
-  Py_DECREF(res);
-  return str;
-};
-
-
-ExecutorInfo ProxyScheduler::getExecutorInfo(SchedulerDriver* driver) {
-  InterpreterLock lock;
-  ExecutorInfo info;
-  PyObject* res = PyObject_CallMethod(impl->pythonScheduler,
-                                      (char*) "getExecutorInfo",
-                                      (char*) "O",
-                                      impl);
-  if (res == NULL) {
-    cerr << "Failed to call scheduler's getExecutorInfo" << endl;
-    goto cleanup;
-  }
-  if (res == Py_None) {
-    PyErr_Format(PyExc_Exception, "Scheduler's getExecutorInfo returned None");
-    goto cleanup;
-  }
-  if (!readPythonProtobuf(res, &info)) {
-    PyErr_Format(PyExc_Exception, "Could not deserialize Python ExecutorInfo");
-    goto cleanup;
-  }
-cleanup:
-  if (PyErr_Occurred()) {
-    PyErr_Print();
-    driver->stop();
-  }
-  Py_XDECREF(res);
-  return info;
-};
-
-
 void ProxyScheduler::registered(SchedulerDriver* driver,
                                 const FrameworkID& frameworkId)
 {
   InterpreterLock lock;
-  
+
   PyObject* fid = NULL;
   PyObject* res = NULL;
-  
+
   fid = createPythonProtobuf(frameworkId, "FrameworkID");
   if (fid == NULL) {
     goto cleanup; // createPythonProtobuf will have set an exception
@@ -101,7 +41,7 @@ void ProxyScheduler::registered(SchedulerDriver* driver,
 cleanup:
   if (PyErr_Occurred()) {
     PyErr_Print();
-    driver->stop();
+    driver->abort();
   }
   Py_XDECREF(fid);
   Py_XDECREF(res);
@@ -141,7 +81,7 @@ void ProxyScheduler::resourceOffers(SchedulerDriver* driver,
 cleanup:
   if (PyErr_Occurred()) {
     PyErr_Print();
-    driver->stop();
+    driver->abort();
   }
   Py_XDECREF(list);
   Py_XDECREF(res);
@@ -152,10 +92,10 @@ void ProxyScheduler::offerRescinded(SchedulerDriver* driver,
                                     const OfferID& offerId)
 {
   InterpreterLock lock;
-  
+
   PyObject* oid = NULL;
   PyObject* res = NULL;
-  
+
   oid = createPythonProtobuf(offerId, "OfferID");
   if (oid == NULL) {
     goto cleanup; // createPythonProtobuf will have set an exception
@@ -174,7 +114,7 @@ void ProxyScheduler::offerRescinded(SchedulerDriver* driver,
 cleanup:
   if (PyErr_Occurred()) {
     PyErr_Print();
-    driver->stop();
+    driver->abort();
   }
   Py_XDECREF(oid);
   Py_XDECREF(res);
@@ -185,10 +125,10 @@ void ProxyScheduler::statusUpdate(SchedulerDriver* driver,
                                   const TaskStatus& status)
 {
   InterpreterLock lock;
-  
+
   PyObject* stat = NULL;
   PyObject* res = NULL;
-  
+
   stat = createPythonProtobuf(status, "TaskStatus");
   if (stat == NULL) {
     goto cleanup; // createPythonProtobuf will have set an exception
@@ -207,7 +147,7 @@ void ProxyScheduler::statusUpdate(SchedulerDriver* driver,
 cleanup:
   if (PyErr_Occurred()) {
     PyErr_Print();
-    driver->stop();
+    driver->abort();
   }
   Py_XDECREF(stat);
   Py_XDECREF(res);
@@ -224,7 +164,7 @@ void ProxyScheduler::frameworkMessage(SchedulerDriver* driver,
   PyObject* sid = NULL;
   PyObject* eid = NULL;
   PyObject* res = NULL;
-  
+
   sid = createPythonProtobuf(slaveId, "SlaveID");
   if (sid == NULL) {
     goto cleanup; // createPythonProtobuf will have set an exception
@@ -249,7 +189,7 @@ void ProxyScheduler::frameworkMessage(SchedulerDriver* driver,
 cleanup:
   if (PyErr_Occurred()) {
     PyErr_Print();
-    driver->stop();
+    driver->abort();
   }
   Py_XDECREF(sid);
   Py_XDECREF(eid);
@@ -261,10 +201,10 @@ void ProxyScheduler::slaveLost(SchedulerDriver* driver,
                                const SlaveID& slaveId)
 {
   InterpreterLock lock;
-  
+
   PyObject* sid = NULL;
   PyObject* res = NULL;
-  
+
   sid = createPythonProtobuf(slaveId, "SlaveID");
   if (sid == NULL) {
     goto cleanup; // createPythonProtobuf will have set an exception
@@ -283,7 +223,7 @@ void ProxyScheduler::slaveLost(SchedulerDriver* driver,
 cleanup:
   if (PyErr_Occurred()) {
     PyErr_Print();
-    driver->stop();
+    driver->abort();
   }
   Py_XDECREF(sid);
   Py_XDECREF(res);

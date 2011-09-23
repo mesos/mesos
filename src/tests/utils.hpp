@@ -87,8 +87,6 @@ void enterTestDirectory(const char* testCase, const char* testName);
 class MockScheduler : public Scheduler
 {
 public:
-  MOCK_METHOD1(getFrameworkName, std::string(SchedulerDriver*));
-  MOCK_METHOD1(getExecutorInfo, ExecutorInfo(SchedulerDriver*));
   MOCK_METHOD2(registered, void(SchedulerDriver*, const FrameworkID&));
   MOCK_METHOD2(resourceOffers, void(SchedulerDriver*,
                                     const std::vector<Offer>&));

@@ -9,8 +9,6 @@ import java.util.List;
  * Callback interface to be implemented by frameworks' schedulers.
  */
 public interface Scheduler {
-  public String getFrameworkName(SchedulerDriver driver);
-  public ExecutorInfo getExecutorInfo(SchedulerDriver driver);
   public void registered(SchedulerDriver driver, FrameworkID frameworkId);
   public void resourceOffers(SchedulerDriver driver, List<Offer> offers);
   public void offerRescinded(SchedulerDriver driver, OfferID offerId);

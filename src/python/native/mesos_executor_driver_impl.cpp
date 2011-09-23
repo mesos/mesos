@@ -73,8 +73,10 @@ PyTypeObject MesosExecutorDriverImplType = {
 PyMethodDef MesosExecutorDriverImpl_methods[] = {
   {"start", (PyCFunction) MesosExecutorDriverImpl_start, METH_NOARGS,
    "Start the driver to connect to Mesos"},
-  {"stop", (PyCFunction) MesosExecutorDriverImpl_stop, METH_NOARGS,
+  {"stop", (PyCFunction) MesosExecutorDriverImpl_stop, METH_VARARGS,
    "Stop the driver, disconnecting from Mesos"},
+  {"abort", (PyCFunction) MesosExecutorDriverImpl_abort, METH_NOARGS,
+   "Abort the driver, disallowing calls from and to the driver"},
   {"join", (PyCFunction) MesosExecutorDriverImpl_join, METH_NOARGS,
    "Wait for a running driver to disconnect from Mesos"},
   {"run", (PyCFunction) MesosExecutorDriverImpl_run, METH_NOARGS,
@@ -198,20 +200,39 @@ PyObject* MesosExecutorDriverImpl_start(MesosExecutorDriverImpl* self)
     return NULL;
   }
 
-  int res = self->driver->start();
-  return PyInt_FromLong(res); // Sets an exception if creating the int fails
+  Status status = self->driver->start();
+  return PyInt_FromLong(status); // Sets an exception if creating the int fails
 }
 
 
-PyObject* MesosExecutorDriverImpl_stop(MesosExecutorDriverImpl* self)
+PyObject* MesosExecutorDriverImpl_stop(MesosExecutorDriverImpl* self,
+                                       PyObject* args)
 {
   if (self->driver == NULL) {
     PyErr_Format(PyExc_Exception, "MesosExecutorDriverImpl.driver is NULL");
     return NULL;
   }
 
-  int res = self->driver->stop();
-  return PyInt_FromLong(res); // Sets an exception if creating the int fails
+  bool failover = false;
+
+  if (!PyArg_ParseTuple(args, "b", &failover)) {
+    return NULL;
+  }
+
+  Status status = self->driver->stop(failover);
+  return PyInt_FromLong(status); // Sets an exception if creating the int fails
+}
+
+
+PyObject* MesosExecutorDriverImpl_abort(MesosExecutorDriverImpl* self)
+{
+  if (self->driver == NULL) {
+    PyErr_Format(PyExc_Exception, "MesosExecutorDriverImpl.driver is NULL");
+    return NULL;
+  }
+
+  Status status = self->driver->abort();
+  return PyInt_FromLong(status); // Sets an exception if creating the int fails
 }
 
 
@@ -222,11 +243,11 @@ PyObject* MesosExecutorDriverImpl_join(MesosExecutorDriverImpl* self)
     return NULL;
   }
 
-  int res;
+  Status status;
   Py_BEGIN_ALLOW_THREADS
-  res = self->driver->join();
+  status = self->driver->join();
   Py_END_ALLOW_THREADS
-  return PyInt_FromLong(res); // Sets an exception if creating the int fails
+  return PyInt_FromLong(status); // Sets an exception if creating the int fails
 }
 
 
@@ -237,11 +258,11 @@ PyObject* MesosExecutorDriverImpl_run(MesosExecutorDriverImpl* self)
     return NULL;
   }
 
-  int res;
+  Status status;
   Py_BEGIN_ALLOW_THREADS
-  res = self->driver->run();
+  status = self->driver->run();
   Py_END_ALLOW_THREADS
-  return PyInt_FromLong(res); // Sets an exception if creating the int fails
+  return PyInt_FromLong(status); // Sets an exception if creating the int fails
 }
 
 
@@ -255,18 +276,18 @@ PyObject* MesosExecutorDriverImpl_sendStatusUpdate(
   }
 
   PyObject* statusObj = NULL;
-  TaskStatus status;
+  TaskStatus taskStatus;
   if (!PyArg_ParseTuple(args, "O", &statusObj)) {
     return NULL;
   }
-  if (!readPythonProtobuf(statusObj, &status)) {
+  if (!readPythonProtobuf(statusObj, &taskStatus)) {
     PyErr_Format(PyExc_Exception,
                  "Could not deserialize Python TaskStatus");
     return NULL;
   }
 
-  int res = self->driver->sendStatusUpdate(status);
-  return PyInt_FromLong(res); // Sets an exception if creating the int fails
+  Status status = self->driver->sendStatusUpdate(taskStatus);
+  return PyInt_FromLong(status); // Sets an exception if creating the int fails
 }
 
 
@@ -284,8 +305,8 @@ PyObject* MesosExecutorDriverImpl_sendFrameworkMessage(
     return NULL;
   }
 
-  int res = self->driver->sendFrameworkMessage(data);
-  return PyInt_FromLong(res); // Sets an exception if creating the int fails
+  Status status = self->driver->sendFrameworkMessage(data);
+  return PyInt_FromLong(status); // Sets an exception if creating the int fails
 }
 
 }} /* namespace mesos { namespace python { */

@@ -61,17 +61,11 @@ TEST(FaultToleranceTest, SlaveLost)
   BasicMasterDetector detector(master, slave, true);
 
   MockScheduler sched;
-  MesosSchedulerDriver driver(&sched, master);
+  MesosSchedulerDriver driver(&sched, "", DEFAULT_EXECUTOR_INFO, master);
 
   vector<Offer> offers;
 
   trigger resourceOffersCall;
-
-  EXPECT_CALL(sched, getFrameworkName(&driver))
-    .WillOnce(Return(""));
-
-  EXPECT_CALL(sched, getExecutorInfo(&driver))
-    .WillOnce(Return(DEFAULT_EXECUTOR_INFO));
 
   EXPECT_CALL(sched, registered(&driver, _))
     .Times(1);
@@ -125,15 +119,9 @@ TEST(FaultToleranceTest, SlavePartitioned)
   PID<Master> master = local::launch(1, 2, 1 * Gigabyte, false, false);
 
   MockScheduler sched;
-  MesosSchedulerDriver driver(&sched, master);
+  MesosSchedulerDriver driver(&sched, "", DEFAULT_EXECUTOR_INFO, master);
 
   trigger slaveLostCall;
-
-  EXPECT_CALL(sched, getFrameworkName(&driver))
-    .WillOnce(Return(""));
-
-  EXPECT_CALL(sched, getExecutorInfo(&driver))
-    .WillOnce(Return(DEFAULT_EXECUTOR_INFO));
 
   EXPECT_CALL(sched, registered(&driver, _))
     .Times(1);
@@ -180,17 +168,11 @@ TEST(FaultToleranceTest, SchedulerFailover)
   // scheduler.
 
   MockScheduler sched1;
-  MesosSchedulerDriver driver1(&sched1, master);
+  MesosSchedulerDriver driver1(&sched1, "", DEFAULT_EXECUTOR_INFO, master);
 
   FrameworkID frameworkId;
 
   trigger sched1RegisteredCall;
-
-  EXPECT_CALL(sched1, getFrameworkName(&driver1))
-    .WillOnce(Return(""));
-
-  EXPECT_CALL(sched1, getExecutorInfo(&driver1))
-    .WillOnce(Return(DEFAULT_EXECUTOR_INFO));
 
   EXPECT_CALL(sched1, registered(&driver1, _))
     .WillOnce(DoAll(SaveArg<1>(&frameworkId), Trigger(&sched1RegisteredCall)));
@@ -213,15 +195,10 @@ TEST(FaultToleranceTest, SchedulerFailover)
   // gets a registered callback..
 
   MockScheduler sched2;
-  MesosSchedulerDriver driver2(&sched2, master, frameworkId);
+  MesosSchedulerDriver driver2(&sched2, "", DEFAULT_EXECUTOR_INFO,
+                               master, frameworkId);
 
   trigger sched2RegisteredCall;
-
-  EXPECT_CALL(sched2, getFrameworkName(&driver2))
-    .WillOnce(Return(""));
-
-  EXPECT_CALL(sched2, getExecutorInfo(&driver2))
-    .WillOnce(Return(DEFAULT_EXECUTOR_INFO));
 
   EXPECT_CALL(sched2, registered(&driver2, frameworkId))
     .WillOnce(Trigger(&sched2RegisteredCall));
@@ -259,15 +236,9 @@ TEST(FaultToleranceTest, FrameworkReregister)
   PID<Master> master = local::launch(1, 2, 1 * Gigabyte, false, false);
 
   MockScheduler sched;
-  MesosSchedulerDriver driver(&sched, master);
+  MesosSchedulerDriver driver(&sched, "", DEFAULT_EXECUTOR_INFO, master);
 
   trigger schedRegisteredCall;
-
-  EXPECT_CALL(sched, getFrameworkName(&driver))
-    .WillOnce(Return(""));
-
-  EXPECT_CALL(sched, getExecutorInfo(&driver))
-    .WillOnce(Return(DEFAULT_EXECUTOR_INFO));
 
   EXPECT_CALL(sched, registered(&driver, _))
     .WillOnce(Trigger(&schedRegisteredCall));
@@ -353,18 +324,12 @@ TEST(FaultToleranceTest, SchedulerFailoverStatusUpdate)
   // first status update message is sent to it (drop the message).
 
   MockScheduler sched1;
-  MesosSchedulerDriver driver1(&sched1, master);
+  MesosSchedulerDriver driver1(&sched1, "", DEFAULT_EXECUTOR_INFO, master);
 
   FrameworkID frameworkId;
   vector<Offer> offers;
 
   trigger resourceOffersCall, statusUpdateMsg;
-
-  EXPECT_CALL(sched1, getFrameworkName(&driver1))
-    .WillOnce(Return(""));
-
-  EXPECT_CALL(sched1, getExecutorInfo(&driver1))
-    .WillOnce(Return(DEFAULT_EXECUTOR_INFO));
 
   EXPECT_CALL(sched1, registered(&driver1, _))
     .WillOnce(SaveArg<1>(&frameworkId));
@@ -400,7 +365,7 @@ TEST(FaultToleranceTest, SchedulerFailoverStatusUpdate)
   vector<TaskDescription> tasks;
   tasks.push_back(task);
 
-  driver1.replyToOffer(offers[0].id(), tasks);
+  driver1.launchTasks(offers[0].id(), tasks);
 
   WAIT_UNTIL(statusUpdateMsg);
 
@@ -410,15 +375,10 @@ TEST(FaultToleranceTest, SchedulerFailoverStatusUpdate)
   // timeout to kick in and another status update message is sent.
 
   MockScheduler sched2;
-  MesosSchedulerDriver driver2(&sched2, master, frameworkId);
+  MesosSchedulerDriver driver2(&sched2, "", DEFAULT_EXECUTOR_INFO,
+                               master, frameworkId);
 
   trigger registeredCall, statusUpdateCall;
-
-  EXPECT_CALL(sched2, getFrameworkName(&driver2))
-    .WillOnce(Return(""));
-
-  EXPECT_CALL(sched2, getExecutorInfo(&driver2))
-    .WillOnce(Return(DEFAULT_EXECUTOR_INFO));
 
   EXPECT_CALL(sched2, registered(&driver2, frameworkId))
     .WillOnce(Trigger(&registeredCall));
@@ -486,23 +446,17 @@ TEST(FaultToleranceTest, SchedulerFailoverFrameworkMessage)
   BasicMasterDetector detector(master, slave, true);
 
   MockScheduler sched1;
-  MesosSchedulerDriver driver1(&sched1, master);
+
+  MesosSchedulerDriver driver1(&sched1, "", DEFAULT_EXECUTOR_INFO, master);
 
   FrameworkID frameworkId;
+
   vector<Offer> offers;
   TaskStatus status;
-
   trigger sched1ResourceOfferCall, sched1StatusUpdateCall;
-
-  EXPECT_CALL(sched1, getFrameworkName(&driver1))
-    .WillOnce(Return(""));
-
-  EXPECT_CALL(sched1, getExecutorInfo(&driver1))
-    .WillOnce(Return(DEFAULT_EXECUTOR_INFO));
 
   EXPECT_CALL(sched1, registered(&driver1, _))
     .WillOnce(SaveArg<1>(&frameworkId));
-
   EXPECT_CALL(sched1, statusUpdate(&driver1, _))
     .WillOnce(DoAll(SaveArg<1>(&status), Trigger(&sched1StatusUpdateCall)));
 
@@ -529,22 +483,17 @@ TEST(FaultToleranceTest, SchedulerFailoverFrameworkMessage)
   vector<TaskDescription> tasks;
   tasks.push_back(task);
 
-  driver1.replyToOffer(offers[0].id(), tasks);
+  driver1.launchTasks(offers[0].id(), tasks);
 
   WAIT_UNTIL(sched1StatusUpdateCall);
 
   EXPECT_EQ(TASK_RUNNING, status.state());
 
   MockScheduler sched2;
-  MesosSchedulerDriver driver2(&sched2, master, frameworkId);
+  MesosSchedulerDriver driver2(&sched2, "", DEFAULT_EXECUTOR_INFO,
+                               master, frameworkId);
 
   trigger sched2RegisteredCall, sched2FrameworkMessageCall;
-
-  EXPECT_CALL(sched2, getFrameworkName(&driver2))
-    .WillOnce(Return(""));
-
-  EXPECT_CALL(sched2, getExecutorInfo(&driver2))
-    .WillOnce(Return(DEFAULT_EXECUTOR_INFO));
 
   EXPECT_CALL(sched2, registered(&driver2, frameworkId))
     .WillOnce(Trigger(&sched2RegisteredCall));
@@ -598,15 +547,9 @@ TEST(FaultToleranceTest, SlaveReregister)
   BasicMasterDetector detector(master, slave, true);
 
   MockScheduler sched;
-  MesosSchedulerDriver driver(&sched, master);
+  MesosSchedulerDriver driver(&sched, "", DEFAULT_EXECUTOR_INFO, master);
 
   trigger resourceOffersCall;
-
-  EXPECT_CALL(sched, getFrameworkName(&driver))
-    .WillOnce(Return(""));
-
-  EXPECT_CALL(sched, getExecutorInfo(&driver))
-    .WillOnce(Return(DEFAULT_EXECUTOR_INFO));
 
   EXPECT_CALL(sched, registered(&driver, _))
     .Times(1);

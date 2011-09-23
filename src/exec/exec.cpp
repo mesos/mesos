@@ -54,6 +54,7 @@ public:
       frameworkId(_frameworkId),
       executorId(_executorId),
       local(_local),
+      aborted(false),
       directory(_directory)
   {
     installProtobufHandler<ExecutorRegisteredMessage>(
@@ -101,13 +102,24 @@ protected:
 
   void registered(const ExecutorArgs& args)
   {
+    if (aborted) {
+      VLOG(1) << "Ignoring registered message because the driver is aborted!";
+      return;
+    }
+
     VLOG(1) << "Executor registered on slave " << args.slave_id();
+
     slaveId = args.slave_id();
     invoke(bind(&Executor::init, executor, driver, cref(args)));
   }
 
   void runTask(const TaskDescription& task)
   {
+    if (aborted) {
+      VLOG(1) << "Ignore run task message because the driver is aborted!";
+      return;
+    }
+
     VLOG(1) << "Executor asked to run task '" << task.task_id() << "'";
 
     invoke(bind(&Executor::launchTask, executor, driver, cref(task)));
@@ -115,7 +127,13 @@ protected:
 
   void killTask(const TaskID& taskId)
   {
+    if (aborted) {
+      VLOG(1) << "Ignoring kill task message because the driver is aborted!";
+      return;
+    }
+
     VLOG(1) << "Executor asked to kill task '" << taskId << "'";
+
     invoke(bind(&Executor::killTask, executor, driver, cref(taskId)));
   }
 
@@ -124,13 +142,25 @@ protected:
 			const ExecutorID& executorId,
 			const string& data)
   {
+    if (aborted) {
+      VLOG(1) << "Ignoring framework message because the driver is aborted!";
+      return;
+    }
+
     VLOG(1) << "Executor received framework message";
+
     invoke(bind(&Executor::frameworkMessage, executor, driver, cref(data)));
   }
 
   void shutdown()
   {
+    if (aborted) {
+      VLOG(1) << "Ignoring shutdown message because the driver is aborted!";
+      return;
+    }
+
     VLOG(1) << "Executor asked to shutdown";
+
     // TODO(benh): Any need to invoke driver.stop?
     invoke(bind(&Executor::shutdown, executor, driver));
     if (!local) {
@@ -140,8 +170,19 @@ protected:
     }
   }
 
+  void abort()
+  {
+    VLOG(1) << "De-activating the executor libprocess";
+    aborted = true;
+  }
+
   void exited()
   {
+    if (aborted) {
+      VLOG(1) << "Ignoring exited event because the driver is aborted!";
+      return;
+    }
+
     VLOG(1) << "Slave exited, trying to shutdown";
 
     // TODO: Pass an argument to shutdown to tell it this is abnormal?
@@ -192,6 +233,7 @@ private:
   ExecutorID executorId;
   SlaveID slaveId;
   bool local;
+  bool aborted;
   const std::string directory;
 };
 
@@ -202,7 +244,7 @@ private:
 
 
 MesosExecutorDriver::MesosExecutorDriver(Executor* _executor)
-  : executor(_executor), running(false)
+  : executor(_executor), state(INITIALIZED), process(NULL)
 {
   // Create mutex and condition variable
   pthread_mutexattr_t attr;
@@ -231,12 +273,16 @@ MesosExecutorDriver::~MesosExecutorDriver()
 }
 
 
-int MesosExecutorDriver::start()
+Status MesosExecutorDriver::start()
 {
   Lock lock(&mutex);
 
-  if (running) {
-    return -1;
+  if (state == RUNNING) {
+    return DRIVER_ALREADY_RUNNING;
+  } else if (state == STOPPED) {
+    return DRIVER_STOPPED;
+  } else if (state == ABORTED) {
+    return DRIVER_ABORTED;
   }
 
   // Set stream buffering mode to flush on newlines so that we capture logs
@@ -303,81 +349,131 @@ int MesosExecutorDriver::start()
 
   workDirectory = value;
 
+  CHECK(process == NULL);
+
   process =
     new ExecutorProcess(slave, this, executor, frameworkId,
                         executorId, local, workDirectory);
 
   spawn(process);
 
-  running = true;
+  state = RUNNING;
 
-  return 0;
+  return OK;
 }
 
 
-int MesosExecutorDriver::stop()
+Status MesosExecutorDriver::stop(bool failover)
 {
   Lock lock(&mutex);
 
-  if (!running) {
-    return -1;
+  if (state == STOPPED) {
+    return DRIVER_STOPPED;
+  } else if (state != RUNNING && state != ABORTED) {
+    return DRIVER_NOT_RUNNING;
   }
 
   CHECK(process != NULL);
-  terminate(process);
-  running = false;
+
+  if (!failover) {
+    terminate(process);
+  }
+
+  state = STOPPED;
   pthread_cond_signal(&cond);
 
-  return 0;
+  return OK;
 }
 
 
-int MesosExecutorDriver::join()
+Status MesosExecutorDriver::abort()
 {
   Lock lock(&mutex);
 
-  while (running) {
+  if (state == ABORTED) {
+    return DRIVER_ABORTED;
+  } else if (state == STOPPED) {
+    return DRIVER_STOPPED;
+  } else if (state != RUNNING) {
+    return DRIVER_NOT_RUNNING;
+  }
+
+  state = ABORTED;
+
+  CHECK(process != NULL);
+
+  dispatch(process, &ExecutorProcess::abort);
+
+  pthread_cond_signal(&cond);
+
+  return OK;
+}
+
+
+Status MesosExecutorDriver::join()
+{
+  Lock lock(&mutex);
+
+  if (state == ABORTED) {
+    return DRIVER_ABORTED;
+  } else if (state == STOPPED) {
+    return DRIVER_STOPPED;
+  } else if (state != RUNNING) {
+    return DRIVER_NOT_RUNNING;
+  }
+
+  while (state == RUNNING) {
     pthread_cond_wait(&cond, &mutex);
   }
 
-  return 0;
+  if (state == ABORTED) {
+    return DRIVER_ABORTED;
+  }
+
+  CHECK(state == STOPPED);
+
+  return OK;
 }
 
 
-int MesosExecutorDriver::run()
+Status MesosExecutorDriver::run()
 {
-  int ret = start();
-  return ret != 0 ? ret : join();
+  Status status = start();
+  return status != OK ? status : join();
 }
 
 
-int MesosExecutorDriver::sendStatusUpdate(const TaskStatus& status)
+Status MesosExecutorDriver::sendStatusUpdate(const TaskStatus& status)
 {
   Lock lock(&mutex);
 
-  if (!running) {
-    //executor->error(this, EINVAL, "Executor has exited");
-    return -1;
+  if (state == ABORTED) {
+    return DRIVER_ABORTED;
+  } else if (state != RUNNING) {
+    return DRIVER_NOT_RUNNING;
   }
 
   CHECK(process != NULL);
+
   dispatch(process, &ExecutorProcess::sendStatusUpdate, status);
 
-  return 0;
+  return OK;
 }
 
 
-int MesosExecutorDriver::sendFrameworkMessage(const string& data)
+Status MesosExecutorDriver::sendFrameworkMessage(const string& data)
 {
   Lock lock(&mutex);
 
-  if (!running) {
-    //executor->error(this, EINVAL, "Executor has exited");
-    return -1;
+  if (state == ABORTED) {
+    return DRIVER_ABORTED;
+  } else if (state != RUNNING) {
+    return DRIVER_NOT_RUNNING;
   }
 
   CHECK(process != NULL);
+
   dispatch(process, &ExecutorProcess::sendFrameworkMessage, data);
 
-  return 0;
+  return OK;
 }

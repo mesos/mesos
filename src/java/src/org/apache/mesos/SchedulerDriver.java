@@ -8,15 +8,17 @@ import java.util.Map;
 
 public interface SchedulerDriver {
   // Lifecycle methods.
-  public int start();
-  public int stop();
-  public int join();
-  public int run();
+  public Status start();
+  public Status stop();
+  public Status stop(boolean failover);
+  public Status abort();
+  public Status join();
+  public Status run();
 
   // Communication methods.
-  public int sendFrameworkMessage(SlaveID slaveId, ExecutorID executorId, byte[] data);
-  public int killTask(TaskID taskId);
-  public int replyToOffer(OfferID offerId, Collection<TaskDescription> tasks, Filters filters);
-  public int replyToOffer(OfferID offerId, Collection<TaskDescription> tasks);
-  public int reviveOffers();
+  public Status sendFrameworkMessage(SlaveID slaveId, ExecutorID executorId, byte[] data);
+  public Status killTask(TaskID taskId);
+  public Status launchTasks(OfferID offerId, Collection<TaskDescription> tasks, Filters filters);
+  public Status launchTasks(OfferID offerId, Collection<TaskDescription> tasks);
+  public Status reviveOffers();
 };

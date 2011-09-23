@@ -78,18 +78,12 @@ TEST(MasterTest, TaskRunning)
   BasicMasterDetector detector(master, slave, true);
 
   MockScheduler sched;
-  MesosSchedulerDriver driver(&sched, master);
+  MesosSchedulerDriver driver(&sched, "", DEFAULT_EXECUTOR_INFO, master);
 
   vector<Offer> offers;
   TaskStatus status;
 
   trigger resourceOffersCall, statusUpdateCall;
-
-  EXPECT_CALL(sched, getFrameworkName(&driver))
-    .WillOnce(Return(""));
-
-  EXPECT_CALL(sched, getExecutorInfo(&driver))
-    .WillOnce(Return(DEFAULT_EXECUTOR_INFO));
 
   EXPECT_CALL(sched, registered(&driver, _))
     .Times(1);
@@ -117,7 +111,7 @@ TEST(MasterTest, TaskRunning)
   vector<TaskDescription> tasks;
   tasks.push_back(task);
 
-  driver.replyToOffer(offers[0].id(), tasks);
+  driver.launchTasks(offers[0].id(), tasks);
 
   WAIT_UNTIL(statusUpdateCall);
 
@@ -171,18 +165,12 @@ TEST(MasterTest, KillTask)
   BasicMasterDetector detector(master, slave, true);
 
   MockScheduler sched;
-  MesosSchedulerDriver driver(&sched, master);
+  MesosSchedulerDriver driver(&sched, "", DEFAULT_EXECUTOR_INFO, master);
 
   vector<Offer> offers;
   TaskStatus status;
 
   trigger resourceOffersCall, statusUpdateCall;
-
-  EXPECT_CALL(sched, getFrameworkName(&driver))
-    .WillOnce(Return(""));
-
-  EXPECT_CALL(sched, getExecutorInfo(&driver))
-    .WillOnce(Return(DEFAULT_EXECUTOR_INFO));
 
   EXPECT_CALL(sched, registered(&driver, _))
     .Times(1);
@@ -213,7 +201,7 @@ TEST(MasterTest, KillTask)
   vector<TaskDescription> tasks;
   tasks.push_back(task);
 
-  driver.replyToOffer(offers[0].id(), tasks);
+  driver.launchTasks(offers[0].id(), tasks);
 
   WAIT_UNTIL(statusUpdateCall);
 
@@ -279,19 +267,13 @@ TEST(MasterTest, FrameworkMessage)
   // first status update message is sent to it (drop the message).
 
   MockScheduler sched;
-  MesosSchedulerDriver schedDriver(&sched, master);
+  MesosSchedulerDriver schedDriver(&sched, "", DEFAULT_EXECUTOR_INFO, master);
 
   vector<Offer> offers;
   TaskStatus status;
   string schedData;
 
   trigger resourceOffersCall, statusUpdateCall, schedFrameworkMessageCall;
-
-  EXPECT_CALL(sched, getFrameworkName(&schedDriver))
-    .WillOnce(Return(""));
-
-  EXPECT_CALL(sched, getExecutorInfo(&schedDriver))
-    .WillOnce(Return(DEFAULT_EXECUTOR_INFO));
 
   EXPECT_CALL(sched, registered(&schedDriver, _))
     .Times(1);
@@ -323,7 +305,7 @@ TEST(MasterTest, FrameworkMessage)
   vector<TaskDescription> tasks;
   tasks.push_back(task);
 
-  schedDriver.replyToOffer(offers[0].id(), tasks);
+  schedDriver.launchTasks(offers[0].id(), tasks);
 
   WAIT_UNTIL(statusUpdateCall);
 
@@ -416,18 +398,12 @@ TEST(MasterTest, MultipleExecutors)
   BasicMasterDetector detector(master, slave, true);
 
   MockScheduler sched;
-  MesosSchedulerDriver driver(&sched, master);
+  MesosSchedulerDriver driver(&sched, "", DEFAULT_EXECUTOR_INFO, master);
 
   vector<Offer> offers;
   TaskStatus status1, status2;
 
   trigger resourceOffersCall, statusUpdateCall1, statusUpdateCall2;
-
-  EXPECT_CALL(sched, getFrameworkName(&driver))
-    .WillOnce(Return(""));
-
-  EXPECT_CALL(sched, getExecutorInfo(&driver))
-    .WillOnce(Return(DEFAULT_EXECUTOR_INFO));
 
   EXPECT_CALL(sched, registered(&driver, _))
     .Times(1);
@@ -467,7 +443,7 @@ TEST(MasterTest, MultipleExecutors)
   tasks.push_back(task1);
   tasks.push_back(task2);
 
-  driver.replyToOffer(offers[0].id(), tasks);
+  driver.launchTasks(offers[0].id(), tasks);
 
   WAIT_UNTIL(statusUpdateCall1);
 

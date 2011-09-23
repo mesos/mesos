@@ -164,3 +164,13 @@ message Filters {
   // Time to consider unused resources refused.
   optional double refuse_seconds = 1;
 }
+
+
+enum Status {
+  OK = 0;
+
+  DRIVER_NOT_RUNNING = 1;
+  DRIVER_ALREADY_RUNNING = 2;
+  DRIVER_ABORTED = 3;
+  DRIVER_STOPPED = 4;
+}

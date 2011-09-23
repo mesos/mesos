@@ -17,27 +17,14 @@ using boost::lexical_cast;
 class MyScheduler : public Scheduler
 {
 public:
-  MyScheduler(const string& uri_, int totalTasks_, double taskLen_,
+  MyScheduler(int totalTasks_, double taskLen_,
       int threadsPerTask_, int64_t memToRequest_, int64_t memToHog_)
-    : uri(uri_), totalTasks(totalTasks_), taskLen(taskLen_),
+    : totalTasks(totalTasks_), taskLen(taskLen_),
       threadsPerTask(threadsPerTask_),
       memToRequest(memToRequest_), memToHog(memToHog_),
       tasksLaunched(0), tasksFinished(0) {}
 
   virtual ~MyScheduler() {}
-
-  virtual string getFrameworkName(SchedulerDriver*)
-  {
-    return "Memory hog";
-  }
-
-  virtual ExecutorInfo getExecutorInfo(SchedulerDriver*)
-  {
-    ExecutorInfo executor;
-    executor.mutable_executor_id()->set_value("default");
-    executor.set_uri(uri);
-    return executor;
-  }
 
   virtual void registered(SchedulerDriver*, const FrameworkID&)
   {
@@ -100,7 +87,7 @@ public:
         tasks.push_back(task);
       }
 
-      driver->replyToOffer(offer.id(), tasks);
+      driver->launchTasks(offer.id(), tasks);
     }
   }
 
@@ -135,7 +122,6 @@ public:
                      const std::string& message) {}
 
 private:
-  string uri;
   double taskLen;
   int threadsPerTask;
   int memToRequest;
@@ -157,14 +143,16 @@ int main(int argc, char** argv)
   // Find this executable's directory to locate executor
   char buf[4096];
   realpath(dirname(argv[0]), buf);
-  string executor = string(buf) + "/memhog-executor";
-  MyScheduler sched(executor,
-                    lexical_cast<int>(argv[2]),
+  string uri = string(buf) + "/memhog-executor";
+  MyScheduler sched(lexical_cast<int>(argv[2]),
                     lexical_cast<double>(argv[3]),
                     lexical_cast<int>(argv[4]),
                     lexical_cast<int64_t>(argv[5]),
                     lexical_cast<int64_t>(argv[6]));
-  MesosSchedulerDriver driver(&sched, argv[1]);
+  ExecutorInfo executor;
+  executor.mutable_executor_id()->set_value("default");
+  executor.set_uri(uri);
+  MesosSchedulerDriver driver(&sched, "Memory hog", executor, argv[1]);
   driver.run();
   return 0;
 }

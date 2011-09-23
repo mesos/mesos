@@ -39,17 +39,11 @@ TEST(ResourceOffersTest, ResourceOfferWithMultipleSlaves)
   PID<Master> master = local::launch(10, 2, 1 * Gigabyte, false, false);
 
   MockScheduler sched;
-  MesosSchedulerDriver driver(&sched, master);
+  MesosSchedulerDriver driver(&sched, "", DEFAULT_EXECUTOR_INFO, master);
 
   vector<Offer> offers;
 
   trigger resourceOffersCall;
-
-  EXPECT_CALL(sched, getFrameworkName(&driver))
-    .WillOnce(Return(""));
-
-  EXPECT_CALL(sched, getExecutorInfo(&driver))
-    .WillOnce(Return(DEFAULT_EXECUTOR_INFO));
 
   EXPECT_CALL(sched, registered(&driver, _))
     .Times(1);
@@ -87,17 +81,11 @@ TEST(ResourceOffersTest, TaskUsesNoResources)
   PID<Master> master = local::launch(1, 2, 1 * Gigabyte, false, false);
 
   MockScheduler sched;
-  MesosSchedulerDriver driver(&sched, master);
+  MesosSchedulerDriver driver(&sched, "", DEFAULT_EXECUTOR_INFO, master);
 
   vector<Offer> offers;
 
   trigger resourceOffersCall;
-
-  EXPECT_CALL(sched, getFrameworkName(&driver))
-    .WillOnce(Return(""));
-
-  EXPECT_CALL(sched, getExecutorInfo(&driver))
-    .WillOnce(Return(DEFAULT_EXECUTOR_INFO));
 
   EXPECT_CALL(sched, registered(&driver, _))
     .Times(1);
@@ -129,7 +117,7 @@ TEST(ResourceOffersTest, TaskUsesNoResources)
     .WillOnce(DoAll(SaveArg<1>(&status),
                     Trigger(&statusUpdateCall)));
 
-  driver.replyToOffer(offers[0].id(), tasks);
+  driver.launchTasks(offers[0].id(), tasks);
 
   WAIT_UNTIL(statusUpdateCall);
 
@@ -152,17 +140,11 @@ TEST(ResourceOffersTest, TaskUsesInvalidResources)
   PID<Master> master = local::launch(1, 2, 1 * Gigabyte, false, false);
 
   MockScheduler sched;
-  MesosSchedulerDriver driver(&sched, master);
+  MesosSchedulerDriver driver(&sched, "", DEFAULT_EXECUTOR_INFO, master);
 
   vector<Offer> offers;
 
   trigger resourceOffersCall;
-
-  EXPECT_CALL(sched, getFrameworkName(&driver))
-    .WillOnce(Return(""));
-
-  EXPECT_CALL(sched, getExecutorInfo(&driver))
-    .WillOnce(Return(DEFAULT_EXECUTOR_INFO));
 
   EXPECT_CALL(sched, registered(&driver, _))
     .Times(1);
@@ -199,7 +181,7 @@ TEST(ResourceOffersTest, TaskUsesInvalidResources)
     .WillOnce(DoAll(SaveArg<1>(&status),
                     Trigger(&statusUpdateCall)));
 
-  driver.replyToOffer(offers[0].id(), tasks);
+  driver.launchTasks(offers[0].id(), tasks);
 
   WAIT_UNTIL(statusUpdateCall);
 
@@ -222,17 +204,11 @@ TEST(ResourceOffersTest, TaskUsesMoreResourcesThanOffered)
   PID<Master> master = local::launch(1, 2, 1 * Gigabyte, false, false);
 
   MockScheduler sched;
-  MesosSchedulerDriver driver(&sched, master);
+  MesosSchedulerDriver driver(&sched, "", DEFAULT_EXECUTOR_INFO, master);
 
   vector<Offer> offers;
 
   trigger resourceOffersCall;
-
-  EXPECT_CALL(sched, getFrameworkName(&driver))
-    .WillOnce(Return(""));
-
-  EXPECT_CALL(sched, getExecutorInfo(&driver))
-    .WillOnce(Return(DEFAULT_EXECUTOR_INFO));
 
   EXPECT_CALL(sched, registered(&driver, _))
     .Times(1);
@@ -269,7 +245,7 @@ TEST(ResourceOffersTest, TaskUsesMoreResourcesThanOffered)
     .WillOnce(DoAll(SaveArg<1>(&status),
                     Trigger(&statusUpdateCall)));
 
-  driver.replyToOffer(offers[0].id(), tasks);
+  driver.launchTasks(offers[0].id(), tasks);
 
   WAIT_UNTIL(statusUpdateCall);
 
@@ -292,17 +268,11 @@ TEST(ResourceOffersTest, ResourcesGetReofferedWhenUnused)
   PID<Master> master = local::launch(1, 2, 1 * Gigabyte, false, false);
 
   MockScheduler sched1;
-  MesosSchedulerDriver driver1(&sched1, master);
+  MesosSchedulerDriver driver1(&sched1, "", DEFAULT_EXECUTOR_INFO, master);
 
   vector<Offer> offers;
 
   trigger sched1ResourceOfferCall;
-
-  EXPECT_CALL(sched1, getFrameworkName(&driver1))
-    .WillOnce(Return(""));
-
-  EXPECT_CALL(sched1, getExecutorInfo(&driver1))
-    .WillOnce(Return(DEFAULT_EXECUTOR_INFO));
 
   EXPECT_CALL(sched1, registered(&driver1, _))
     .Times(1);
@@ -320,21 +290,15 @@ TEST(ResourceOffersTest, ResourcesGetReofferedWhenUnused)
 
   vector<TaskDescription> tasks; // Use nothing!
 
-  driver1.replyToOffer(offers[0].id(), tasks);
+  driver1.launchTasks(offers[0].id(), tasks);
 
   driver1.stop();
   driver1.join();
 
   MockScheduler sched2;
-  MesosSchedulerDriver driver2(&sched2, master);
+  MesosSchedulerDriver driver2(&sched2, "", DEFAULT_EXECUTOR_INFO, master);
 
   trigger sched2ResourceOfferCall;
-
-  EXPECT_CALL(sched2, getFrameworkName(&driver2))
-    .WillOnce(Return(""));
-
-  EXPECT_CALL(sched2, getExecutorInfo(&driver2))
-    .WillOnce(Return(DEFAULT_EXECUTOR_INFO));
 
   EXPECT_CALL(sched2, registered(&driver2, _))
     .Times(1);
@@ -364,17 +328,11 @@ TEST(ResourceOffersTest, ResourcesGetReofferedAfterTaskDescriptionError)
   PID<Master> master = local::launch(1, 2, 1 * Gigabyte, false, false);
 
   MockScheduler sched1;
-  MesosSchedulerDriver driver1(&sched1, master);
+  MesosSchedulerDriver driver1(&sched1, "", DEFAULT_EXECUTOR_INFO, master);
 
   vector<Offer> offers;
 
   trigger sched1ResourceOffersCall;
-
-  EXPECT_CALL(sched1, getFrameworkName(&driver1))
-    .WillOnce(Return(""));
-
-  EXPECT_CALL(sched1, getExecutorInfo(&driver1))
-    .WillOnce(Return(DEFAULT_EXECUTOR_INFO));
 
   EXPECT_CALL(sched1, registered(&driver1, _))
     .Times(1);
@@ -416,7 +374,7 @@ TEST(ResourceOffersTest, ResourcesGetReofferedAfterTaskDescriptionError)
     .WillOnce(DoAll(SaveArg<1>(&status),
                     Trigger(&sched1StatusUpdateCall)));
 
-  driver1.replyToOffer(offers[0].id(), tasks);
+  driver1.launchTasks(offers[0].id(), tasks);
 
   WAIT_UNTIL(sched1StatusUpdateCall);
 
@@ -429,15 +387,9 @@ TEST(ResourceOffersTest, ResourcesGetReofferedAfterTaskDescriptionError)
   driver1.join();
 
   MockScheduler sched2;
-  MesosSchedulerDriver driver2(&sched2, master);
+  MesosSchedulerDriver driver2(&sched2, "", DEFAULT_EXECUTOR_INFO, master);
 
   trigger sched2ResourceOffersCall;
-
-  EXPECT_CALL(sched2, getFrameworkName(&driver2))
-    .WillOnce(Return(""));
-
-  EXPECT_CALL(sched2, getExecutorInfo(&driver2))
-    .WillOnce(Return(DEFAULT_EXECUTOR_INFO));
 
   EXPECT_CALL(sched2, registered(&driver2, _))
     .Times(1);
@@ -495,15 +447,9 @@ TEST(ResourceOffersTest, ResourceRequest)
   PID<Master> master =
       local::launch(1, 2, 1 * Gigabyte, false, false, &allocator);
 
-  MesosSchedulerDriver driver(&sched, master);
+  MesosSchedulerDriver driver(&sched, "", DEFAULT_EXECUTOR_INFO, master);
 
   trigger registeredCall;
-
-  EXPECT_CALL(sched, getFrameworkName(&driver))
-    .WillOnce(Return(""));
-
-  EXPECT_CALL(sched, getExecutorInfo(&driver))
-    .WillOnce(Return(DEFAULT_EXECUTOR_INFO));
 
   EXPECT_CALL(sched, registered(&driver, _))
     .WillOnce(Trigger(&registeredCall));

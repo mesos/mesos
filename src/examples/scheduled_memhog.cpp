@@ -46,9 +46,8 @@ struct TaskComparator
 class MyScheduler : public Scheduler
 {
 public:
-  MyScheduler(const string& uri_, const string& scheduleFile,
-              int threadsPerTask_)
-    : uri(uri_), threadsPerTask(threadsPerTask_),
+  MyScheduler(const string& scheduleFile, int threadsPerTask_)
+    : threadsPerTask(threadsPerTask_),
       tasksLaunched(0), tasksFinished(0), successfulTasks(0)
   {
     ifstream in(scheduleFile.c_str());
@@ -71,19 +70,6 @@ public:
   }
 
   virtual ~MyScheduler() {}
-
-  virtual string getFrameworkName(SchedulerDriver*)
-  {
-    return "Memory hog";
-  }
-
-  virtual ExecutorInfo getExecutorInfo(SchedulerDriver*)
-  {
-    ExecutorInfo executor;
-    executor.mutable_executor_id()->set_value("default");
-    executor.set_uri(uri);
-    return executor;
-  }
 
   virtual void registered(SchedulerDriver*, const FrameworkID&)
   {
@@ -154,7 +140,7 @@ public:
         toLaunch.push_back(task);
       }
 
-      driver->replyToOffer(offer.id(), toLaunch);
+      driver->launchTasks(offer.id(), toLaunch);
     }
   }
 
@@ -199,7 +185,6 @@ public:
   int successfulTasks;
 
 private:
-  string uri;
   double taskLen;
   int threadsPerTask;
   time_t startTime;
@@ -216,9 +201,12 @@ int main(int argc, char** argv)
   }
   char buf[4096];
   realpath(dirname(argv[0]), buf);
-  string executor = string(buf) + "/memhog-executor";
-  MyScheduler sched(executor, argv[2], 1);
-  MesosSchedulerDriver driver(&sched, argv[1]);
+  string uri = string(buf) + "/memhog-executor";
+  MyScheduler sched(argv[2], 1);
+  ExecutorInfo executor;
+  executor.mutable_executor_id()->set_value("default");
+  executor.set_uri(uri);
+  MesosSchedulerDriver driver(&sched, "Memory hog", executor, argv[1]);
   driver.run();
   return (sched.successfulTasks == sched.tasks.size()) ? 0 : 1;
 }

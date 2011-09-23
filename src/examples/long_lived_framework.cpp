@@ -21,23 +21,10 @@ const int32_t MEM_PER_TASK = 32;
 class MyScheduler : public Scheduler
 {
 public:
-  MyScheduler(const string& _uri)
-    : uri(_uri), tasksLaunched(0) {}
+  MyScheduler()
+    : tasksLaunched(0) {}
 
   virtual ~MyScheduler() {}
-
-  virtual string getFrameworkName(SchedulerDriver*)
-  {
-    return "C++ Test Framework";
-  }
-
-  virtual ExecutorInfo getExecutorInfo(SchedulerDriver*)
-  {
-    ExecutorInfo executor;
-    executor.mutable_executor_id()->set_value("default");
-    executor.set_uri(uri);
-    return executor;
-  }
 
   virtual void registered(SchedulerDriver*, const FrameworkID&)
   {
@@ -100,7 +87,7 @@ public:
         mem -= MEM_PER_TASK;
       }
 
-      driver->replyToOffer(offer.id(), tasks);
+      driver->launchTasks(offer.id(), tasks);
     }
   }
 
@@ -138,10 +125,13 @@ int main(int argc, char** argv)
   // Find this executable's directory to locate executor
   char buf[4096];
   realpath(dirname(argv[0]), buf);
-  string executor = string(buf) + "/long-lived-executor";
+  string uri = string(buf) + "/long-lived-executor";
   // Run a Mesos scheduler
-  MyScheduler sched(executor);
-  MesosSchedulerDriver driver(&sched, argv[1]);
+  MyScheduler sched;
+  ExecutorInfo executor;
+  executor.mutable_executor_id()->set_value("default");
+  executor.set_uri(uri);
+  MesosSchedulerDriver driver(&sched, "C++ Test Framework", executor, argv[1]);
   driver.run();
   return 0;
 }

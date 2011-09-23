@@ -184,16 +184,16 @@ MasterDetector* MasterDetector::create(const string &url,
     case UrlProcessor::MESOS:
     case UrlProcessor::UNKNOWN: {
       if (contend) {
-	// TODO(benh): Wierdnesses like this makes it seem like there
-	// should be a separate elector and detector. In particular,
-	// it doesn't make sense to pass a libprocess pid and attempt
-	// to contend (at least not right now).
-	fatal("cannot contend to be a master with specified url");
+        // TODO(benh): Wierdnesses like this makes it seem like there
+        // should be a separate elector and detector. In particular,
+        // it doesn't make sense to pass a libprocess pid and attempt
+        // to contend (at least not right now).
+        fatal("cannot contend to be a master with specified url");
       } else {
-	UPID master(urlPair.second);
-	if (!master)
-	  fatal("cannot use specified url to detect master");
-	detector = new BasicMasterDetector(master, pid);
+        UPID master(urlPair.second);
+        if (!master)
+          fatal("cannot use specified url to detect master");
+        detector = new BasicMasterDetector(master, pid);
       }
       break;
     }
@@ -416,7 +416,7 @@ void ZooKeeperMasterDetector::connected()
     // Save the sequence id but only grab the basename, e.g.,
     // "/path/to/znode/000000131" => "000000131".
     size_t index;
-    if ((index = result.find_last_of('/')) != string::npos) {  
+    if ((index = result.find_last_of('/')) != string::npos) {
       mySeq = result.erase(0, index + 1);
     } else {
       mySeq = result;

@@ -73,14 +73,16 @@ PyTypeObject MesosSchedulerDriverImplType = {
 PyMethodDef MesosSchedulerDriverImpl_methods[] = {
   {"start", (PyCFunction) MesosSchedulerDriverImpl_start, METH_NOARGS,
    "Start the driver to connect to Mesos"},
-  {"stop", (PyCFunction) MesosSchedulerDriverImpl_stop, METH_NOARGS,
+  {"stop", (PyCFunction) MesosSchedulerDriverImpl_stop, METH_VARARGS,
    "Stop the driver, disconnecting from Mesos"},
+  {"abort", (PyCFunction) MesosSchedulerDriverImpl_abort, METH_NOARGS,
+    "Abort the driver, disabling calls from and to the driver"},
   {"join", (PyCFunction) MesosSchedulerDriverImpl_join, METH_NOARGS,
    "Wait for a running driver to disconnect from Mesos"},
   {"run", (PyCFunction) MesosSchedulerDriverImpl_run, METH_NOARGS,
    "Start a driver and run it, returning when it disconnects from Mesos"},
-  {"replyToOffer",
-   (PyCFunction) MesosSchedulerDriverImpl_replyToOffer,
+  {"launchTasks",
+   (PyCFunction) MesosSchedulerDriverImpl_launchTasks,
    METH_VARARGS,
    "Reply to a Mesos offer with a list of tasks"},
   {"killTask",
@@ -103,12 +105,12 @@ PyMethodDef MesosSchedulerDriverImpl_methods[] = {
  * Create, but don't initialize, a new MesosSchedulerDriverImpl
  * (called by Python before init method).
  */
-PyObject* MesosSchedulerDriverImpl_new(PyTypeObject *type,
-                                       PyObject *args,
-                                       PyObject *kwds)
+PyObject* MesosSchedulerDriverImpl_new(PyTypeObject* type,
+                                       PyObject* args,
+                                       PyObject* kwds)
 {
-  MesosSchedulerDriverImpl *self;
-  self = (MesosSchedulerDriverImpl *) type->tp_alloc(type, 0);
+  MesosSchedulerDriverImpl* self;
+  self = (MesosSchedulerDriverImpl*) type->tp_alloc(type, 0);
   if (self != NULL) {
     self->driver = NULL;
     self->proxyScheduler = NULL;
@@ -121,22 +123,25 @@ PyObject* MesosSchedulerDriverImpl_new(PyTypeObject *type,
 /**
  * Initialize a MesosSchedulerDriverImpl with constructor arguments.
  */
-int MesosSchedulerDriverImpl_init(MesosSchedulerDriverImpl *self,
-                                  PyObject *args,
-                                  PyObject *kwds)
+int MesosSchedulerDriverImpl_init(MesosSchedulerDriverImpl* self,
+                                  PyObject* args,
+                                  PyObject* kwds)
 {
-  PyObject *pythonScheduler = NULL;
+  PyObject *pythonSchedulerObj = NULL;
   const char* url;
-  PyObject *frameworkId = NULL;
+  PyObject *frameworkIdObj = NULL;
+  const char* frameworkName;
+  PyObject *executorInfoObj = NULL;
 
-  if (!PyArg_ParseTuple(args, "Os|O", &pythonScheduler, &url, &frameworkId)) {
+  if (!PyArg_ParseTuple(args, "OsOs|O", &pythonSchedulerObj, &frameworkName,
+                        &executorInfoObj, &url, &frameworkIdObj)) {
     return -1;
   }
 
-  if (pythonScheduler != NULL) {
+  if (pythonSchedulerObj != NULL) {
     PyObject* tmp = self->pythonScheduler;
-    Py_INCREF(pythonScheduler);
-    self->pythonScheduler = pythonScheduler;
+    Py_INCREF(pythonSchedulerObj);
+    self->pythonScheduler = pythonSchedulerObj;
     Py_XDECREF(tmp);
   }
 
@@ -151,20 +156,30 @@ int MesosSchedulerDriverImpl_init(MesosSchedulerDriverImpl *self,
     self->proxyScheduler = NULL;
   }
 
-  FrameworkID fid;
-  if (frameworkId != NULL) {
-    if (!readPythonProtobuf(frameworkId, &fid)) {
+  FrameworkID frameworkId;
+  if (frameworkIdObj != NULL) {
+    if (!readPythonProtobuf(frameworkIdObj, &frameworkId)) {
       PyErr_Format(PyExc_Exception, "Could not deserialize Python FrameworkId");
+      return -1;
+    }
+  }
+
+  ExecutorInfo executorInfo;
+  if (executorInfoObj != NULL) {
+    if (!readPythonProtobuf(executorInfoObj, &executorInfo)) {
+      PyErr_Format(PyExc_Exception, "Could not deserialize Python ExecutorInfo");
       return -1;
     }
   }
 
   self->proxyScheduler = new ProxyScheduler(self);
 
-  if (frameworkId != NULL) {
-    self->driver = new MesosSchedulerDriver(self->proxyScheduler, url, fid);
+  if (frameworkIdObj != NULL) {
+    self->driver = new MesosSchedulerDriver(self->proxyScheduler, frameworkName,
+                                            executorInfo, url, frameworkId);
   } else {
-    self->driver = new MesosSchedulerDriver(self->proxyScheduler, url);
+    self->driver = new MesosSchedulerDriver(self->proxyScheduler, frameworkName,
+                                            executorInfo, url);
   }
 
   return 0;
@@ -181,10 +196,12 @@ void MesosSchedulerDriverImpl_dealloc(MesosSchedulerDriverImpl* self)
     delete self->driver;
     self->driver = NULL;
   }
+
   if (self->proxyScheduler != NULL) {
     delete self->proxyScheduler;
     self->proxyScheduler = NULL;
   }
+
   MesosSchedulerDriverImpl_clear(self);
   self->ob_type->tp_free((PyObject*) self);
 }
@@ -221,20 +238,39 @@ PyObject* MesosSchedulerDriverImpl_start(MesosSchedulerDriverImpl* self)
     return NULL;
   }
 
-  int res = self->driver->start();
-  return PyInt_FromLong(res); // Sets an exception if creating the int fails
+  Status status = self->driver->start();
+  return PyInt_FromLong(status); // Sets an exception if creating the int fails
 }
 
 
-PyObject* MesosSchedulerDriverImpl_stop(MesosSchedulerDriverImpl* self)
+PyObject* MesosSchedulerDriverImpl_stop(MesosSchedulerDriverImpl* self,
+                                        PyObject* args)
 {
   if (self->driver == NULL) {
     PyErr_Format(PyExc_Exception, "MesosSchedulerDriverImpl.driver is NULL");
     return NULL;
   }
 
-  int res = self->driver->stop();
-  return PyInt_FromLong(res); // Sets an exception if creating the int fails
+  bool failover = false;
+
+  if (!PyArg_ParseTuple(args, "b", &failover)) {
+    return NULL;
+  }
+
+  Status status = self->driver->stop(failover);
+  return PyInt_FromLong(status); // Sets an exception if creating the int fails
+}
+
+
+PyObject* MesosSchedulerDriverImpl_abort(MesosSchedulerDriverImpl* self)
+{
+  if (self->driver == NULL) {
+    PyErr_Format(PyExc_Exception, "MesosSchedulerDriverImpl.driver is NULL");
+    return NULL;
+  }
+
+  Status status = self->driver->abort();
+  return PyInt_FromLong(status); // Sets an exception if creating the int fails
 }
 
 
@@ -245,11 +281,11 @@ PyObject* MesosSchedulerDriverImpl_join(MesosSchedulerDriverImpl* self)
     return NULL;
   }
 
-  int res;
+  Status status;
   Py_BEGIN_ALLOW_THREADS
-  res = self->driver->join();
+  status = self->driver->join();
   Py_END_ALLOW_THREADS
-  return PyInt_FromLong(res); // Sets an exception if creating the int fails
+  return PyInt_FromLong(status); // Sets an exception if creating the int fails
 }
 
 
@@ -260,11 +296,11 @@ PyObject* MesosSchedulerDriverImpl_run(MesosSchedulerDriverImpl* self)
     return NULL;
   }
 
-  int res;
+  Status status;
   Py_BEGIN_ALLOW_THREADS
-  res = self->driver->run();
+  status = self->driver->run();
   Py_END_ALLOW_THREADS
-  return PyInt_FromLong(res); // Sets an exception if creating the int fails
+  return PyInt_FromLong(status); // Sets an exception if creating the int fails
 }
 
 
@@ -275,12 +311,12 @@ PyObject* MesosSchedulerDriverImpl_reviveOffers(MesosSchedulerDriverImpl* self)
     return NULL;
   }
 
-  int res = self->driver->reviveOffers();
-  return PyInt_FromLong(res); // Sets an exception if creating the int fails
+  Status status = self->driver->reviveOffers();
+  return PyInt_FromLong(status); // Sets an exception if creating the int fails
 }
 
 
-PyObject* MesosSchedulerDriverImpl_replyToOffer(MesosSchedulerDriverImpl* self,
+PyObject* MesosSchedulerDriverImpl_launchTasks(MesosSchedulerDriverImpl* self,
                                                 PyObject* args)
 {
   if (self->driver == NULL) {
@@ -305,7 +341,7 @@ PyObject* MesosSchedulerDriverImpl_replyToOffer(MesosSchedulerDriverImpl* self,
   }
 
   if (!PyList_Check(tasksObj)) {
-    PyErr_Format(PyExc_Exception, "Parameter 2 to replyToOffer is not a list");
+    PyErr_Format(PyExc_Exception, "Parameter 2 to launchTasks is not a list");
     return NULL;
   }
   Py_ssize_t len = PyList_Size(tasksObj);
@@ -331,9 +367,8 @@ PyObject* MesosSchedulerDriverImpl_replyToOffer(MesosSchedulerDriverImpl* self,
     }
   }
 
-  int res;
-  res = self->driver->replyToOffer(offerId, tasks, filters);
-  return PyInt_FromLong(res); // Sets an exception if creating the int fails
+  Status status = self->driver->launchTasks(offerId, tasks, filters);
+  return PyInt_FromLong(status); // Sets an exception if creating the int fails
 }
 
 
@@ -355,8 +390,8 @@ PyObject* MesosSchedulerDriverImpl_killTask(MesosSchedulerDriverImpl* self,
     return NULL;
   }
 
-  int res = self->driver->killTask(tid);
-  return PyInt_FromLong(res); // Sets an exception if creating the int fails
+  Status status = self->driver->killTask(tid);
+  return PyInt_FromLong(status); // Sets an exception if creating the int fails
 }
 
 
@@ -388,8 +423,8 @@ PyObject* MesosSchedulerDriverImpl_sendFrameworkMessage(
     return NULL;
   }
 
-  int res = self->driver->sendFrameworkMessage(sid, eid, data);
-  return PyInt_FromLong(res); // Sets an exception if creating the int fails
+  Status status = self->driver->sendFrameworkMessage(sid, eid, data);
+  return PyInt_FromLong(status); // Sets an exception if creating the int fails
 }
 
 }} /* namespace mesos { namespace python { */

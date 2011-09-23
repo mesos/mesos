@@ -1,6 +1,5 @@
 #include <dlfcn.h>
 #include <errno.h>
-#include <pwd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -71,7 +70,9 @@ public:
       frameworkId(_frameworkId),
       framework(_framework),
       master(UPID()),
-      failover(!(_frameworkId == ""))
+      failover(!(_frameworkId == "")),
+      connected(false),
+      aborted(false)
   {
     installProtobufHandler<NewMasterDetectedMessage>(
         &SchedulerProcess::newMasterDetected,
@@ -117,8 +118,6 @@ public:
         &SchedulerProcess::error,
         &FrameworkErrorMessage::code,
         &FrameworkErrorMessage::message);
-
-    installMessageHandler(process::EXITED, &SchedulerProcess::exited);
   }
 
   virtual ~SchedulerProcess() {}
@@ -145,22 +144,30 @@ protected:
       send(master, message);
       failover = false; // Only failover the first time.
     }
-
-    active = true;
   }
 
   void noMasterDetected()
   {
     VLOG(1) << "No master detected, waiting for another master";
+
     // In this case, we don't actually invoke Scheduler::error
     // since we might get reconnected to a master imminently.
-    active = false;
+    connected = false;
   }
 
   void registered(const FrameworkID& frameworkId)
   {
+    if (aborted) {
+      VLOG(1) << "Ignoring framework registered message because "
+              << "the driver is aborted!";
+      return;
+    }
+
     VLOG(1) << "Framework registered with " << frameworkId;
+
     this->frameworkId = frameworkId;
+    connected = true;
+
     invoke(bind(&Scheduler::registered, sched, driver, cref(frameworkId)));
   }
 
@@ -168,11 +175,19 @@ protected:
   {
     VLOG(1) << "Framework re-registered with " << frameworkId;
     CHECK(this->frameworkId == frameworkId);
+
+    connected = true;
   }
 
   void resourceOffers(const vector<Offer>& offers,
                       const vector<string>& pids)
   {
+    if (aborted) {
+      VLOG(1) << "Ignoring resource offers message because "
+              << "the driver is aborted!";
+      return;
+    }
+
     VLOG(1) << "Received " << offers.size() << " offers";
 
     CHECK(offers.size() == pids.size());
@@ -195,7 +210,14 @@ protected:
 
   void rescindOffer(const OfferID& offerId)
   {
+    if (aborted) {
+      VLOG(1) << "Ignoring rescind offer message because "
+              << "the driver is aborted!";
+      return;
+    }
+
     VLOG(1) << "Rescinded offer " << offerId;
+
     savedOffers.erase(offerId);
     invoke(bind(&Scheduler::offerRescinded, sched, driver, cref(offerId)));
   }
@@ -203,6 +225,12 @@ protected:
   void statusUpdate(const StatusUpdate& update, const UPID& pid)
   {
     const TaskStatus& status = update.status();
+
+    if (aborted) {
+      VLOG(1) << "Ignoring task status update message because "
+              << "the driver is aborted!";
+      return;
+    }
 
     VLOG(1) << "Status update: task " << status.task_id()
             << " of framework " << update.framework_id()
@@ -237,7 +265,13 @@ protected:
 
   void lostSlave(const SlaveID& slaveId)
   {
+    if (aborted) {
+      VLOG(1) << "Ignoring lost slave message because the driver is aborted!";
+      return;
+    }
+
     VLOG(1) << "Lost slave " << slaveId;
+
     savedSlavePids.erase(slaveId);
     invoke(bind(&Scheduler::slaveLost, sched, driver, cref(slaveId)));
   }
@@ -247,43 +281,73 @@ protected:
 			const ExecutorID& executorId,
 			const string& data)
   {
+    if (aborted) {
+      VLOG(1) << "Ignoring framework message because the driver is aborted!";
+      return;
+    }
+
     VLOG(1) << "Received framework message";
+
     invoke(bind(&Scheduler::frameworkMessage, sched, driver, cref(slaveId),
                 cref(executorId), cref(data)));
   }
 
   void error(int32_t code, const string& message)
   {
+    if (aborted) {
+      VLOG(1) << "Ignoring error message because the driver is aborted!";
+      return;
+    }
+
     VLOG(1) << "Got error '" << message << "' (code: " << code << ")";
+
+    driver->abort();
+
     invoke(bind(&Scheduler::error, sched, driver, code, cref(message)));
   }
 
-  void exited()
+  void stop(bool failover)
   {
-    // TODO(benh): Don't wait for a new master forever.
-    if (from() == master) {
-      VLOG(1) << "Connection to master lost .. waiting for new master";
-    }
-  }
+    VLOG(1) << "Stopping the framework";
 
-  void stop()
-  {
     // Whether or not we send an unregister message, we want to
     // terminate this process ...
     terminate(self());
 
-    if (!active)
-      return;
+    if (!failover) {
+      UnregisterFrameworkMessage message;
+      message.mutable_framework_id()->MergeFrom(frameworkId);
+      send(master, message);
+    }
+  }
 
-    UnregisterFrameworkMessage message;
+  // NOTE: This function stops any further callbacks from reaching the
+  // scheduler by informing the master. The abort flag stops
+  // those callbacks that are already enqueued.
+  void abort()
+  {
+    VLOG(1) << "Aborting the framework";
+    aborted = true;
+
+    if (!connected) {
+      VLOG(1) << "Not sending a deactivate message as master is disconnected";
+      return;
+    }
+
+    VLOG(1) << "Deactivating the framework " << frameworkId;
+
+    DeactivateFrameworkMessage message;
     message.mutable_framework_id()->MergeFrom(frameworkId);
     send(master, message);
+
   }
 
   void killTask(const TaskID& taskId)
   {
-    if (!active)
+    if (!connected) {
+      VLOG(1) << "Ignoring kill task message as master is disconnected";
       return;
+    }
 
     KillTaskMessage message;
     message.mutable_framework_id()->MergeFrom(frameworkId);
@@ -293,8 +357,10 @@ protected:
 
   void requestResources(const vector<ResourceRequest>& requests)
   {
-    if (!active)
+    if (!connected) {
+      VLOG(1) << "Ignoring request resources message as master is disconnected";
       return;
+    }
 
     ResourceRequestMessage message;
     message.mutable_framework_id()->MergeFrom(frameworkId);
@@ -304,14 +370,16 @@ protected:
     send(master, message);
   }
 
-  void replyToOffer(const OfferID& offerId,
-                    const vector<TaskDescription>& tasks,
-                    const Filters& filters)
+  void launchTasks(const OfferID& offerId,
+                   const vector<TaskDescription>& tasks,
+                   const Filters& filters)
   {
-    if (!active)
+    if (!connected) {
+      VLOG(1) << "Ignoring launch tasks message as master is disconnected";
       return;
+    }
 
-    ResourceOfferReplyMessage message;
+    LaunchTasksMessage message;
     message.mutable_framework_id()->MergeFrom(frameworkId);
     message.mutable_offer_id()->MergeFrom(offerId);
     message.mutable_filters()->MergeFrom(filters);
@@ -332,8 +400,10 @@ protected:
 
   void reviveOffers()
   {
-    if (!active)
+    if (!connected) {
+      VLOG(1) << "Ignoring revive offers message as master is disconnected";
       return;
+    }
 
     ReviveOffersMessage message;
     message.mutable_framework_id()->MergeFrom(frameworkId);
@@ -344,11 +414,13 @@ protected:
 			                const ExecutorID& executorId,
 			                const string& data)
   {
-    if (!active)
-      return;
+    if (!connected) {
+     VLOG(1) << "Ignoring send framework message as master is disconnected";
+     return;
+    }
 
     VLOG(1) << "Asked to send framework message to slave "
-	    << slaveId;
+            << slaveId;
 
     // TODO(benh): After a scheduler has re-registered it won't have
     // any saved slave PIDs, maybe it makes sense to try and save each
@@ -389,7 +461,8 @@ private:
   bool failover;
   UPID master;
 
-  volatile bool active;
+  volatile bool connected; // Flag to indicate if master is connected.
+  volatile bool aborted; // Flag to indicate if the driver is aborted.
 
   hashmap<OfferID, hashmap<SlaveID, UPID> > savedOffers;
   hashmap<SlaveID, UPID> savedSlavePids;
@@ -408,17 +481,14 @@ private:
 //     using locks for certain methods ... but this may change in the
 //     future.
 //
-// (2) There are two possible status variables, one called 'active' in
-//     SchedulerProcess and one called 'running' in
-//     MesosSchedulerDriver. The former is used to represent whether
-//     or not we are connected to an active master while the latter is
-//     used to represent whether or not a client has called
-//     MesosSchedulerDriver::start/run or MesosSchedulerDriver::stop.
-
+// (2) There is a variable called state, that represents the current
+//     state of the driver and is used to enforce its state transitions.
 
 MesosSchedulerDriver::MesosSchedulerDriver(Scheduler* sched,
-					   const string& url,
-					   const FrameworkID& frameworkId)
+                                           const std::string& frameworkName,
+                                           const ExecutorInfo& executorInfo,
+                                           const string& url,
+                                           const FrameworkID& frameworkId)
 {
   Configurator configurator;
   // TODO(benh): Only register local options if this is running with
@@ -435,13 +505,15 @@ MesosSchedulerDriver::MesosSchedulerDriver(Scheduler* sched,
     conf = new Configuration();
   }
   conf->set("url", url); // Override URL param with the one from the user
-  init(sched, conf, frameworkId);
+  init(sched, conf, frameworkId, frameworkName, executorInfo);
 }
 
 
 MesosSchedulerDriver::MesosSchedulerDriver(Scheduler* sched,
-					   const map<string, string>& params,
-					   const FrameworkID& frameworkId)
+                                           const std::string& frameworkName,
+                                           const ExecutorInfo& executorInfo,
+                                           const map<string, string> &params,
+                                           const FrameworkID& frameworkId)
 {
   Configurator configurator;
   // TODO(benh): Only register local options if this is running with
@@ -457,14 +529,16 @@ MesosSchedulerDriver::MesosSchedulerDriver(Scheduler* sched,
     sched->error(this, 2, message);
     conf = new Configuration();
   }
-  init(sched, conf, frameworkId);
+  init(sched, conf, frameworkId, frameworkName, executorInfo);
 }
 
 
 MesosSchedulerDriver::MesosSchedulerDriver(Scheduler* sched,
-					   int argc,
+                                           const std::string& frameworkName,
+                                           const ExecutorInfo& executorInfo,
+                                           int argc,
                                            char** argv,
-					   const FrameworkID& frameworkId)
+                                           const FrameworkID& frameworkId)
 {
   Configurator configurator;
   // TODO(benh): Only register local options if this is running with
@@ -479,21 +553,25 @@ MesosSchedulerDriver::MesosSchedulerDriver(Scheduler* sched,
     sched->error(this, 2, message);
     conf = new Configuration();
   }
-  init(sched, conf, frameworkId);
+  init(sched, conf, frameworkId, frameworkName, executorInfo);
 }
 
 
 void MesosSchedulerDriver::init(Scheduler* _sched,
                                 Configuration* _conf,
-                                const FrameworkID& _frameworkId)
+                                const FrameworkID& _frameworkId,
+                                const std::string& _frameworkName,
+                                const ExecutorInfo& _executorInfo)
 {
   sched = _sched;
   conf = _conf;
   frameworkId = _frameworkId;
+  frameworkName = _frameworkName;
+  executorInfo = _executorInfo;
   url = conf->get<string>("url", "local");
   process = NULL;
   detector = NULL;
-  running = false;
+  state = INITIALIZED;
 
   // Create mutex and condition variable
   pthread_mutexattr_t attr;
@@ -548,40 +626,29 @@ MesosSchedulerDriver::~MesosSchedulerDriver()
 }
 
 
-int MesosSchedulerDriver::start()
+Status MesosSchedulerDriver::start()
 {
   Lock lock(&mutex);
 
-  if (running) {
-    return -1;
-  }
-
-  // We might have been running before, but have since stopped. Don't
-  // allow this driver to be used again (for now)!
-  if (process != NULL) {
-    return -1;
+  if (state == RUNNING) {
+    return DRIVER_ALREADY_RUNNING;
+  } else if (state == STOPPED) {
+    return DRIVER_STOPPED;
+  } else if (state == ABORTED) {
+    return DRIVER_ABORTED;
   }
 
   // Set running here so we can recognize an exception from calls into
   // Java (via getFrameworkName or getExecutorInfo).
-  running = true;
-
-  // Get username of current user.
-  passwd* passwd;
-  if ((passwd = getpwuid(getuid())) == NULL) {
-    fatal("failed to get username information");
-  }
+  state = RUNNING;;
 
   // Set up framework info.
   FrameworkInfo framework;
-  framework.set_user(passwd->pw_name);
-  framework.set_name(sched->getFrameworkName(this));
-  framework.mutable_executor()->MergeFrom(sched->getExecutorInfo(this));
+  framework.set_user(utils::os::user());
+  framework.set_name(frameworkName);
+  framework.mutable_executor()->MergeFrom(executorInfo);
 
-  // Something invoked stop while we were in the scheduler, bail.
-  if (!running) {
-    return -1;
-  }
+  CHECK(process == NULL);
 
   process = new SchedulerProcess(this, sched, frameworkId, framework);
 
@@ -599,28 +666,25 @@ int MesosSchedulerDriver::start()
     detector = MasterDetector::create(url, pid, false, false);
   }
 
-  return 0;
+  return OK;
 }
 
 
-int MesosSchedulerDriver::stop()
+Status MesosSchedulerDriver::stop(bool failover)
 {
   Lock lock(&mutex);
 
-  if (!running) {
-    // Don't issue an error (could lead to an infinite loop).
-    return -1;
+  if (state == STOPPED) {
+    return DRIVER_STOPPED;
+  } else if (state != RUNNING && state != ABORTED) {
+    return DRIVER_NOT_RUNNING;
   }
 
-  // Stop the process if it is running (it might not be because we set
-  // running to be true, then called getFrameworkName or
-  // getExecutorInfo which threw exceptions, or explicitely called
-  // stop. See above in start).
-  if (process != NULL) {
-    dispatch(process, &SchedulerProcess::stop);
-  }
+  CHECK(process != NULL);
 
-  running = false;
+  dispatch(process, &SchedulerProcess::stop, failover);
+
+  state = STOPPED;
 
   // TODO: It might make more sense to clean up our local cluster here than in
   // the destructor. However, what would be even better is to allow multiple
@@ -629,87 +693,141 @@ int MesosSchedulerDriver::stop()
 
   pthread_cond_signal(&cond);
 
-  return 0;
+  return OK;
 }
 
 
-int MesosSchedulerDriver::join()
+Status MesosSchedulerDriver::abort()
 {
   Lock lock(&mutex);
 
-  while (running) {
+  if (state == ABORTED) {
+    return DRIVER_ABORTED;
+  } else if (state == STOPPED) {
+    return DRIVER_STOPPED;
+  } else if (state != RUNNING) {
+    return DRIVER_NOT_RUNNING;
+  }
+
+  CHECK(process != NULL);
+
+  dispatch(process, &SchedulerProcess::abort);
+
+  state = ABORTED;
+
+  pthread_cond_signal(&cond);
+
+  return OK;
+}
+
+
+Status MesosSchedulerDriver::join()
+{
+  Lock lock(&mutex);
+
+  if (state == ABORTED) {
+    return DRIVER_ABORTED;
+  } else if (state == STOPPED) {
+    return DRIVER_STOPPED;
+  } else if (state != RUNNING) {
+    return DRIVER_NOT_RUNNING;
+  }
+
+  while (state == RUNNING) {
     pthread_cond_wait(&cond, &mutex);
   }
 
-  return 0;
+  if (state == ABORTED)
+    return DRIVER_ABORTED;
+
+  CHECK(state == STOPPED);
+
+  return OK;
 }
 
 
-int MesosSchedulerDriver::run()
+Status MesosSchedulerDriver::run()
 {
-  int ret = start();
-  return ret != 0 ? ret : join();
+  Status status = start();
+  return status != OK ? status : join();
 }
 
 
-int MesosSchedulerDriver::killTask(const TaskID& taskId)
+Status MesosSchedulerDriver::killTask(const TaskID& taskId)
 {
   Lock lock(&mutex);
 
-  if (!running || (process != NULL && !process->active)) {
-    return -1;
+  if (state == ABORTED) {
+    return DRIVER_ABORTED;
+  } else if (state != RUNNING) {
+    return DRIVER_NOT_RUNNING;
   }
+
+  CHECK(process != NULL);
 
   dispatch(process, &SchedulerProcess::killTask, taskId);
 
-  return 0;
+  return OK;
 }
 
 
-int MesosSchedulerDriver::replyToOffer(const OfferID& offerId,
-                                       const vector<TaskDescription>& tasks,
-                                       const Filters& filters)
+Status MesosSchedulerDriver::launchTasks(const OfferID& offerId,
+                                         const vector<TaskDescription>& tasks,
+                                         const Filters& filters)
 {
   Lock lock(&mutex);
 
-  if (!running || (process != NULL && !process->active)) {
-    return -1;
+  if (state == ABORTED) {
+    return DRIVER_ABORTED;
+  } else if (state != RUNNING) {
+    return DRIVER_NOT_RUNNING;
   }
 
-  dispatch(process, &SchedulerProcess::replyToOffer, offerId, tasks, filters);
+  CHECK(process != NULL);
 
-  return 0;
+  dispatch(process, &SchedulerProcess::launchTasks, offerId, tasks, filters);
+
+  return OK;
 }
 
 
-int MesosSchedulerDriver::reviveOffers()
+Status MesosSchedulerDriver::reviveOffers()
 {
   Lock lock(&mutex);
 
-  if (!running || (process != NULL && !process->active)) {
-    return -1;
+  if (state == ABORTED) {
+    return DRIVER_ABORTED;
+  } else if (state != RUNNING) {
+    return DRIVER_NOT_RUNNING;
   }
+
+  CHECK(process != NULL);
 
   dispatch(process, &SchedulerProcess::reviveOffers);
 
-  return 0;
+  return OK;
 }
 
 
-int MesosSchedulerDriver::sendFrameworkMessage(const SlaveID& slaveId,
-					                           const ExecutorID& executorId,
-					                           const string& data)
+Status MesosSchedulerDriver::sendFrameworkMessage(
+    const SlaveID& slaveId,
+    const ExecutorID& executorId,
+    const string& data)
 {
   Lock lock(&mutex);
 
-  if (!running || (process != NULL && !process->active)) {
-    return -1;
+  if (state == ABORTED) {
+    return DRIVER_ABORTED;
+  } else if (state != RUNNING) {
+    return DRIVER_NOT_RUNNING;
   }
+
+  CHECK(process != NULL);
 
   dispatch(process, &SchedulerProcess::sendFrameworkMessage,
            slaveId, executorId, data);
 
-  return 0;
+  return OK;
 }
 
 
@@ -719,16 +837,20 @@ void MesosSchedulerDriver::error(int code, const string& message)
 }
 
 
-int MesosSchedulerDriver::requestResources(
+Status MesosSchedulerDriver::requestResources(
     const vector<ResourceRequest>& requests)
 {
   Lock lock(&mutex);
 
-  if (!running || (process != NULL && !process->active)) {
-    return -1;
+  if (state == ABORTED) {
+    return DRIVER_ABORTED;
+  } else if (state != RUNNING) {
+    return DRIVER_NOT_RUNNING;
   }
+
+  CHECK(process != NULL);
 
   dispatch(process, &SchedulerProcess::requestResources, requests);
 
-  return 0;
+  return OK;
 }

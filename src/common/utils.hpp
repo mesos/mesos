@@ -336,6 +336,17 @@ inline std::list<std::string> listdir(const std::string& directory)
 }
 
 
+inline std::string user()
+{
+  passwd* passwd;
+  if ((passwd = getpwuid(getuid())) == NULL) {
+    LOG(FATAL) << "Failed to get username information";
+  }
+
+  return passwd->pw_name;
+}
+
+
 inline Result<std::string> hostname()
 {
   char host[512];

@@ -57,12 +57,13 @@ public:
                            const FrameworkInfo& frameworkInfo,
                            bool failover);
   void unregisterFramework(const FrameworkID& frameworkId);
+  void deactivateFramework(const FrameworkID& frameworkId);
   void resourceRequest(const FrameworkID& frameworkId,
                        const std::vector<ResourceRequest>& requests);
-  void resourceOfferReply(const FrameworkID& frameworkId,
-                          const OfferID& offerId,
-                          const std::vector<TaskDescription>& tasks,
-                          const Filters& filters);
+  void launchTasks(const FrameworkID& frameworkId,
+                   const OfferID& offerId,
+                   const std::vector<TaskDescription>& tasks,
+                   const Filters& filters);
   void reviveOffers(const FrameworkID& frameworkId);
   void killTask(const FrameworkID& frameworkId, const TaskID& taskId);
   void schedulerMessage(const SlaveID& slaveId,
@@ -105,14 +106,14 @@ protected:
 
   void initialize();
 
-  // Process a resource offer reply (for a non-cancelled offer) by
+  // Process a launch tasks request (for a non-cancelled offer) by
   // launching the desired tasks (if the offer contains a valid set of
   // tasks) and reporting any unused resources to the allocator.
-  void processOfferReply(Offer* offer,
-                         Framework* framework,
-                         Slave* slave,
-                         const std::vector<TaskDescription>& tasks,
-                         const Filters& filters);
+  void processTasks(Offer* offer,
+                    Framework* framework,
+                    Slave* slave,
+                    const std::vector<TaskDescription>& tasks,
+                    const Filters& filters);
 
   // Add a framework.
   void addFramework(Framework* framework);

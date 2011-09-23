@@ -264,3 +264,19 @@ jobject convert(JNIEnv* env, const ExecutorArgs& args)
 
   return jargs;
 }
+
+template <>
+jobject convert(JNIEnv* env, const Status& status)
+{
+  jint jvalue = status;
+
+  jclass clazz = env->FindClass("org/apache/mesos/Protos$Status");
+
+  jmethodID valueOf =
+    env->GetStaticMethodID(clazz, "valueOf",
+                           "(I)Lorg/apache/mesos/Protos$Status;");
+
+  jobject jstate = env->CallStaticObjectMethod(clazz, valueOf, jvalue);
+
+  return jstate;
+}

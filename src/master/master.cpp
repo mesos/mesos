@@ -330,17 +330,21 @@ void Master::initialize()
       &Master::unregisterFramework,
       &UnregisterFrameworkMessage::framework_id);
 
+  installProtobufHandler<DeactivateFrameworkMessage>(
+        &Master::deactivateFramework,
+        &DeactivateFrameworkMessage::framework_id);
+
   installProtobufHandler<ResourceRequestMessage>(
       &Master::resourceRequest,
       &ResourceRequestMessage::framework_id,
       &ResourceRequestMessage::requests);
 
-  installProtobufHandler<ResourceOfferReplyMessage>(
-      &Master::resourceOfferReply,
-      &ResourceOfferReplyMessage::framework_id,
-      &ResourceOfferReplyMessage::offer_id,
-      &ResourceOfferReplyMessage::tasks,
-      &ResourceOfferReplyMessage::filters);
+  installProtobufHandler<LaunchTasksMessage>(
+      &Master::launchTasks,
+      &LaunchTasksMessage::framework_id,
+      &LaunchTasksMessage::offer_id,
+      &LaunchTasksMessage::tasks,
+      &LaunchTasksMessage::filters);
 
   installProtobufHandler<ReviveOffersMessage>(
       &Master::reviveOffers,
@@ -464,17 +468,20 @@ void Master::registerFramework(const FrameworkInfo& frameworkInfo)
     message.set_message("No executor URI given");
     send(from(), message);
     delete framework;
-  } else {
-    bool rootSubmissions = conf.get<bool>("root_submissions", true);
-    if (framework->info.user() == "root" && rootSubmissions == false) {
-      LOG(INFO) << framework << " registering as root, but "
-                << "root submissions are disabled on this cluster";
-      FrameworkErrorMessage message;
-      message.set_code(1);
-      message.set_message("User 'root' is not allowed to run frameworks");
-      send(from(), message);
-      delete framework;
-    }
+    return;
+  }
+
+  bool rootSubmissions = conf.get<bool>("root_submissions", true);
+
+  if (framework->info.user() == "root" && rootSubmissions == false) {
+    LOG(INFO) << framework << " registering as root, but "
+      << "root submissions are disabled on this cluster";
+    FrameworkErrorMessage message;
+    message.set_code(1);
+    message.set_message("User 'root' is not allowed to run frameworks");
+    send(from(), message);
+    delete framework;
+    return;
   }
 
   addFramework(framework);
@@ -491,76 +498,81 @@ void Master::reregisterFramework(const FrameworkID& frameworkId,
     message.set_code(1);
     message.set_message("Missing framework id");
     send(from(), message);
-  } else if (frameworkInfo.executor().uri() == "") {
+    return;
+  }
+
+  if (frameworkInfo.executor().uri() == "") {
     LOG(INFO) << "Framework " << frameworkId << " re-registering "
               << "without an executor URI";
     FrameworkErrorMessage message;
     message.set_code(1);
     message.set_message("No executor URI given");
     send(from(), message);
-  } else {
-    LOG(INFO) << "Re-registering framework " << frameworkId
-              << " at " << from();
+    return;
+  }
 
-    if (frameworks.count(frameworkId) > 0) {
-      // Using the "failover" of the scheduler allows us to keep a
-      // scheduler that got partitioned but didn't die (in ZooKeeper
-      // speak this means didn't lose their session) and then
-      // eventually tried to connect to this master even though
-      // another instance of their scheduler has reconnected. This
-      // might not be an issue in the future when the
-      // master/allocator launches the scheduler can get restarted
-      // (if necessary) by the master and the master will always
-      // know which scheduler is the correct one.
-      if (failover) {
-        // TODO: Should we check whether the new scheduler has given
-        // us a different framework name, user name or executor info?
-        LOG(INFO) << "Framework " << frameworkId << " failed over";
-        failoverFramework(frameworks[frameworkId], from());
-      } else {
-        LOG(INFO) << "Allowing the Framework " << frameworkId
-                  << " to re-register with an already used id";
+  LOG(INFO) << "Re-registering framework " << frameworkId
+            << " at " << from();
 
-        FrameworkReregisteredMessage message;
-        message.mutable_framework_id()->MergeFrom(frameworkId);
-        send(from(), message);
-        return;
-      }
+  if (frameworks.count(frameworkId) > 0) {
+    // Using the "failover" of the scheduler allows us to keep a
+    // scheduler that got partitioned but didn't die (in ZooKeeper
+    // speak this means didn't lose their session) and then
+    // eventually tried to connect to this master even though
+    // another instance of their scheduler has reconnected. This
+    // might not be an issue in the future when the
+    // master/allocator launches the scheduler can get restarted
+    // (if necessary) by the master and the master will always
+    // know which scheduler is the correct one.
+    if (failover) {
+      // TODO: Should we check whether the new scheduler has given
+      // us a different framework name, user name or executor info?
+      LOG(INFO) << "Framework " << frameworkId << " failed over";
+      failoverFramework(frameworks[frameworkId], from());
     } else {
-      // We don't have a framework with this ID, so we must be a newly
-      // elected Mesos master to which either an existing scheduler or a
-      // failed-over one is connecting. Create a Framework object and add
-      // any tasks it has that have been reported by reconnecting slaves.
-      Framework* framework =
-        new Framework(frameworkInfo, frameworkId, from(), elapsedTime());
+      LOG(INFO) << "Allowing the Framework " << frameworkId
+                << " to re-register with an already used id";
 
-      // TODO(benh): Check for root submissions like above!
+      FrameworkReregisteredMessage message;
+      message.mutable_framework_id()->MergeFrom(frameworkId);
+      send(from(), message);
+      return;
+    }
+  } else {
+    // We don't have a framework with this ID, so we must be a newly
+    // elected Mesos master to which either an existing scheduler or a
+    // failed-over one is connecting. Create a Framework object and add
+    // any tasks it has that have been reported by reconnecting slaves.
+    Framework* framework =
+      new Framework(frameworkInfo, frameworkId, from(), elapsedTime());
 
-      addFramework(framework);
+    // TODO(benh): Check for root submissions like above!
 
-      // Add any running tasks reported by slaves for this framework.
-      foreachpair (const SlaveID& slaveId, Slave* slave, slaves) {
-        foreachvalue (Task* task, slave->tasks) {
-          if (framework->id == task->framework_id()) {
-            framework->addTask(task);
-          }
+    addFramework(framework);
+
+    // Add any running tasks reported by slaves for this framework.
+    foreachpair (const SlaveID& slaveId, Slave* slave, slaves) {
+      foreachvalue (Task* task, slave->tasks) {
+        if (framework->id == task->framework_id()) {
+          framework->addTask(task);
         }
       }
     }
-
-    CHECK(frameworks.count(frameworkId) > 0);
-
-    // Broadcast the new framework pid to all the slaves. We have to
-    // broadcast because an executor might be running on a slave but
-    // it currently isn't running any tasks. This could be a
-    // potential scalability issue ...
-    foreachvalue (Slave* slave, slaves) {
-      UpdateFrameworkMessage message;
-      message.mutable_framework_id()->MergeFrom(frameworkId);
-      message.set_pid(from());
-      send(slave->pid, message);
-    }
   }
+
+  CHECK(frameworks.count(frameworkId) > 0);
+
+  // Broadcast the new framework pid to all the slaves. We have to
+  // broadcast because an executor might be running on a slave but
+  // it currently isn't running any tasks. This could be a
+  // potential scalability issue ...
+  foreachvalue (Slave* slave, slaves) {
+    UpdateFrameworkMessage message;
+    message.mutable_framework_id()->MergeFrom(frameworkId);
+    message.set_pid(from());
+    send(slave->pid, message);
+  }
+
 }
 
 
@@ -580,6 +592,22 @@ void Master::unregisterFramework(const FrameworkID& frameworkId)
 }
 
 
+void Master::deactivateFramework(const FrameworkID& frameworkId)
+{
+  LOG(INFO) << "Asked to deactivate framework " << frameworkId;
+  Framework* framework = getFramework(frameworkId);
+
+  if (framework != NULL) {
+    if (framework->pid == from()) {
+      framework->active = false;
+    } else {
+      LOG(WARNING) << from() << " tried to deactivate framework; "
+        << "expecting " << framework->pid;
+    }
+  }
+}
+
+
 void Master::resourceRequest(const FrameworkID& frameworkId,
                              const vector<ResourceRequest>& requests)
 {
@@ -587,10 +615,10 @@ void Master::resourceRequest(const FrameworkID& frameworkId,
 }
 
 
-void Master::resourceOfferReply(const FrameworkID& frameworkId,
-                                const OfferID& offerId,
-                                const vector<TaskDescription>& tasks,
-                                const Filters& filters)
+void Master::launchTasks(const FrameworkID& frameworkId,
+                         const OfferID& offerId,
+                         const vector<TaskDescription>& tasks,
+                         const Filters& filters)
 {
   LOG(INFO) << "Received reply for offer " << offerId;
 
@@ -606,7 +634,7 @@ void Master::resourceOfferReply(const FrameworkID& frameworkId,
       CHECK(offer->framework_id() == frameworkId);
       Slave* slave = getSlave(offer->slave_id());
       CHECK(slave != NULL) << "An offer should not outlive a slave!";
-      processOfferReply(offer, framework, slave, tasks, filters);
+      processTasks(offer, framework, slave, tasks, filters);
     } else {
       // The offer is gone (possibly rescinded, lost slave, re-reply
       // to same offer, etc). Report all tasks in it as failed.
@@ -982,7 +1010,7 @@ void Master::deactivatedSlaveHostnamePort(const string& hostname,
     }
 
     LOG(INFO) << "Master now considering a slave at "
-	      << hostname << ":" << port << " as inactive";
+	            << hostname << ":" << port << " as inactive";
     slaveHostnamePorts.remove(hostname, port);
   }
 }
@@ -1231,11 +1259,11 @@ struct ResourceUsageChecker : TaskDescriptionVisitor
 // Process a resource offer reply (for a non-cancelled offer) by
 // launching the desired tasks (if the offer contains a valid set of
 // tasks) and reporting used resources to the allocator.
-void Master::processOfferReply(Offer* offer,
-                               Framework* framework,
-                               Slave* slave,
-                               const vector<TaskDescription>& tasks,
-                               const Filters& filters)
+void Master::processTasks(Offer* offer,
+                          Framework* framework,
+                          Slave* slave,
+                          const vector<TaskDescription>& tasks,
+                          const Filters& filters)
 {
   Resources usedResources; // Accumulated resources used from this offer.
 

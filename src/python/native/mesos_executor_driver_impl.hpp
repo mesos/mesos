@@ -65,7 +65,10 @@ int MesosExecutorDriverImpl_clear(MesosExecutorDriverImpl* self);
 // MesosExecutorDriverImpl methods
 PyObject* MesosExecutorDriverImpl_start(MesosExecutorDriverImpl* self);
 
-PyObject* MesosExecutorDriverImpl_stop(MesosExecutorDriverImpl* self);
+PyObject* MesosExecutorDriverImpl_stop(MesosExecutorDriverImpl* self,
+                                       PyObject* args);
+
+PyObject* MesosExecutorDriverImpl_abort(MesosExecutorDriverImpl* self);
 
 PyObject* MesosExecutorDriverImpl_join(MesosExecutorDriverImpl* self);
 

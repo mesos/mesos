@@ -90,6 +90,11 @@ message UnregisterFrameworkMessage {
 }
 
 
+message DeactivateFrameworkMessage {
+  required FrameworkID framework_id = 1;
+}
+
+
 message ResourceRequestMessage {
   required FrameworkID framework_id = 1;
   repeated ResourceRequest requests = 2;
@@ -102,7 +107,7 @@ message ResourceOffersMessage {
 }
 
 
-message ResourceOfferReplyMessage {
+message LaunchTasksMessage {
   required FrameworkID framework_id = 1;
   required OfferID offer_id = 2;
   repeated TaskDescription tasks = 3;
