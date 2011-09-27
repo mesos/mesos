@@ -26,10 +26,11 @@ class SchedulerDriver:
   def abort(self) : pass
   def join(self): pass
   def run(self): pass
-  def sendFrameworkMessage(self, slaveId, executorId, data): pass
-  def killTask(self, taskId): pass
+  def requestResources(self, requests): pass
   def launchTasks(self, offerId, tasks, filters = None): pass
+  def killTask(self, taskId): pass
   def reviveOffers(self): pass
+  def sendFrameworkMessage(self, slaveId, executorId, data): pass
 
 
 # Base class for Mesos executors. Users' executors should extend this class

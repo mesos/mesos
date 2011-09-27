@@ -81,6 +81,10 @@ PyMethodDef MesosSchedulerDriverImpl_methods[] = {
    "Wait for a running driver to disconnect from Mesos"},
   {"run", (PyCFunction) MesosSchedulerDriverImpl_run, METH_NOARGS,
    "Start a driver and run it, returning when it disconnects from Mesos"},
+  {"requestResources",
+   (PyCFunction) MesosSchedulerDriverImpl_requestResources,
+   METH_VARARGS,
+   "Request resources from the Mesos allocator"},
   {"launchTasks",
    (PyCFunction) MesosSchedulerDriverImpl_launchTasks,
    METH_VARARGS,
@@ -89,14 +93,14 @@ PyMethodDef MesosSchedulerDriverImpl_methods[] = {
    (PyCFunction) MesosSchedulerDriverImpl_killTask,
    METH_VARARGS,
    "Kill the task with the given ID"},
-  {"sendFrameworkMessage",
-   (PyCFunction) MesosSchedulerDriverImpl_sendFrameworkMessage,
-   METH_VARARGS,
-   "Send a FrameworkMessage to a slave"},
   {"reviveOffers",
    (PyCFunction) MesosSchedulerDriverImpl_reviveOffers,
    METH_NOARGS,
    "Remove all filters and ask Mesos for new offers"},
+  {"sendFrameworkMessage",
+   (PyCFunction) MesosSchedulerDriverImpl_sendFrameworkMessage,
+   METH_VARARGS,
+   "Send a FrameworkMessage to a slave"},
   {NULL}  /* Sentinel */
 };
 
@@ -304,14 +308,41 @@ PyObject* MesosSchedulerDriverImpl_run(MesosSchedulerDriverImpl* self)
 }
 
 
-PyObject* MesosSchedulerDriverImpl_reviveOffers(MesosSchedulerDriverImpl* self)
+PyObject* MesosSchedulerDriverImpl_requestResources(MesosSchedulerDriverImpl* self,
+                                                    PyObject* args)
 {
   if (self->driver == NULL) {
     PyErr_Format(PyExc_Exception, "MesosSchedulerDriverImpl.driver is NULL");
     return NULL;
   }
 
-  Status status = self->driver->reviveOffers();
+  PyObject* requestsObj = NULL;
+  vector<ResourceRequest> requests;
+
+  if (!PyArg_ParseTuple(args, "O", &requestsObj)) {
+    return NULL;
+  }
+
+  if (!PyList_Check(requestsObj)) {
+    PyErr_Format(PyExc_Exception, "Parameter 2 to requestsResources is not a list");
+    return NULL;
+  }
+  Py_ssize_t len = PyList_Size(requestsObj);
+  for (int i = 0; i < len; i++) {
+    PyObject* requestObj = PyList_GetItem(requestsObj, i);
+    if (requestObj == NULL) {
+      return NULL; // Exception will have been set by PyList_GetItem
+    }
+    ResourceRequest request;
+    if (!readPythonProtobuf(requestObj, &request)) {
+      PyErr_Format(PyExc_Exception,
+                   "Could not deserialize Python ResourceRequest");
+      return NULL;
+    }
+    requests.push_back(request);
+  }
+
+  Status status = self->driver->requestResources(requests);
   return PyInt_FromLong(status); // Sets an exception if creating the int fails
 }
 
@@ -347,7 +378,7 @@ PyObject* MesosSchedulerDriverImpl_launchTasks(MesosSchedulerDriverImpl* self,
   Py_ssize_t len = PyList_Size(tasksObj);
   for (int i = 0; i < len; i++) {
     PyObject* taskObj = PyList_GetItem(tasksObj, i);
-    if (tasksObj == NULL) {
+    if (taskObj == NULL) {
       return NULL; // Exception will have been set by PyList_GetItem
     }
     TaskDescription task;
@@ -395,6 +426,18 @@ PyObject* MesosSchedulerDriverImpl_killTask(MesosSchedulerDriverImpl* self,
 }
 
 
+PyObject* MesosSchedulerDriverImpl_reviveOffers(MesosSchedulerDriverImpl* self)
+{
+  if (self->driver == NULL) {
+    PyErr_Format(PyExc_Exception, "MesosSchedulerDriverImpl.driver is NULL");
+    return NULL;
+  }
+
+  Status status = self->driver->reviveOffers();
+  return PyInt_FromLong(status); // Sets an exception if creating the int fails
+}
+
+
 PyObject* MesosSchedulerDriverImpl_sendFrameworkMessage(
     MesosSchedulerDriverImpl* self,
     PyObject* args)
@@ -407,7 +450,6 @@ PyObject* MesosSchedulerDriverImpl_sendFrameworkMessage(
 
   PyObject* sidObj = NULL;
   PyObject* eidObj = NULL;
-  PyObject* dataObj = NULL;
   SlaveID sid;
   ExecutorID eid;
   const char* data;

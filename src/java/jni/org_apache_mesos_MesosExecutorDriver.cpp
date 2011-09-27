@@ -246,9 +246,7 @@ void JNIExecutor::error(ExecutorDriver* driver, int code, const string& message)
 }
 
 
-#ifdef __cplusplus
 extern "C" {
-#endif
 
 /*
  * Class:     org_apache_mesos_MesosExecutorDriver
@@ -440,7 +438,4 @@ JNIEXPORT jobject JNICALL Java_org_apache_mesos_MesosExecutorDriver_sendFramewor
   return convert<Status>(env, status);
 }
 
-
-#ifdef __cplusplus
-}
-#endif
+} // extern "C" {

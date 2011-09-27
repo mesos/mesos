@@ -46,15 +46,19 @@ public class MesosSchedulerDriver implements SchedulerDriver {
     return ret != Status.OK ? ret : join();
   }
 
-  public native Status sendFrameworkMessage(SlaveID slaveId, ExecutorID executorId, byte[] data);
-  public native Status killTask(TaskID taskId);
-  public native Status launchTasks(OfferID offerId, Collection<TaskDescription> tasks, Filters filters);
+  public native Status requestResources(Collection<ResourceRequest> requests);
 
   public Status launchTasks(OfferID offerId, Collection<TaskDescription> tasks) {
     return launchTasks(offerId, tasks, Filters.newBuilder().build());
   }
 
+  public native Status launchTasks(OfferID offerId, Collection<TaskDescription> tasks, Filters filters);
+
+  public native Status killTask(TaskID taskId);
+
   public native Status reviveOffers();
+
+  public native Status sendFrameworkMessage(SlaveID slaveId, ExecutorID executorId, byte[] data);
 
   protected native void initialize();
   protected native void finalize();

@@ -397,9 +397,7 @@ void JNIScheduler::error(SchedulerDriver* driver, int code,
 }
 
 
-#ifdef __cplusplus
 extern "C" {
-#endif
 
 /*
  * Class:     org_apache_mesos_MesosSchedulerDriver
@@ -690,6 +688,47 @@ JNIEXPORT jobject JNICALL Java_org_apache_mesos_MesosSchedulerDriver_reviveOffer
 }
 
 
-#ifdef __cplusplus
+/*
+ * Class:     org_apache_mesos_MesosSchedulerDriver
+ * Method:    requestResources
+ * Signature: (Ljava/util/Collection;)Lorg/apache/mesos/Protos/Status;
+ */
+JNIEXPORT jobject JNICALL Java_org_apache_mesos_MesosSchedulerDriver_requestResources
+  (JNIEnv* env, jobject thiz, jobject jrequests)
+{
+  jclass clazz = env->GetObjectClass(thiz);
+
+  jfieldID __driver = env->GetFieldID(clazz, "__driver", "J");
+  MesosSchedulerDriver* driver =
+    (MesosSchedulerDriver*) env->GetLongField(thiz, __driver);
+
+  // Construct a C++ ResourceRequest from each Java ResourceRequest.
+  vector<ResourceRequest> requests;
+
+  clazz = env->GetObjectClass(jrequests);
+
+  // Iterator iterator = requests.iterator();
+  jmethodID iterator =
+    env->GetMethodID(clazz, "iterator", "()Ljava/util/Iterator;");
+  jobject jiterator = env->CallObjectMethod(jrequests, iterator);
+
+  clazz = env->GetObjectClass(jiterator);
+
+  // while (iterator.hasNext()) {
+  jmethodID hasNext = env->GetMethodID(clazz, "hasNext", "()Z");
+
+  jmethodID next = env->GetMethodID(clazz, "next", "()Ljava/lang/Object;");
+
+  while (env->CallBooleanMethod(jrequests, hasNext)) {
+    // Object task = iterator.next();
+    jobject jrequest = env->CallObjectMethod(jiterator, next);
+    const ResourceRequest& request = construct<ResourceRequest>(env, jrequest);
+    requests.push_back(request);
+  }
+
+  Status status = driver->requestResources(requests);
+
+  return convert<Status>(env, status);
 }
-#endif
+
+} // extern "C" {

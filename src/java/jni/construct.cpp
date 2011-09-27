@@ -293,3 +293,24 @@ ExecutorInfo construct(JNIEnv* env, jobject jobj)
 
   return executor;
 }
+
+
+template <>
+ResourceRequest construct(JNIEnv* env, jobject jobj)
+{
+  jclass clazz = env->GetObjectClass(jobj);
+
+  // byte[] data = obj.toByteArray();
+  jmethodID toByteArray = env->GetMethodID(clazz, "toByteArray", "()[B");
+
+  jbyteArray jdata = (jbyteArray) env->CallObjectMethod(jobj, toByteArray);
+
+  jbyte* data = env->GetByteArrayElements(jdata, NULL);
+  jsize length = env->GetArrayLength(jdata);
+
+  const ResourceRequest& request = parse<ResourceRequest>(data, length);
+
+  env->ReleaseByteArrayElements(jdata, data, 0);
+
+  return request;
+}

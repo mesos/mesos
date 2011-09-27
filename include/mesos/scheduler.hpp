@@ -82,20 +82,20 @@ public:
 
   // Communication methods.
 
-  virtual Status sendFrameworkMessage(const SlaveID& slaveId,
-                                      const ExecutorID& executorId,
-                                      const std::string& data) = 0;
-
-  virtual Status killTask(const TaskID& taskId) = 0;
+  virtual Status requestResources(
+      const std::vector<ResourceRequest>& requests) = 0;
 
   virtual Status launchTasks(const OfferID& offerId,
                              const std::vector<TaskDescription>& tasks,
                              const Filters& filters = Filters()) = 0;
 
+  virtual Status killTask(const TaskID& taskId) = 0;
+
   virtual Status reviveOffers() = 0;
 
-  virtual Status requestResources(
-      const std::vector<ResourceRequest>& requests) = 0;
+  virtual Status sendFrameworkMessage(const SlaveID& slaveId,
+                                      const ExecutorID& executorId,
+                                      const std::string& data) = 0;
 };
 
 
@@ -139,7 +139,6 @@ public:
                        const std::map<std::string, std::string>& params,
                        const FrameworkID& frameworkId = FrameworkID());
 
-#ifndef SWIG
   /**
    * Create a scheduler driver with a config read from command-line arguments.
    * Additional Mesos config options are read from the environment, as well
@@ -161,7 +160,6 @@ public:
                        int argc,
                        char** argv,
                        const FrameworkID& frameworkId = FrameworkID());
-#endif
 
   virtual ~MesosSchedulerDriver();
 
@@ -173,19 +171,20 @@ public:
   virtual Status run(); // Start and then join driver.
 
   // Communication methods.
-  virtual Status sendFrameworkMessage(const SlaveID& slaveId,
-                                      const ExecutorID& executorId,
-                                      const std::string& data);
-
-  virtual Status killTask(const TaskID& taskId);
+  virtual Status requestResources(
+      const std::vector<ResourceRequest>& requests);
 
   virtual Status launchTasks(const OfferID& offerId,
                              const std::vector<TaskDescription>& tasks,
                              const Filters& filters = Filters());
 
+  virtual Status killTask(const TaskID& taskId);
+
   virtual Status reviveOffers();
 
-  virtual Status requestResources(const std::vector<ResourceRequest>& requests);
+  virtual Status sendFrameworkMessage(const SlaveID& slaveId,
+                                      const ExecutorID& executorId,
+                                      const std::string& data);
 
 private:
   // Initialization method used by constructors

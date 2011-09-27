@@ -87,9 +87,7 @@ jobject convert(JNIEnv* env, const Log::Entry& entry)
 }
 
 
-#ifdef __cplusplus
 extern "C" {
-#endif
 
 /*
  * Class:     org_apache_mesos_Log_Reader
@@ -475,6 +473,4 @@ JNIEXPORT void JNICALL Java_org_apache_mesos_Log_finalize
   delete log;
 }
 
-#ifdef __cplusplus
-}
-#endif
+} // extern "C" {

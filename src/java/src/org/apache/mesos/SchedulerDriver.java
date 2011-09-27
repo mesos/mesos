@@ -16,9 +16,10 @@ public interface SchedulerDriver {
   public Status run();
 
   // Communication methods.
-  public Status sendFrameworkMessage(SlaveID slaveId, ExecutorID executorId, byte[] data);
-  public Status killTask(TaskID taskId);
+  public Status requestResources(Collection<ResourceRequest> requests);
   public Status launchTasks(OfferID offerId, Collection<TaskDescription> tasks, Filters filters);
   public Status launchTasks(OfferID offerId, Collection<TaskDescription> tasks);
+  public Status killTask(TaskID taskId);
   public Status reviveOffers();
+  public Status sendFrameworkMessage(SlaveID slaveId, ExecutorID executorId, byte[] data);
 };
