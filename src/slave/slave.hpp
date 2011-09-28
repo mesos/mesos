@@ -47,6 +47,7 @@ public:
   void masterDetectionFailure();
   void registered(const SlaveID& slaveId);
   void reregistered(const SlaveID& slaveId);
+  void doReliableRegistration();
   void runTask(const FrameworkInfo& frameworkInfo,
                const FrameworkID& frameworkId,
                const std::string& pid,
@@ -159,6 +160,7 @@ private:
 
   double startTime;
 
+  bool connected; // Flag to indicate if slave is registered.
 //   typedef std::pair<FrameworkID, TaskID> StatusUpdateStreamID;
 //   hashmap<std::pair<FrameworkID, TaskID>, StatusUpdateStream*> statusUpdateStreams;
 

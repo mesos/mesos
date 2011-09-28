@@ -43,6 +43,7 @@ using testing::Return;
 using testing::SaveArg;
 using testing::SaveArgPointee;
 
+
 TEST(FaultToleranceTest, SlaveLost)
 {
   ASSERT_TRUE(GTEST_IS_THREADSAFE);
@@ -223,6 +224,51 @@ TEST(FaultToleranceTest, SchedulerFailover)
 }
 
 
+TEST(FaultToleranceTest, FrameworkReliableRegistration)
+{
+  ASSERT_TRUE(GTEST_IS_THREADSAFE);
+
+  MockFilter filter;
+  process::filter(&filter);
+
+  EXPECT_MSG(filter, _, _, _)
+    .WillRepeatedly(Return(false));
+
+  PID<Master> master = local::launch(1, 2, 1 * Gigabyte, false, false);
+
+  MockScheduler sched;
+  MesosSchedulerDriver driver(&sched, "", DEFAULT_EXECUTOR_INFO, master);
+
+  trigger schedRegisteredCall;
+
+  EXPECT_CALL(sched, registered(&driver, _))
+    .WillOnce(Trigger(&schedRegisteredCall));
+
+  EXPECT_CALL(sched, resourceOffers(&driver, _))
+    .WillRepeatedly(Return());
+
+  EXPECT_CALL(sched, offerRescinded(&driver, _))
+    .Times(AtMost(1));
+
+  // Drop the registered message, in the first attempt, but allow subsequent
+  // tries.
+  EXPECT_MSG(filter, Eq(FrameworkRegisteredMessage().GetTypeName()), _, _)
+    .WillOnce(Return(true))
+    .WillRepeatedly(Return(false));
+
+  driver.start();
+
+  WAIT_UNTIL(schedRegisteredCall); // Ensures registered message is received.
+
+  driver.stop();
+  driver.join();
+
+  local::shutdown();
+
+  process::filter(NULL);
+}
+
+
 TEST(FaultToleranceTest, FrameworkReregister)
 {
   ASSERT_TRUE(GTEST_IS_THREADSAFE);
@@ -280,6 +326,7 @@ TEST(FaultToleranceTest, FrameworkReregister)
 
   process::filter(NULL);
 }
+
 
 TEST(FaultToleranceTest, SchedulerFailoverStatusUpdate)
 {
@@ -520,6 +567,65 @@ TEST(FaultToleranceTest, SchedulerFailoverFrameworkMessage)
 
   process::post(master, process::TERMINATE);
   process::wait(master);
+}
+
+
+TEST(FaultToleranceTest, SlaveReliableRegistration)
+{
+  ASSERT_TRUE(GTEST_IS_THREADSAFE);
+
+  MockFilter filter;
+  process::filter(&filter);
+
+  EXPECT_MSG(filter, _, _, _)
+    .WillRepeatedly(Return(false));
+
+  SimpleAllocator a;
+  Master m(&a);
+  PID<Master> master = process::spawn(&m);
+
+  ProcessBasedIsolationModule isolationModule;
+
+  Resources resources = Resources::parse("cpus:2;mem:1024");
+
+  Slave s(resources, true, &isolationModule);
+  PID<Slave> slave = process::spawn(&s);
+
+  BasicMasterDetector detector(master, slave, true);
+
+  MockScheduler sched;
+  MesosSchedulerDriver driver(&sched, "", DEFAULT_EXECUTOR_INFO, master);
+
+  trigger resourceOffersCall;
+
+  EXPECT_CALL(sched, registered(&driver, _))
+    .Times(1);
+
+  EXPECT_CALL(sched, resourceOffers(&driver, _))
+    .WillOnce(Trigger(&resourceOffersCall))
+    .WillRepeatedly(Return());
+
+  trigger slaveRegisterMsg;
+
+  // Drop the first registered message, but allow subsequent messages.
+  EXPECT_MSG(filter, Eq(SlaveRegisteredMessage().GetTypeName()), _, _)
+    .WillOnce(Return(true))
+    .WillRepeatedly(DoAll(Trigger(&slaveRegisterMsg), Return(false)));
+
+  driver.start();
+
+  WAIT_UNTIL(slaveRegisterMsg);
+
+  driver.stop();
+  driver.join();
+
+  process::post(slave, process::TERMINATE);
+  process::wait(slave);
+
+  process::post(master, process::TERMINATE);
+  process::wait(master);
+
+  process::filter(NULL);
 }
 
 

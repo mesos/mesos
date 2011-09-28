@@ -456,6 +456,11 @@ void Master::noMasterDetected()
 
 void Master::registerFramework(const FrameworkInfo& frameworkInfo)
 {
+  if (!elected) {
+    LOG(WARNING) << "Ignoring register framework message since not elected yet";
+    return;
+  }
+
   Framework* framework =
     new Framework(frameworkInfo, newFrameworkId(), from(), elapsedTime());
 
@@ -492,6 +497,12 @@ void Master::reregisterFramework(const FrameworkID& frameworkId,
                                  const FrameworkInfo& frameworkInfo,
                                  bool failover)
 {
+  if (!elected) {
+    LOG(WARNING) << "Ignoring re-register framework message since "
+                 << "not elected yet";
+    return;
+  }
+
   if (frameworkId == "") {
     LOG(ERROR) << "Framework re-registering without an id!";
     FrameworkErrorMessage message;
@@ -748,6 +759,11 @@ void Master::schedulerMessage(const SlaveID& slaveId,
 
 void Master::registerSlave(const SlaveInfo& slaveInfo)
 {
+  if (!elected) {
+    LOG(WARNING) << "Ignoring register slave message since not elected yet";
+    return;
+  }
+
   Slave* slave = new Slave(slaveInfo, newSlaveId(), from(), elapsedTime());
 
   LOG(INFO) << "Attempting to register slave " << slave->id
@@ -772,6 +788,11 @@ void Master::reregisterSlave(const SlaveID& slaveId,
                              const vector<ExecutorInfo>& executorInfos,
                              const vector<Task>& tasks)
 {
+  if (!elected) {
+    LOG(WARNING) << "Ignoring re-register slave message since not elected yet";
+    return;
+  }
+
   if (slaveId == "") {
     LOG(ERROR) << "Slave re-registered without an id!";
     send(from(), TERMINATE);

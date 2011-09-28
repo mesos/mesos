@@ -145,6 +145,7 @@ void Slave::initialize()
   stats.invalidFrameworkMessages = 0;
 
   startTime = elapsedTime();
+  connected = false;
 
   // Install protobuf handlers.
   installProtobufHandler<NewMasterDetectedMessage>(
@@ -301,6 +302,44 @@ void Slave::newMasterDetected(const UPID& pid)
   master = pid;
   link(master);
 
+  connected = false;
+  doReliableRegistration();
+}
+
+
+void Slave::noMasterDetected()
+{
+  LOG(INFO) << "Lost master(s) ... waiting";
+  connected = false;
+  master = UPID();
+}
+
+
+void Slave::registered(const SlaveID& slaveId)
+{
+  LOG(INFO) << "Registered with master; given slave ID " << slaveId;
+  id = slaveId;
+  connected = true;
+}
+
+
+void Slave::reregistered(const SlaveID& slaveId)
+{
+  LOG(INFO) << "Re-registered with master";
+
+  if (!(id == slaveId)) {
+    LOG(FATAL) << "Slave re-registered but got wrong ID";
+  }
+  connected = true;
+}
+
+
+void Slave::doReliableRegistration()
+{
+  if (connected || !master) {
+    return;
+  }
+
   if (id == "") {
     // Slave started before master.
     // (Vinod): Is the above comment true?
@@ -325,29 +364,9 @@ void Slave::newMasterDetected(const UPID& pid)
 
     send(master, message);
   }
-}
 
-
-void Slave::noMasterDetected()
-{
-  LOG(INFO) << "Lost master(s) ... waiting";
-}
-
-
-void Slave::registered(const SlaveID& slaveId)
-{
-  LOG(INFO) << "Registered with master; given slave ID " << slaveId;
-  id = slaveId;
-}
-
-
-void Slave::reregistered(const SlaveID& slaveId)
-{
-  LOG(INFO) << "Re-registered with master";
-
-  if (!(id == slaveId)) {
-    LOG(FATAL) << "Slave re-registered but got wrong ID";
-  }
+  // Re-try registration if necessary.
+  delay(1.0, self(), &Slave::doReliableRegistration);
 }
 
 

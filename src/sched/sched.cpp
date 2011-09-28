@@ -19,6 +19,7 @@
 #include <process/dispatch.hpp>
 #include <process/process.hpp>
 #include <process/protobuf.hpp>
+#include <process/timer.hpp>
 
 #include "configurator/configuration.hpp"
 
@@ -130,20 +131,8 @@ protected:
     master = pid;
     link(master);
 
-    if (frameworkId == "") {
-      // Touched for the very first time.
-      RegisterFrameworkMessage message;
-      message.mutable_framework()->MergeFrom(framework);
-      send(master, message);
-    } else {
-      // Not the first time, or failing over.
-      ReregisterFrameworkMessage message;
-      message.mutable_framework()->MergeFrom(framework);
-      message.mutable_framework_id()->MergeFrom(frameworkId);
-      message.set_failover(failover);
-      send(master, message);
-      failover = false; // Only failover the first time.
-    }
+    connected = false;
+    doReliableRegistration();
   }
 
   void noMasterDetected()
@@ -153,6 +142,7 @@ protected:
     // In this case, we don't actually invoke Scheduler::error
     // since we might get reconnected to a master imminently.
     connected = false;
+    master = UPID();
   }
 
   void registered(const FrameworkID& frameworkId)
@@ -167,6 +157,7 @@ protected:
 
     this->frameworkId = frameworkId;
     connected = true;
+    failover = false;
 
     invoke(bind(&Scheduler::registered, sched, driver, cref(frameworkId)));
   }
@@ -177,6 +168,30 @@ protected:
     CHECK(this->frameworkId == frameworkId);
 
     connected = true;
+    failover = false;
+  }
+
+  void doReliableRegistration()
+  {
+    if (connected || !master) {
+      return;
+    }
+
+    if (frameworkId == "") {
+      // Touched for the very first time.
+      RegisterFrameworkMessage message;
+      message.mutable_framework()->MergeFrom(framework);
+      send(master, message);
+    } else {
+      // Not the first time, or failing over.
+      ReregisterFrameworkMessage message;
+      message.mutable_framework()->MergeFrom(framework);
+      message.mutable_framework_id()->MergeFrom(frameworkId);
+      message.set_failover(failover);
+      send(master, message);
+    }
+
+    delay(1.0, self(), &SchedulerProcess::doReliableRegistration);
   }
 
   void resourceOffers(const vector<Offer>& offers,
@@ -461,7 +476,7 @@ private:
   bool failover;
   UPID master;
 
-  volatile bool connected; // Flag to indicate if master is connected.
+  volatile bool connected; // Flag to indicate if framework is registered.
   volatile bool aborted; // Flag to indicate if the driver is aborted.
 
   hashmap<OfferID, hashmap<SlaveID, UPID> > savedOffers;
