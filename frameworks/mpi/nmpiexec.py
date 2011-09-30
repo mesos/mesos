@@ -61,7 +61,7 @@ class MyScheduler(mesos.Scheduler):
     tasks = []
     if self.tasksLaunched == TOTAL_TASKS:
       print "Rejecting permanently because we have already started"
-      driver.replyToOffer(oid, tasks, {})
+      driver.replyToOffer(oid, tasks, {"timeout": "-1"})
       return
     for offer in offers:
       print "Considering slot on %s" % offer.hostname
@@ -94,7 +94,7 @@ class MyScheduler(mesos.Scheduler):
       else:
         print "Rejecting slot because we've launched enough tasks"
     print "Replying to offer!"
-    driver.replyToOffer(oid, tasks, {})
+    driver.replyToOffer(oid, tasks, {"timeout": "-1"})
     if self.tasksLaunched == TOTAL_TASKS:
       threading.Thread(target = mpiexec, args=[driver]).start()
 
