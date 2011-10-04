@@ -10,8 +10,11 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.TimeUnit;
 
 public class Log {
+  static {
+    System.loadLibrary("mesos");
+  }
 
-  static class Position implements Comparable<Position> {
+  public static class Position implements Comparable<Position> {
     @Override
     public int compareTo(Position that) {
       return Long.signum(value - that.value);
@@ -52,7 +55,7 @@ public class Log {
     private final long value;
   }
 
-  static class Entry {
+  public static class Entry {
     public final Position position;
     public final byte[] data;
 
@@ -67,7 +70,7 @@ public class Log {
    * An exception that gets thrown when an error occurs while
    * performing a read or write operation.
    */
-  static class OperationFailedException extends Exception {
+  public static class OperationFailedException extends Exception {
     public OperationFailedException(String message) {
       super(message);
     }
@@ -82,7 +85,7 @@ public class Log {
    * ability to perform operations (e.g., because it was superseded by
    * another writer).
    */
-  static class WriterFailedException extends Exception {
+  public static class WriterFailedException extends Exception {
     public WriterFailedException(String message) {
       super(message);
     }
@@ -92,8 +95,8 @@ public class Log {
     }
   }
 
-  static class Reader {
-    Reader(Log log) {
+  public static class Reader {
+    public Reader(Log log) {
       this.log = log;
       initialize(log);
     }
@@ -129,19 +132,22 @@ public class Log {
     private long __reader;
   }
 
-  static class Writer {
-    Writer(Log log) {
+  public static class Writer {
+    public Writer(Log log) {
       this.log = log;
       initialize(log);
     }
 
     /**
      * Attepts to read from the log between the specified positions
-     * (inclusive). If either of the positions are invalid, an
-     * OperationFailedException will get thrown. Unfortunately, this
-     * will also get thrown in other circumstances (e.g., disk
-     * failure) and therefore it is currently impossible to tell these
-     * two cases apart.
+     * (inclusive). If either of the positions are invalid, a
+     * WriterFailedException will get thrown. Unfortunately, this will
+     * also get thrown in other circumstances (e.g., disk failure) and
+     * therefore it is currently impossible to tell these two cases
+     * apart.
+     * TODO(benh): Throw both OperationFailedException and
+     * WriterFailedException to differentiate the need for a new
+     * writer from a bad position, or a bad disk, etc.
      */
     public native Position append(byte[] data)
       throws TimeoutException, WriterFailedException;
@@ -149,10 +155,13 @@ public class Log {
     /**
      * Attepts to truncate the log (from the beginning to the
      * specified position exclusive) If the position is invalid, an
-     * OperationFailedException will get thrown. Unfortunately, this
-     * will also get thrown in other circumstances (e.g., disk
-     * failure) and therefore it is currently impossible to tell these
-     * two cases apart.
+     * WriterFailedException will get thrown. Unfortunately, this will
+     * also get thrown in other circumstances (e.g., disk failure) and
+     * therefore it is currently impossible to tell these two cases
+     * apart.
+     * TODO(benh): Throw both OperationFailedException and
+     * WriterFailedException to differentiate the need for a new
+     * writer from a bad position, or a bad disk, etc.
      */
     public native Position truncate(Position to)
       throws TimeoutException, WriterFailedException;
@@ -165,18 +174,18 @@ public class Log {
     private long __writer;
   }
 
-  Log(int quorum,
-      String path,
-      Set<String> pids) {
+  public Log(int quorum,
+             String path,
+             Set<String> pids) {
     initialize(quorum, path, pids);
   }
 
-  Log(int quorum,
-      String path,
-      String servers,
-      long timeout,
-      TimeUnit unit,
-      String znode) {
+  public Log(int quorum,
+             String path,
+             String servers,
+             long timeout,
+             TimeUnit unit,
+             String znode) {
     initialize(quorum, path, servers, timeout, unit, znode);
   }
 

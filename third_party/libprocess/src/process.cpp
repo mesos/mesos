@@ -370,8 +370,6 @@ public:
   void run(ProcessBase *process);
   void cleanup(ProcessBase *process);
 
-  static void invoke(const function<void (void)> &thunk);
-
 private:
   timeout create_timeout(ProcessBase *process, double secs);
   void start_timeout(const timeout &timeout);
@@ -460,14 +458,6 @@ static ucontext_t proc_uctx_running;
 //static __thread ProcessBase *proc_process = NULL;
 static ProcessBase *proc_process = NULL;
 
-/* Flag indicating if performing safe call into legacy. */
-// static __thread bool legacy = false;
-static bool legacy = false;
-
-/* Thunk to safely call into legacy. */
-// static __thread function<void (void)> *legacy_thunk;
-static const function<void (void)> *legacy_thunk;
-
 /* Scheduler gate. */
 static Gate *gate = new Gate();
 
@@ -488,6 +478,15 @@ static synchronizable(filterer) = SYNCHRONIZED_INITIALIZER_RECURSIVE;
 
 /* Global garbage collector. */
 PID<GarbageCollector> gc;
+
+/* Thunks to be invoked via process::invoke. */
+static queue<function<void(void)>*>* thunks =
+  new queue<function<void(void)>*>();
+static synchronizable(thunks) = SYNCHRONIZED_INITIALIZER;
+
+/* Thread to invoke thunks (see above). */
+static Gate* invoke_gate = new Gate();
+static pthread_t invoke_thread;
 
 
 int set_nbio(int fd)
@@ -894,6 +893,31 @@ void * serve(void *arg)
 }
 
 
+void* invoker(void* arg)
+{
+  do {
+    Gate::state_t old = invoke_gate->approach();
+
+    function<void(void)>* thunk = NULL;
+    synchronized (thunks) {
+      if (!thunks->empty()) {
+        thunk = thunks->front();
+        thunks->pop();
+      }
+    }
+
+    if (thunk != NULL) {
+      (*thunk)();
+      continue;
+    }
+
+    invoke_gate->arrive(old);
+  } while (true);
+
+  return NULL;
+}
+
+
 void trampoline(int stack0, int stack1, int process0, int process1)
 {
   /* Unpackage the arguments. */
@@ -1013,10 +1037,6 @@ void * schedule(void *arg)
       CHECK(proc_process == NULL);
       proc_process = process;
       swapcontext(&proc_uctx_running, &process->uctx);
-      while (legacy) {
-	(*legacy_thunk)();
-	swapcontext(&proc_uctx_running, &process->uctx);
-      }
       CHECK(proc_process != NULL);
       proc_process = NULL;
     }
@@ -1223,6 +1243,10 @@ void initialize(bool initialize_google_logging)
 //   sigprocmask (SIG_UNBLOCK, &sa.sa_mask, 0);
 
   if (pthread_create(&io_thread, NULL, serve, loop) != 0) {
+    PLOG(FATAL) << "Failed to initialize, pthread_create";
+  }
+
+  if (pthread_create(&invoke_thread, NULL, invoker, NULL) != 0) {
     PLOG(FATAL) << "Failed to initialize, pthread_create";
   }
 
@@ -2465,16 +2489,6 @@ void ProcessManager::cleanup(ProcessBase *process)
 }
 
 
-void ProcessManager::invoke(const function<void (void)> &thunk)
-{
-  legacy_thunk = &thunk;
-  legacy = true;
-  CHECK(proc_process != NULL);
-  swapcontext(&proc_process->uctx, &proc_uctx_running);
-  legacy = false;
-}
-
-
 timeout ProcessManager::create_timeout(ProcessBase *process, double secs)
 {
   CHECK(process != NULL);
@@ -3141,7 +3155,7 @@ UPID ProcessBase::spawn(ProcessBase* process, bool manage)
       }
     }
 
-    VLOG(1) << "Spawning process " << process->self();
+    VLOG(2) << "Spawning process " << process->self();
 
     return process_manager->spawn(process, manage);
   } else {
@@ -3222,10 +3236,15 @@ bool wait(const UPID& pid, double secs)
 }
 
 
-void invoke(const function<void (void)> &thunk)
+void invoke(const function<void(void)>& thunk)
 {
   initialize();
-  ProcessManager::invoke(thunk);
+
+  synchronized (thunks) {
+    thunks->push(new function<void(void)>(thunk));
+  }
+
+  invoke_gate->open();
 }
 
 

@@ -18,6 +18,7 @@
 #include "common/lambda.hpp"
 #include "common/option.hpp"
 #include "common/seconds.hpp"
+#include "common/utils.hpp"
 
 #ifdef WITH_ZOOKEEPER
 #include "zookeeper/group.hpp"
@@ -73,9 +74,7 @@ private:
 class ZooKeeperNetwork : public Network
 {
 public:
-  ZooKeeperNetwork(const std::string& servers,
-                   const seconds& timeout,
-                   const std::string& znode);
+  ZooKeeperNetwork(zookeeper::Group* group);
 
 private:
   // Helper that sets up a watch on the group.
@@ -86,12 +85,12 @@ private:
   void ready(const std::set<zookeeper::Group::Membership>& memberships);
 
   // Invoked if watching the group fails.
-  void failed(const std::string& message);
+  void failed(const std::string& message) const;
 
   // Invoked if we were unable to watch the group.
-  void discarded();
+  void discarded() const;
 
-  zookeeper::Group group;
+  zookeeper::Group* group;
 
   async::Dispatch dispatch;
 };
@@ -234,11 +233,8 @@ void Network::broadcast(
 }
 
 #ifdef WITH_ZOOKEEPER
-inline ZooKeeperNetwork::ZooKeeperNetwork(
-    const std::string& servers,
-    const seconds& timeout,
-    const std::string& znode)
-  : group(servers, timeout, znode)
+inline ZooKeeperNetwork::ZooKeeperNetwork(zookeeper::Group* _group)
+  : group(_group)
 {
   watch();
 }
@@ -247,7 +243,7 @@ inline ZooKeeperNetwork::ZooKeeperNetwork(
 inline void ZooKeeperNetwork::watch(
     const std::set<zookeeper::Group::Membership>& memberships)
 {
-  group.watch(memberships)
+  group->watch(memberships)
     .onReady(dispatch(lambda::bind(&ZooKeeperNetwork::ready,
                                    this, lambda::_1)))
     .onFailed(dispatch(lambda::bind(&ZooKeeperNetwork::failed,
@@ -259,11 +255,13 @@ inline void ZooKeeperNetwork::watch(
 inline void ZooKeeperNetwork::ready(
     const std::set<zookeeper::Group::Membership>& memberships)
 {
+  LOG(INFO) << "ZooKeeper group memberships changed";
+
   // Get infos for each membership in order to convert them to PIDs.
   std::set<process::Future<std::string> > futures;
 
   foreach (const zookeeper::Group::Membership& membership, memberships) {
-    futures.insert(group.info(membership));
+    futures.insert(group->info(membership));
   }
 
   std::set<process::UPID> pids;
@@ -279,11 +277,15 @@ inline void ZooKeeperNetwork::ready(
       process::UPID pid(option.get().get());
       CHECK(pid) << "Failed to parse '" << option.get().get() << "'";
       pids.insert(pid);
+      futures.erase(option.get());
     } else {
       watch(); // Try again later assuming empty group.
       return;
     }
   }
+
+  LOG(INFO) << "ZooKeeper group PIDs: "
+            << mesos::internal::utils::stringify(pids);
 
   set(pids); // Update the network.
 
@@ -291,13 +293,13 @@ inline void ZooKeeperNetwork::ready(
 }
 
 
-inline void ZooKeeperNetwork::failed(const std::string& message)
+inline void ZooKeeperNetwork::failed(const std::string& message) const
 {
   LOG(FATAL) << "Failed to watch ZooKeeper group: "<< message;
 }
 
 
-inline void ZooKeeperNetwork::discarded()
+inline void ZooKeeperNetwork::discarded() const
 {
   LOG(FATAL) << "Unexpected discarded future while watching ZooKeeper group";
 }

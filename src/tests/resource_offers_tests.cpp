@@ -36,7 +36,7 @@ TEST(ResourceOffersTest, ResourceOfferWithMultipleSlaves)
 {
   ASSERT_TRUE(GTEST_IS_THREADSAFE);
 
-  PID<Master> master = local::launch(10, 2, 1 * Gigabyte, false, false);
+  PID<Master> master = local::launch(10, 2, 1 * Gigabyte, false);
 
   MockScheduler sched;
   MesosSchedulerDriver driver(&sched, "", DEFAULT_EXECUTOR_INFO, master);
@@ -78,7 +78,7 @@ TEST(ResourceOffersTest, TaskUsesNoResources)
 {
   ASSERT_TRUE(GTEST_IS_THREADSAFE);
 
-  PID<Master> master = local::launch(1, 2, 1 * Gigabyte, false, false);
+  PID<Master> master = local::launch(1, 2, 1 * Gigabyte, false);
 
   MockScheduler sched;
   MesosSchedulerDriver driver(&sched, "", DEFAULT_EXECUTOR_INFO, master);
@@ -137,7 +137,7 @@ TEST(ResourceOffersTest, TaskUsesInvalidResources)
 {
   ASSERT_TRUE(GTEST_IS_THREADSAFE);
 
-  PID<Master> master = local::launch(1, 2, 1 * Gigabyte, false, false);
+  PID<Master> master = local::launch(1, 2, 1 * Gigabyte, false);
 
   MockScheduler sched;
   MesosSchedulerDriver driver(&sched, "", DEFAULT_EXECUTOR_INFO, master);
@@ -201,7 +201,7 @@ TEST(ResourceOffersTest, TaskUsesMoreResourcesThanOffered)
 {
   ASSERT_TRUE(GTEST_IS_THREADSAFE);
 
-  PID<Master> master = local::launch(1, 2, 1 * Gigabyte, false, false);
+  PID<Master> master = local::launch(1, 2, 1 * Gigabyte, false);
 
   MockScheduler sched;
   MesosSchedulerDriver driver(&sched, "", DEFAULT_EXECUTOR_INFO, master);
@@ -265,7 +265,7 @@ TEST(ResourceOffersTest, ResourcesGetReofferedWhenUnused)
 {
   ASSERT_TRUE(GTEST_IS_THREADSAFE);
 
-  PID<Master> master = local::launch(1, 2, 1 * Gigabyte, false, false);
+  PID<Master> master = local::launch(1, 2, 1 * Gigabyte, false);
 
   MockScheduler sched1;
   MesosSchedulerDriver driver1(&sched1, "", DEFAULT_EXECUTOR_INFO, master);
@@ -325,7 +325,7 @@ TEST(ResourceOffersTest, ResourcesGetReofferedAfterTaskDescriptionError)
 {
   ASSERT_TRUE(GTEST_IS_THREADSAFE);
 
-  PID<Master> master = local::launch(1, 2, 1 * Gigabyte, false, false);
+  PID<Master> master = local::launch(1, 2, 1 * Gigabyte, false);
 
   MockScheduler sched1;
   MesosSchedulerDriver driver1(&sched1, "", DEFAULT_EXECUTOR_INFO, master);
@@ -444,8 +444,7 @@ TEST(ResourceOffersTest, ResourceRequest)
   EXPECT_CALL(allocator, timerTick())
     .WillRepeatedly(Return());
 
-  PID<Master> master =
-      local::launch(1, 2, 1 * Gigabyte, false, false, &allocator);
+  PID<Master> master = local::launch(1, 2, 1 * Gigabyte, false, &allocator);
 
   MesosSchedulerDriver driver(&sched, "", DEFAULT_EXECUTOR_INFO, master);
 

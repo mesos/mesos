@@ -38,7 +38,7 @@ std::string identity(JNIEnv* env, jobject jposition)
 template <>
 jobject convert(JNIEnv* env, const Log::Position& position)
 {
-  std::string identity = position.identity();
+  const std::string& identity = position.identity();
 
   const char* bytes = identity.c_str();
 
@@ -66,20 +66,23 @@ jobject convert(JNIEnv* env, const Log::Position& position)
 }
 
 
+template <>
 jobject convert(JNIEnv* env, const Log::Entry& entry)
 {
-  jobject jposition = convert(env, entry.position);
+  jobject jposition = convert<Log::Position>(env, entry.position);
 
   // byte[] data = ..;
   jbyteArray jdata = env->NewByteArray(entry.data.size());
   env->SetByteArrayRegion(jdata, 0, entry.data.size(),
                           (jbyte*) entry.data.data());
 
+  // We can create a Java Log.Entry directly because JNI does not
+  // enforce access modifiers (thus breaking encapsulation).
   jclass clazz = env->FindClass("org/apache/mesos/Log$Entry");
 
   jmethodID _init_ = env->GetMethodID(clazz, "<init>",
                                       "(Lorg/apache/mesos/Log$Position;"
-                                      "Ljava/lang/String;)V");
+                                      "[B)V");
 
   jobject jentry = env->NewObject(clazz, _init_, jposition, jdata);
 
@@ -136,7 +139,7 @@ JNIEXPORT jobject JNICALL Java_org_apache_mesos_Log_00024Reader_read
 
   // Loop through C++ list and add each entry to the Java list.
   foreach (const Log::Entry& entry, entries.get()) {
-    jobject jentry = convert(env, entry);
+    jobject jentry = convert<Log::Entry>(env, entry);
     env->CallBooleanMethod(jentries, add, jentry);
   }
 
@@ -161,7 +164,7 @@ JNIEXPORT jobject JNICALL Java_org_apache_mesos_Log_00024Reader_beginning
 
   Log::Position position = reader->beginning();
 
-  return convert(env, position);
+  return convert<Log::Position>(env, position);
 }
 
 
@@ -411,6 +414,8 @@ JNIEXPORT void JNICALL Java_org_apache_mesos_Log_initialize__ILjava_lang_String_
   // Create the C++ Log and initialize the __log variable.
   Log* log = new Log(quorum, path, pids);
 
+  clazz = env->GetObjectClass(thiz);
+
   jfieldID __log = env->GetFieldID(clazz, "__log", "J");
   env->SetLongField(thiz, __log, (jlong) log);
 }
@@ -450,6 +455,8 @@ JNIEXPORT void JNICALL Java_org_apache_mesos_Log_initialize__ILjava_lang_String_
 
    // Create the C++ Log and initialize the __log variable.
   Log* log = new Log(quorum, path, servers, timeout, znode);
+
+  clazz = env->GetObjectClass(thiz);
 
   jfieldID __log = env->GetFieldID(clazz, "__log", "J");
   env->SetLongField(thiz, __log, (jlong) log);

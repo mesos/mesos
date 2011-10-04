@@ -40,8 +40,6 @@ using namespace mesos::internal;
 
 using namespace process;
 
-using boost::cref;
-
 using std::map;
 using std::string;
 using std::vector;
@@ -159,7 +157,7 @@ protected:
     connected = true;
     failover = false;
 
-    invoke(bind(&Scheduler::registered, sched, driver, cref(frameworkId)));
+    invoke(bind(&Scheduler::registered, sched, driver, frameworkId));
   }
 
   void reregistered(const FrameworkID& frameworkId)
@@ -220,7 +218,7 @@ protected:
       }
     }
 
-    invoke(bind(&Scheduler::resourceOffers, sched, driver, cref(offers)));
+    invoke(bind(&Scheduler::resourceOffers, sched, driver, offers));
   }
 
   void rescindOffer(const OfferID& offerId)
@@ -234,7 +232,7 @@ protected:
     VLOG(1) << "Rescinded offer " << offerId;
 
     savedOffers.erase(offerId);
-    invoke(bind(&Scheduler::offerRescinded, sched, driver, cref(offerId)));
+    invoke(bind(&Scheduler::offerRescinded, sched, driver, offerId));
   }
 
   void statusUpdate(const StatusUpdate& update, const UPID& pid)
@@ -262,7 +260,7 @@ protected:
     // multiple times (of course, if a scheduler re-uses a TaskID,
     // that could be bad.
 
-    invoke(bind(&Scheduler::statusUpdate, sched, driver, cref(status)));
+    invoke(bind(&Scheduler::statusUpdate, sched, driver, status));
 
     if (pid) {
       // Acknowledge the message (we do this last, after we invoked
@@ -288,7 +286,7 @@ protected:
     VLOG(1) << "Lost slave " << slaveId;
 
     savedSlavePids.erase(slaveId);
-    invoke(bind(&Scheduler::slaveLost, sched, driver, cref(slaveId)));
+    invoke(bind(&Scheduler::slaveLost, sched, driver, slaveId));
   }
 
   void frameworkMessage(const SlaveID& slaveId,
@@ -303,8 +301,8 @@ protected:
 
     VLOG(1) << "Received framework message";
 
-    invoke(bind(&Scheduler::frameworkMessage, sched, driver, cref(slaveId),
-                cref(executorId), cref(data)));
+    invoke(bind(&Scheduler::frameworkMessage,
+                sched, driver, slaveId, executorId, data));
   }
 
   void error(int32_t code, const string& message)
@@ -318,7 +316,7 @@ protected:
 
     driver->abort();
 
-    invoke(bind(&Scheduler::error, sched, driver, code, cref(message)));
+    invoke(bind(&Scheduler::error, sched, driver, code, message));
   }
 
   void stop(bool failover)
@@ -671,11 +669,11 @@ Status MesosSchedulerDriver::start()
 
   // Check and see if we need to launch a local cluster.
   if (url == "local") {
-    const PID<master::Master>& master = local::launch(*conf, true);
+    const PID<master::Master>& master = local::launch(*conf);
     detector = new BasicMasterDetector(master, pid);
   } else if (url == "localquiet") {
     conf->set("quiet", 1);
-    const PID<master::Master>& master = local::launch(*conf, true);
+    const PID<master::Master>& master = local::launch(*conf);
     detector = new BasicMasterDetector(master, pid);
   } else {
     detector = MasterDetector::create(url, pid, false, false);

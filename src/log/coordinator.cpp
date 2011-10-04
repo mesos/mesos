@@ -87,6 +87,7 @@ Result<uint64_t> Coordinator::elect()
 
   // Either we have a quorum or we timed out.
   if (okays >= quorum) {
+    LOG(INFO) << "Coordinator elected!";
     elected = true;
 
     // Need to "catchup" local replica (i.e., fill in any unlearned
@@ -123,6 +124,7 @@ Result<uint64_t> Coordinator::elect()
   }
 
   // Timed out ...
+  LOG(INFO) << "Coordinator timed out while trying to get elected";
   return Result<uint64_t>::none();
 }
 

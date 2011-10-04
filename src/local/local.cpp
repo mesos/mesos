@@ -38,18 +38,6 @@ using std::stringstream;
 using std::vector;
 
 
-namespace {
-
-static pthread_once_t glog_initialized = PTHREAD_ONCE_INIT;
-
-
-void initialize_glog() {
-  google::InitGoogleLogging("mesos-local");
-}
-
-} // namespace {
-
-
 namespace mesos { namespace internal { namespace local {
 
 static Allocator* allocator = NULL;
@@ -72,7 +60,6 @@ void registerOptions(Configurator* configurator)
 PID<Master> launch(int numSlaves,
                    int32_t cpus,
                    int64_t mem,
-                   bool initLogging,
                    bool quiet,
                    Allocator* _allocator)
 {
@@ -85,13 +72,11 @@ PID<Master> launch(int numSlaves,
   out << "cpus:" << cpus << ";" << "mem:" << mem;
   conf.set("resources", out.str());
 
-  return launch(conf, initLogging, _allocator);
+  return launch(conf, _allocator);
 }
 
 
-PID<Master> launch(const Configuration& conf,
-                   bool initLogging,
-                   Allocator* _allocator)
+PID<Master> launch(const Configuration& conf, Allocator* _allocator)
 {
   int numSlaves = conf.get<int>("num_slaves", 1);
   bool quiet = conf.get<bool>("quiet", false);
@@ -100,18 +85,10 @@ PID<Master> launch(const Configuration& conf,
     fatal("can only launch one local cluster at a time (for now)");
   }
 
-  if (initLogging) {
-    pthread_once(&glog_initialized, initialize_glog);
-    if (!quiet) {
-      google::SetStderrLogging(google::INFO);
-    }
-  }
-
-  if(_allocator == NULL) {
+  if (_allocator == NULL) {
     // Create default allocator, save it for deleting later.
     _allocator = allocator = new SimpleAllocator();
-  }
-  else {
+  } else {
     // TODO(benh): Figure out the behavior of allocator pointer and remove the
     // else block.
     allocator = NULL;

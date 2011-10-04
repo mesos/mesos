@@ -233,8 +233,7 @@ void ReplicaProcess::promise(const PromiseRequest& request)
 {
   if (request.has_position()) {
     LOG(INFO) << "Replica received explicit promise request for "
-              << request.id() << " from " << from()
-              << " for position " << request.position();
+              << request.id() << " for position " << request.position();
 
     // Need to get the action for the specified position.
     Result<Action> result = read(request.position());
@@ -284,7 +283,7 @@ void ReplicaProcess::promise(const PromiseRequest& request)
     }
   } else {
     LOG(INFO) << "Replica received implicit promise request for "
-              << request.id() << " from " << from();
+              << request.id();
 
     if (request.id() <= coordinator) { // Only make an implicit promise once!
       PromiseResponse response;

@@ -29,7 +29,6 @@ using namespace mesos::internal;
 using namespace process;
 
 using boost::bind;
-using boost::cref;
 
 using std::string;
 
@@ -110,7 +109,7 @@ protected:
     VLOG(1) << "Executor registered on slave " << args.slave_id();
 
     slaveId = args.slave_id();
-    invoke(bind(&Executor::init, executor, driver, cref(args)));
+    invoke(bind(&Executor::init, executor, driver, args));
   }
 
   void runTask(const TaskDescription& task)
@@ -122,7 +121,7 @@ protected:
 
     VLOG(1) << "Executor asked to run task '" << task.task_id() << "'";
 
-    invoke(bind(&Executor::launchTask, executor, driver, cref(task)));
+    invoke(bind(&Executor::launchTask, executor, driver, task));
   }
 
   void killTask(const TaskID& taskId)
@@ -134,7 +133,7 @@ protected:
 
     VLOG(1) << "Executor asked to kill task '" << taskId << "'";
 
-    invoke(bind(&Executor::killTask, executor, driver, cref(taskId)));
+    invoke(bind(&Executor::killTask, executor, driver, taskId));
   }
 
   void frameworkMessage(const SlaveID& slaveId,
@@ -149,7 +148,7 @@ protected:
 
     VLOG(1) << "Executor received framework message";
 
-    invoke(bind(&Executor::frameworkMessage, executor, driver, cref(data)));
+    invoke(bind(&Executor::frameworkMessage, executor, driver, data));
   }
 
   void shutdown()

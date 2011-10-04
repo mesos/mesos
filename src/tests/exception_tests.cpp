@@ -46,7 +46,7 @@ TEST(ExceptionTest, AbortOnFrameworkError)
 {
   ASSERT_TRUE(GTEST_IS_THREADSAFE);
 
-  PID<Master> master = local::launch(1, 2, 1 * Gigabyte, false, false);
+  PID<Master> master = local::launch(1, 2, 1 * Gigabyte, false);
 
   MockScheduler sched;
 
@@ -94,7 +94,7 @@ TEST(ExceptionTest, DeactiveFrameworkOnAbort)
   EXPECT_MSG(filter, _, _, _)
     .WillRepeatedly(Return(false));
 
-  PID<Master> master = local::launch(1, 2, 1 * Gigabyte, false, false);
+  PID<Master> master = local::launch(1, 2, 1 * Gigabyte, false);
 
   MockScheduler sched;
 
@@ -138,7 +138,7 @@ TEST(ExceptionTest, DisallowSchedulerActionsOnAbort)
 {
   ASSERT_TRUE(GTEST_IS_THREADSAFE);
 
-  PID<Master> master = local::launch(1, 2, 1 * Gigabyte, false, false);
+  PID<Master> master = local::launch(1, 2, 1 * Gigabyte, false);
 
   MockScheduler sched;
 
@@ -182,7 +182,7 @@ TEST(ExceptionTest, DisallowSchedulerCallbacksOnAbort)
   EXPECT_MSG(filter, _, _, _)
     .WillRepeatedly(Return(false));
 
-  PID<Master> master = local::launch(1, 2, 1 * Gigabyte, false, false);
+  PID<Master> master = local::launch(1, 2, 1 * Gigabyte, false);
 
   MockScheduler sched;
 

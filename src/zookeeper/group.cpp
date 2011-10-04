@@ -306,6 +306,10 @@ Promise<set<Group::Membership> > GroupProcess::watch(
     Promise<set<Group::Membership> > promise;
     promise.fail(error.get());
     return promise;
+  } else if (state != CONNECTED) {
+    Watch watch(expected);
+    pending.watches.push(watch);
+    return watch.promise;
   }
 
   // To guarantee causality, we must invalidate our cache of
@@ -463,7 +467,7 @@ void GroupProcess::deleted(const string& path)
 
 Result<Group::Membership> GroupProcess::doJoin(const string& info)
 {
-  CHECK(error.isNone());
+  CHECK(error.isNone()) << ": " << error.get();
   CHECK(state == CONNECTED);
 
   // Create a new ephemeral node to represent a new member and use the
@@ -503,7 +507,7 @@ Result<Group::Membership> GroupProcess::doJoin(const string& info)
 
 Result<bool> GroupProcess::doCancel(const Group::Membership& membership)
 {
-  CHECK(error.isNone());
+  CHECK(error.isNone()) << ": " << error.get();
   CHECK(state == CONNECTED);
 
   Try<string> sequence = strings::format("%.*d", 10, membership.sequence);
@@ -540,7 +544,7 @@ Result<bool> GroupProcess::doCancel(const Group::Membership& membership)
 
 Result<string> GroupProcess::doInfo(const Group::Membership& membership)
 {
-  CHECK(error.isNone());
+  CHECK(error.isNone()) << ": " << error.get();
   CHECK(state == CONNECTED);
 
   Try<string> sequence = strings::format("%.*d", 10, membership.sequence);
@@ -635,7 +639,7 @@ void GroupProcess::update()
 
 bool GroupProcess::sync()
 {
-  CHECK(error.isNone());
+  CHECK(error.isNone()) << ": " << error.get();
   CHECK(state == CONNECTED);
 
   // Do joins.

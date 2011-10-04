@@ -1,3 +1,6 @@
+#ifndef __ZOOKEEPER_GROUP_HPP__
+#define __ZOOKEEPER_GROUP_HPP__
+
 #include <set>
 
 #include "process/future.hpp"
@@ -99,3 +102,5 @@ private:
 };
 
 } // namespace zookeeper {
+
+#endif // __ZOOKEEPER_GROUP_HPP__

@@ -14,6 +14,10 @@
 #include "log/coordinator.hpp"
 #include "log/replica.hpp"
 
+#ifdef WITH_ZOOKEEPER
+#include "zookeeper/group.hpp"
+#endif // WITH_ZOOKEEPER
+
 namespace mesos {
 namespace internal {
 namespace log {
@@ -122,7 +126,7 @@ public:
     // one writer (local and remote) is valid at a time. A writer
     // becomes invalid if any operation returns an error, and a new
     // writer must be created in order perform subsequent operations.
-    Writer(Log* log, int retries = 0);
+    Writer(Log* log, int retries = 3);
     ~Writer();
 
     // Attempts to append the specified data to the log. A none result
@@ -139,20 +143,27 @@ public:
 
   private:
     Option<std::string> error;
-    Coordinator* coordinator;
+    Coordinator coordinator;
   };
 
   // Creates a new replicated log that assumes the specified quorum
   // size, is backed by a file at the specified path, and coordiantes
   // with other replicas via the set of process PIDs.
-  Log(int quorum,
+  Log(int _quorum,
       const std::string& path,
       const std::set<process::UPID>& pids)
+#ifdef WITH_ZOOKEEPER
+    : group(NULL)
+#endif // WITH_ZOOKEEPER
   {
+    quorum = _quorum;
+
     replica = new Replica(path);
+
     network = new Network(pids);
-    network->add(replica->pid()); // Don't forget to add our own replica!
-    coordinator = new Coordinator(quorum, replica, network);
+
+    // Don't forget to add our own replica!
+    network->add(replica->pid());
   }
 
 #ifdef WITH_ZOOKEEPER
@@ -160,22 +171,39 @@ public:
   // size, is backed by a file at the specified path, and coordiantes
   // with other replicas associated with the specified ZooKeeper
   // servers, timeout, and znode.
-  Log(int quorum,
+  Log(int _quorum,
       const std::string& path,
       const std::string& servers,
       const seconds& timeout,
       const std::string& znode)
   {
+    quorum = _quorum;
+
     replica = new Replica(path);
-    network = new ZooKeeperNetwork(servers, timeout, znode);
-    coordinator = new Coordinator(quorum, replica, network);
+
+    group = new zookeeper::Group(servers, timeout, znode);
+    network = new ZooKeeperNetwork(group);
+
+    // Need to add our replica to the ZooKeeper group!
+    LOG(INFO) << "Attempting to join replica to ZooKeeper group";
+
+    membership = group->join(replica->pid())
+      .onFailed(dispatch(lambda::bind(&Log::failed, this, lambda::_1)))
+      .onDiscarded(dispatch(lambda::bind(&Log::discarded, this)));
+
+    group->watch()
+      .onReady(dispatch(lambda::bind(&Log::watch, this, lambda::_1)))
+      .onFailed(dispatch(lambda::bind(&Log::failed, this, lambda::_1)))
+      .onDiscarded(dispatch(lambda::bind(&Log::discarded, this)));
   }
 #endif // WITH_ZOOKEEPER
 
   ~Log()
   {
-    delete coordinator;
     delete network;
+#ifdef WITH_ZOOKEEPER
+    delete group;
+#endif // WITH_ZOOKEEPER
     delete replica;
   }
 
@@ -195,14 +223,25 @@ public:
       ((uint64_t) (bytes[7] & 0xff));
     return Position(value);
   }
-
 private:
   friend class Reader;
   friend class Writer;
 
+#ifdef WITH_ZOOKEEPER
+  // TODO(benh): Factor this out into some sort of "membership renewer".
+  void watch(const std::set<zookeeper::Group::Membership>& memberships);
+  void failed(const std::string& message) const;
+  void discarded() const;
+
+  zookeeper::Group* group;
+  process::Future<zookeeper::Group::Membership> membership;
+  async::Dispatch dispatch;
+#endif // WITH_ZOOKEEPER
+
+  int quorum;
+
   Replica* replica;
   Network* network;
-  Coordinator* coordinator;
 };
 
 
@@ -277,19 +316,18 @@ Log::Position Log::Reader::ending()
 
 
 Log::Writer::Writer(Log* log, int retries)
-  : coordinator(log->coordinator),
+  : coordinator(log->quorum, log->replica, log->network),
     error(Option<std::string>::none())
 {
   do {
-    Result<uint64_t> result = coordinator->elect();
+    Result<uint64_t> result = coordinator.elect();
     if (result.isNone()) {
       retries--;
-      continue;
     } else if (result.isSome()) {
-      return;
+      break;
     } else {
       error = result.error();
-      return;
+      break;
     }
   } while (retries > 0);
 }
@@ -297,7 +335,7 @@ Log::Writer::Writer(Log* log, int retries)
 
 Log::Writer::~Writer()
 {
-  coordinator->demote();
+  coordinator.demote();
 }
 
 
@@ -307,7 +345,9 @@ Result<Log::Position> Log::Writer::append(const std::string& data)
     return Result<Log::Position>::error(error.get());
   }
 
-  Result<uint64_t> result = coordinator->append(data);
+  LOG(INFO) << "Attempting to append " << data.size() << " bytes to the log";
+
+  Result<uint64_t> result = coordinator.append(data);
 
   if (result.isError()) {
     error = result.error();
@@ -328,7 +368,9 @@ Result<Log::Position> Log::Writer::truncate(const Log::Position& to)
     return Result<Log::Position>::error(error.get());
   }
 
-  Result<uint64_t> result = coordinator->truncate(to.value);
+  LOG(INFO) << "Attempting to truncate the log to " << to.value;
+
+  Result<uint64_t> result = coordinator.truncate(to.value);
 
   if (result.isError()) {
     error = result.error();
@@ -341,6 +383,37 @@ Result<Log::Position> Log::Writer::truncate(const Log::Position& to)
 
   return Log::Position(result.get());
 }
+
+
+#ifdef WITH_ZOOKEEPER
+void Log::watch(const std::set<zookeeper::Group::Membership>& memberships)
+{
+  if (membership.isReady() && memberships.count(membership.get()) == 0) {
+    // Our replica's membership must have expired, join back up.
+    LOG(INFO) << "Renewing replica group membership";
+    membership = group->join(replica->pid())
+      .onFailed(dispatch(lambda::bind(&Log::failed, this, lambda::_1)))
+      .onDiscarded(dispatch(lambda::bind(&Log::discarded, this)));
+  }
+
+  group->watch(memberships)
+    .onReady(dispatch(lambda::bind(&Log::watch, this, lambda::_1)))
+    .onFailed(dispatch(lambda::bind(&Log::failed, this, lambda::_1)))
+    .onDiscarded(dispatch(lambda::bind(&Log::discarded, this)));
+}
+
+
+void Log::failed(const std::string& message) const
+{
+  LOG(FATAL) << "Failed to participate in ZooKeeper group: " << message;
+}
+
+
+void Log::discarded() const
+{
+  LOG(FATAL) << "Not expecting future to get discarded!";
+}
+#endif // WITH_ZOOKEEPER
 
 } // namespace log {
 } // namespace internal {

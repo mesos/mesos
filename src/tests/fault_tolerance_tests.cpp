@@ -117,7 +117,7 @@ TEST(FaultToleranceTest, SlavePartitioned)
   EXPECT_MSG(filter, _, _, _)
     .WillRepeatedly(Return(false));
 
-  PID<Master> master = local::launch(1, 2, 1 * Gigabyte, false, false);
+  PID<Master> master = local::launch(1, 2, 1 * Gigabyte, false);
 
   MockScheduler sched;
   MesosSchedulerDriver driver(&sched, "", DEFAULT_EXECUTOR_INFO, master);
@@ -162,7 +162,7 @@ TEST(FaultToleranceTest, SchedulerFailover)
 {
   ASSERT_TRUE(GTEST_IS_THREADSAFE);
 
-  PID<Master> master = local::launch(1, 2, 1 * Gigabyte, false, false);
+  PID<Master> master = local::launch(1, 2, 1 * Gigabyte, false);
 
   // Launch the first (i.e., failing) scheduler and wait until
   // registered gets called to launch the second (i.e., failover)
@@ -234,7 +234,7 @@ TEST(FaultToleranceTest, FrameworkReliableRegistration)
   EXPECT_MSG(filter, _, _, _)
     .WillRepeatedly(Return(false));
 
-  PID<Master> master = local::launch(1, 2, 1 * Gigabyte, false, false);
+  PID<Master> master = local::launch(1, 2, 1 * Gigabyte, false);
 
   MockScheduler sched;
   MesosSchedulerDriver driver(&sched, "", DEFAULT_EXECUTOR_INFO, master);
@@ -279,7 +279,7 @@ TEST(FaultToleranceTest, FrameworkReregister)
   EXPECT_MSG(filter, _, _, _)
     .WillRepeatedly(Return(false));
 
-  PID<Master> master = local::launch(1, 2, 1 * Gigabyte, false, false);
+  PID<Master> master = local::launch(1, 2, 1 * Gigabyte, false);
 
   MockScheduler sched;
   MesosSchedulerDriver driver(&sched, "", DEFAULT_EXECUTOR_INFO, master);
