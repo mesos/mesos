@@ -11,7 +11,7 @@
 #include "common/strings.hpp"
 #include "common/utils.hpp"
 
-#include "zookeeper/credentials.hpp"
+#include "zookeeper/authentication.hpp"
 #include "zookeeper/group.hpp"
 #include "zookeeper/watcher.hpp"
 #include "zookeeper/zookeeper.hpp"
@@ -41,7 +41,7 @@ public:
   GroupProcess(const string& servers,
                const seconds& timeout,
                const string& znode,
-               const Option<Credentials>& credentials = Option<Credentials>());
+               const Option<Authentication>& auth = Option<Authentication>());
   ~GroupProcess();
 
   void initialize();
@@ -92,7 +92,7 @@ private:
   const seconds timeout;
   const string znode;
 
-  Option<Credentials> credentials; // ZooKeeper credentials.
+  Option<Authentication> auth; // ZooKeeper authentication.
 
   const ACL_vector acl; // Default ACL to use.
 
@@ -155,12 +155,12 @@ GroupProcess::GroupProcess(
     const string& _servers,
     const seconds& _timeout,
     const string& _znode,
-    const Option<Credentials>& _credentials)
+    const Option<Authentication>& _auth)
   : servers(_servers),
     timeout(_timeout),
     znode(strings::remove(_znode, "/", strings::SUFFIX)),
-    credentials(_credentials),
-    acl(_credentials.isSome()
+    auth(_auth),
+    acl(_auth.isSome()
         ? EVERYONE_READ_CREATOR_ALL
         : ZOO_OPEN_ACL_UNSAFE),
     state(DISCONNECTED),
@@ -361,19 +361,14 @@ void GroupProcess::connected(bool reconnect)
 {
   if (!reconnect) {
     // Authenticate if necessary.
-    if (credentials.isSome()) {
-      const string& username = credentials.get().username;
-      const string& password = credentials.get().password;
+    if (auth.isSome()) {
+      LOG(INFO) << "Authenticating with ZooKeeper using " << auth.get().scheme;
 
-      LOG(INFO) << "Authenticating with ZooKeeper using "
-                << username << ":XXXXX";
-
-      int code = zk->authenticate(username, password);
+      int code = zk->authenticate(auth.get().scheme, auth.get().credentials);
 
       if (code != ZOK) { // TODO(benh): Authentication retries?
         Try<string> message = strings::format(
-            "Failed to authenticate username '%s' with ZooKeeper: %s",
-            username.c_str(), zk->message(code));
+            "Failed to authenticate with ZooKeeper: %s", zk->message(code));
         error = message.isSome()
           ? message.get()
           : "Failed to authenticate with ZooKeeper";
@@ -736,9 +731,9 @@ void GroupProcess::abort()
 Group::Group(const string& servers,
              const seconds& timeout,
              const string& znode,
-             const Option<Credentials>& credentials)
+             const Option<Authentication>& auth)
 {
-  process = new GroupProcess(servers, timeout, znode, credentials);
+  process = new GroupProcess(servers, timeout, znode, auth);
   spawn(process);
   dispatch(process, &GroupProcess::initialize);
 }

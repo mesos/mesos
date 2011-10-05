@@ -125,7 +125,7 @@ public:
   /**
    * \brief authenticate synchronously.
    */
-  int authenticate(const std::string& username, const std::string& password);
+  int authenticate(const std::string& scheme, const std::string& credentials);
 
   /**
    * \brief create a node synchronously.

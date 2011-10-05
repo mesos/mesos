@@ -187,16 +187,14 @@ public:
     }
   }
 
-  Promise<int> authenticate(const string& username, const string& password)
+  Promise<int> authenticate(const string& scheme, const string& credentials)
   {
-    std::string auth = username + ":" + password;
-
     Promise<int> promise;
 
     tuple<Promise<int> >* args = new tuple<Promise<int> >(promise);
 
-    int ret = zoo_add_auth(zh, "digest", auth.c_str(), auth.length(),
-                           voidCompletion, args);
+    int ret = zoo_add_auth(zh, scheme.c_str(), credentials.data(),
+                           credentials.size(), voidCompletion, args);
 
     if (ret != ZOK) {
       promise.set(ret);

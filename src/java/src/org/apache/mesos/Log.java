@@ -189,6 +189,17 @@ public class Log {
     initialize(quorum, path, servers, timeout, unit, znode);
   }
 
+  public Log(int quorum,
+             String path,
+             String servers,
+             long timeout,
+             TimeUnit unit,
+             String znode,
+             String scheme,
+             byte[] credentials) {
+    initialize(quorum, path, servers, timeout, unit, znode, scheme, credentials);
+  }
+
   /**
    * Returns a position based off of the bytes recovered from
    * Position.identity().
@@ -216,6 +227,15 @@ public class Log {
                                    long timeout,
                                    TimeUnit unit,
                                    String znode);
+
+  protected native void initialize(int quorum,
+                                   String path,
+                                   String servers,
+                                   long timeout,
+                                   TimeUnit unit,
+                                   String znode,
+                                   String scheme,
+                                   byte[] credentials);
 
   protected native void finalize();
 

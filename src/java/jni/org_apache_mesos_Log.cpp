@@ -465,6 +465,63 @@ JNIEXPORT void JNICALL Java_org_apache_mesos_Log_initialize__ILjava_lang_String_
 
 /*
  * Class:     org_apache_mesos_Log
+ * Method:    initialize
+ * Signature: (ILjava/lang/String;Ljava/lang/String;JLjava/util/concurrent/TimeUnit;Ljava/lang/String;Ljava/lang/String;[B)V
+ */
+JNIEXPORT void JNICALL Java_org_apache_mesos_Log_initialize__ILjava_lang_String_2Ljava_lang_String_2JLjava_util_concurrent_TimeUnit_2Ljava_lang_String_2Ljava_lang_String_2_3B
+  (JNIEnv* env,
+   jobject thiz,
+   jint jquorum,
+   jstring jpath,
+   jstring jservers,
+   jlong jtimeout,
+   jobject junit,
+   jstring jznode,
+   jstring jscheme,
+   jbyteArray jcredentials)
+{
+  int quorum = jquorum;
+
+  std::string path = construct<std::string>(env, jpath);
+
+  std::string servers = construct<std::string>(env, jservers);
+
+  jclass clazz = env->GetObjectClass(junit);
+
+  // long seconds = unit.toSeconds(time);
+  jmethodID toSeconds = env->GetMethodID(clazz, "toSeconds", "(J)J");
+
+  jlong jseconds = env->CallLongMethod(junit, toSeconds, jtimeout);
+
+  seconds timeout(jseconds);
+
+  std::string znode = construct<std::string>(env, jznode);
+
+  std::string scheme = construct<std::string>(env, jscheme);
+
+  jbyte* temp = env->GetByteArrayElements(jcredentials, NULL);
+  jsize length = env->GetArrayLength(jcredentials);
+
+  std::string credentials((char*) temp, (size_t) length);
+
+  env->ReleaseByteArrayElements(jcredentials, temp, 0);
+
+  zookeeper::Authentication auth;
+  auth.scheme = scheme;
+  auth.credentials = credentials;
+
+   // Create the C++ Log and initialize the __log variable.
+  Log* log = new Log(quorum, path, servers, timeout, znode, auth);
+
+  clazz = env->GetObjectClass(thiz);
+
+  jfieldID __log = env->GetFieldID(clazz, "__log", "J");
+  env->SetLongField(thiz, __log, (jlong) log);
+}
+
+
+/*
+ * Class:     org_apache_mesos_Log
  * Method:    finalize
  * Signature: ()V
  */

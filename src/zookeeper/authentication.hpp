@@ -1,5 +1,5 @@
-#ifndef __ZOOKEEPER_CREDENTIALS_HPP__
-#define __ZOOKEEPER_CREDENTIALS_HPP__
+#ifndef __ZOOKEEPER_AUTHENTICATION_HPP__
+#define __ZOOKEEPER_AUTHENTICATION_HPP__
 
 #include <zookeeper.h>
 
@@ -7,10 +7,10 @@
 
 namespace zookeeper {
 
-struct Credentials
+struct Authentication
 {
-  std::string username;
-  std::string password;
+  std::string scheme;
+  std::string credentials;
 };
 
 
@@ -20,4 +20,4 @@ extern const ACL_vector EVERYONE_READ_CREATOR_ALL;
 
 } // namespace zookeeper {
 
-#endif // __ZOOKEEPER_CREDENTIALS_HPP__
+#endif // __ZOOKEEPER_AUTHENTICATION_HPP__

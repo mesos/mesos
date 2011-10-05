@@ -175,13 +175,15 @@ public:
       const std::string& path,
       const std::string& servers,
       const seconds& timeout,
-      const std::string& znode)
+      const std::string& znode,
+      const Option<zookeeper::Authentication>& auth
+        = Option<zookeeper::Authentication>::none())
   {
     quorum = _quorum;
 
     replica = new Replica(path);
 
-    group = new zookeeper::Group(servers, timeout, znode);
+    group = new zookeeper::Group(servers, timeout, znode, auth);
     network = new ZooKeeperNetwork(group);
 
     // Need to add our replica to the ZooKeeper group!

@@ -4,6 +4,7 @@
 
 #include "tests/base_zookeeper_test.hpp"
 
+#include "zookeeper/authentication.hpp"
 #include "zookeeper/group.hpp"
 
 
@@ -25,27 +26,16 @@ protected:
 };
 
 
-static ACL _EVERYONE_READ_CREATOR_ALL_ACL[] = {
-    {ZOO_PERM_READ, ZOO_ANYONE_ID_UNSAFE},
-    {ZOO_PERM_ALL, ZOO_AUTH_IDS}
-};
-
-
-static ACL_vector EVERYONE_READ_CREATOR_ALL = {
-    2, _EVERYONE_READ_CREATOR_ALL_ACL
-};
-
-
 TEST_F(ZooKeeperTest, Auth)
 {
   mesos::internal::test::BaseZooKeeperTest::TestWatcher watcher;
 
   ZooKeeper authenticatedZk(zks->connectString(), NO_TIMEOUT, &watcher);
   watcher.awaitSessionEvent(ZOO_CONNECTED_STATE);
-  authenticatedZk.authenticate("creator", "creator");
+  authenticatedZk.authenticate("digest", "creator:creator");
   authenticatedZk.create("/test",
                          "42",
-                         EVERYONE_READ_CREATOR_ALL,
+                         zookeeper::EVERYONE_READ_CREATOR_ALL,
                          0,
                          NULL);
   assertGet(&authenticatedZk, "/test", "42");
@@ -57,7 +47,7 @@ TEST_F(ZooKeeperTest, Auth)
 
   ZooKeeper nonOwnerZk(zks->connectString(), NO_TIMEOUT, &watcher);
   watcher.awaitSessionEvent(ZOO_CONNECTED_STATE);
-  nonOwnerZk.authenticate("non-owner", "non-owner");
+  nonOwnerZk.authenticate("digest", "non-owner:non-owner");
   assertGet(&nonOwnerZk, "/test", "42");
   assertNotSet(&nonOwnerZk, "/test", "37");
 }

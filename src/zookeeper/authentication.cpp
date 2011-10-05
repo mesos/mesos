@@ -1,4 +1,4 @@
-#include "zookeeper/credentials.hpp"
+#include "zookeeper/authentication.hpp"
 
 namespace zookeeper {
 

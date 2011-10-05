@@ -8,7 +8,7 @@
 
 #include "common/seconds.hpp"
 
-#include "zookeeper/credentials.hpp"
+#include "zookeeper/authentication.hpp"
 
 namespace zookeeper {
 
@@ -69,7 +69,7 @@ public:
   Group(const std::string& servers,
         const seconds& timeout,
         const std::string& znode,
-        const Option<Credentials>& credentials = Option<Credentials>());
+        const Option<Authentication>& auth = Option<Authentication>::none());
   ~Group();
 
   // Returns the result of trying to join a "group" in ZooKeeper. If
