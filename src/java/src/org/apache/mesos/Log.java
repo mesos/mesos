@@ -9,11 +9,19 @@ import java.util.Set;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.TimeUnit;
 
+/**
+ * Provides access to a distributed append only log.  The log can be read from using a
+ * {@link Log.Reader} and written to using a {@link Log.Writer}.
+ */
 public class Log {
   static {
     System.loadLibrary("mesos");
   }
 
+  /**
+   * An opaque identifier of a log entry's position within the log.  Can be used to inidicate
+   * {@link Reader#read read} ranges and {@link Writer#truncate truncation} locations.
+   */
   public static class Position implements Comparable<Position> {
     @Override
     public int compareTo(Position that) {
@@ -55,6 +63,9 @@ public class Log {
     private final long value;
   }
 
+  /**
+   * Represents an opaque data entry in the {@link Log} with a {@link Position}.
+   */
   public static class Entry {
     public final Position position;
     public final byte[] data;
@@ -95,6 +106,10 @@ public class Log {
     }
   }
 
+  /**
+   * Provides read access to the {@link Log}.  This class is safe for use from multiple threads and
+   * for the life of the log regardless of any exceptions thrown from its methods.
+   */
   public static class Reader {
     public Reader(Log log) {
       this.log = log;
@@ -132,6 +147,10 @@ public class Log {
     private long __reader;
   }
 
+  /**
+   * Provides write access to the {@link Log}.  This class is not safe for use from multiple
+   * threads and instances should be thrown out after any {@link WriterFailedException} is thrown.
+   */
   public static class Writer {
     public Writer(Log log) {
       this.log = log;
@@ -145,7 +164,8 @@ public class Log {
      * also get thrown in other circumstances (e.g., disk failure) and
      * therefore it is currently impossible to tell these two cases
      * apart.
-     * TODO(benh): Throw both OperationFailedException and
+     *
+     * <p>TODO(benh): Throw both OperationFailedException and
      * WriterFailedException to differentiate the need for a new
      * writer from a bad position, or a bad disk, etc.
      */
@@ -159,7 +179,8 @@ public class Log {
      * also get thrown in other circumstances (e.g., disk failure) and
      * therefore it is currently impossible to tell these two cases
      * apart.
-     * TODO(benh): Throw both OperationFailedException and
+     *
+     * <p>TODO(benh): Throw both OperationFailedException and
      * WriterFailedException to differentiate the need for a new
      * writer from a bad position, or a bad disk, etc.
      */
