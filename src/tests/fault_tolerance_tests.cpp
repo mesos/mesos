@@ -328,6 +328,98 @@ TEST(FaultToleranceTest, FrameworkReregister)
 }
 
 
+TEST(FaultToleranceTest, TaskLost)
+{
+  ASSERT_TRUE(GTEST_IS_THREADSAFE);
+
+  MockFilter filter;
+  process::filter(&filter);
+
+  EXPECT_MSG(filter, _, _, _)
+    .WillRepeatedly(Return(false));
+
+  SimpleAllocator a;
+  Master m(&a);
+  PID<Master> master = process::spawn(&m);
+
+  MockExecutor exec;
+  map<ExecutorID, Executor*> execs;
+  execs[DEFAULT_EXECUTOR_ID] = &exec;
+
+  TestingIsolationModule isolationModule(execs);
+
+  Resources resources = Resources::parse("cpus:2;mem:1024");
+
+  Slave s(resources, true, &isolationModule);
+  PID<Slave> slave = process::spawn(&s);
+
+  BasicMasterDetector detector(master, slave, true);
+
+  MockScheduler sched;
+  MesosSchedulerDriver driver(&sched, "", DEFAULT_EXECUTOR_INFO, master);
+  vector<Offer> offers;
+  trigger statusUpdateCall, resourceOffersCall;
+  TaskStatus status;
+
+  EXPECT_CALL(sched, registered(&driver, _))
+    .Times(1);
+
+  EXPECT_CALL(sched, resourceOffers(&driver, _))
+    .WillOnce(DoAll(SaveArg<1>(&offers),
+                    Trigger(&resourceOffersCall)))
+    .WillRepeatedly(Return());
+
+  EXPECT_CALL(sched, offerRescinded(&driver, _))
+    .Times(AtMost(1));
+
+  EXPECT_CALL(sched, statusUpdate(&driver, _))
+    .WillOnce(DoAll(SaveArg<1>(&status),
+                    Trigger(&statusUpdateCall)));
+
+  process::Message message;
+
+  EXPECT_MSG(filter, Eq(FrameworkRegisteredMessage().GetTypeName()), _, _)
+    .WillOnce(DoAll(SaveArgPointee<0>(&message),
+                    Return(false)));
+
+  driver.start();
+
+  WAIT_UNTIL(resourceOffersCall);
+
+  // Simulate a spurious noMasterDetected event at the scheduler.
+  NoMasterDetectedMessage noMasterDetectedMsg;
+  process::post(message.to, noMasterDetectedMsg);
+
+  EXPECT_NE(0, offers.size());
+
+  TaskDescription task;
+  task.set_name("");
+  task.mutable_task_id()->set_value("1");
+  task.mutable_slave_id()->MergeFrom(offers[0].slave_id());
+  task.mutable_resources()->MergeFrom(offers[0].resources());
+
+  vector<TaskDescription> tasks;
+  tasks.push_back(task);
+
+  driver.launchTasks(offers[0].id(), tasks);
+
+  WAIT_UNTIL(statusUpdateCall);
+
+  EXPECT_EQ(status.state(), TASK_LOST);
+
+  driver.stop();
+  driver.join();
+
+  process::post(slave, process::TERMINATE);
+  process::wait(slave);
+
+  process::post(master, process::TERMINATE);
+  process::wait(master);
+
+  process::filter(NULL);
+}
+
+
 TEST(FaultToleranceTest, SchedulerFailoverStatusUpdate)
 {
   ASSERT_TRUE(GTEST_IS_THREADSAFE);

@@ -535,14 +535,28 @@ void Master::reregisterFramework(const FrameworkID& frameworkId,
     // master/allocator launches the scheduler can get restarted
     // (if necessary) by the master and the master will always
     // know which scheduler is the correct one.
+
+    Framework* framework = frameworks[frameworkId];
+
     if (failover) {
       // TODO: Should we check whether the new scheduler has given
       // us a different framework name, user name or executor info?
       LOG(INFO) << "Framework " << frameworkId << " failed over";
-      failoverFramework(frameworks[frameworkId], from());
+      failoverFramework(framework, from());
     } else {
       LOG(INFO) << "Allowing the Framework " << frameworkId
                 << " to re-register with an already used id";
+
+      // Remove any offers sent to this framework.
+      // NOTE: We need to do this because the scheduler might have
+      // replied to the offers but the driver might have dropped
+      // those messages since it wasn't connected to the master.
+      foreach (Offer* offer, utils::copy(framework->offers)) {
+        allocator->resourcesRecovered(offer->framework_id(),
+                                      offer->slave_id(),
+                                      offer->resources());
+        removeOffer(offer);
+      }
 
       FrameworkReregisteredMessage message;
       message.mutable_framework_id()->MergeFrom(frameworkId);

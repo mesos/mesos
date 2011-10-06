@@ -28,6 +28,7 @@
 #include "common/lock.hpp"
 #include "common/logging.hpp"
 #include "common/type_utils.hpp"
+#include "common/uuid.hpp"
 
 #include "detector/detector.hpp"
 
@@ -389,6 +390,26 @@ protected:
   {
     if (!connected) {
       VLOG(1) << "Ignoring launch tasks message as master is disconnected";
+      // NOTE: Reply to the framework with TASK_LOST messages for each
+      // task. This is a hack for now, to not let the scheduler believe the
+      // tasks are forever in PENDING state, when actually the master
+      // never received the launchTask message. Also, realize that this
+      // hack doesn't capture the case when the scheduler process sends it
+      // but the master never receives it (message lost, master failover etc).
+      // In the future, this should be solved by the replicated log and timeouts.
+      foreach (const TaskDescription& task, tasks) {
+        VLOG(1) << "Sending TASK_FAILED update for task" << task.task_id().value();
+        StatusUpdate update;
+        update.mutable_framework_id()->MergeFrom(frameworkId);
+        TaskStatus* status = update.mutable_status();
+        status->mutable_task_id()->MergeFrom(task.task_id());
+        status->set_state(TASK_LOST);
+        status->set_message("Master Disconnected");
+        update.set_timestamp(elapsedTime());
+        update.set_uuid(UUID::random().toBytes());
+
+        statusUpdate(update, UPID());
+      }
       return;
     }
 
