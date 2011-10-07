@@ -497,22 +497,28 @@ JNIEXPORT void JNICALL Java_org_apache_mesos_Log_initialize__ILjava_lang_String_
 
   std::string znode = construct<std::string>(env, jznode);
 
-  std::string scheme = construct<std::string>(env, jscheme);
+  Log *log;
+  // if either of these are null, then assume Credentials.NONE
+  if (jscheme != NULL && jcredentials != NULL) {
+    std::string scheme = construct<std::string>(env, jscheme);
 
-  jbyte* temp = env->GetByteArrayElements(jcredentials, NULL);
-  jsize length = env->GetArrayLength(jcredentials);
+    jbyte* temp = env->GetByteArrayElements(jcredentials, NULL);
+    jsize length = env->GetArrayLength(jcredentials);
 
-  std::string credentials((char*) temp, (size_t) length);
+    std::string credentials((char*) temp, (size_t) length);
 
-  env->ReleaseByteArrayElements(jcredentials, temp, 0);
+    env->ReleaseByteArrayElements(jcredentials, temp, 0);
 
-  zookeeper::Authentication auth;
-  auth.scheme = scheme;
-  auth.credentials = credentials;
+    zookeeper::Authentication auth;
+    auth.scheme = scheme;
+    auth.credentials = credentials;
 
-   // Create the C++ Log and initialize the __log variable.
-  Log* log = new Log(quorum, path, servers, timeout, znode, auth);
+    log = new Log(quorum, path, servers, timeout, znode, auth);
+  } else {
+    log = new Log(quorum, path, servers, timeout, znode);
+  }
 
+  // Create the C++ Log and initialize the __log variable.
   clazz = env->GetObjectClass(thiz);
 
   jfieldID __log = env->GetFieldID(clazz, "__log", "J");
