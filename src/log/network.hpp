@@ -305,4 +305,4 @@ inline void ZooKeeperNetwork::discarded() const
 }
 #endif // WITH_ZOOKEEPER
 
-#endif __NETWORK_HPP__
+#endif // __NETWORK_HPP__

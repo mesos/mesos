@@ -41,6 +41,7 @@ WITH_INCLUDED_ZOOKEEPER = @WITH_INCLUDED_ZOOKEEPER@
 BOOST = third_party/boost-1.37.0
 PROTOBUF = third_party/protobuf-2.3.0
 GLOG = third_party/glog-0.3.1
+LEVELDB = third_party/leveldb
 ZOOKEEPER = third_party/zookeeper-3.3.1/src/c
 LIBPROCESS = third_party/libprocess
 LIBEV = $(LIBPROCESS)/third_party/libev-3.8
@@ -70,6 +71,10 @@ LDFLAGS += -L@top_builddir@/$(PROTOBUF)/src/.libs
 CXXFLAGS += -I@top_srcdir@/$(GLOG)/src -I@top_builddir@/$(GLOG)/src
 LDFLAGS += -L@top_builddir@/$(GLOG)/.libs
 
+# Add leveldb to include and lib paths.
+CXXFLAGS += -I@top_srcdir@/$(LEVELDB)/include
+LDFLAGS += -L@top_builddir@/$(LEVELDB)
+
 # Add libprocess to CFLAGS, CXXFLAGS, and LDFLAGS.
 CFLAGS += -I@top_srcdir@/$(LIBPROCESS)/include
 CXXFLAGS += -I@top_srcdir@/$(LIBPROCESS)/include
@@ -88,8 +93,8 @@ endif
 CFLAGS += -MMD -MP
 CXXFLAGS += -MMD -MP
 
-# Add protobuf, glog, libev, libprocess, pthread, and dl to LIBS.
-LIBS += -lprotobuf -lglog -lprocess -lev -lpthread -ldl
+# Add protobuf, glog, leveldb, libev, libprocess, pthread, and dl to LIBS.
+LIBS += -lprotobuf -lglog -lleveldb -lprocess -lev -lpthread -ldl
 
 # Add ZooKeeper if necessary.
 ifeq ($(WITH_ZOOKEEPER),1)
@@ -147,6 +152,8 @@ SLAVE_EXE_OBJ = $(SLAVE_OBJ) $(SLAVE_WEBUI_OBJ) $(COMMON_OBJ)	\
 
 LAUNCHER_EXE_OBJ = launcher/launcher.o $(COMMON_OBJ)
 
+LOG_EXE_OBJ = log/replica.o
+
 LOCAL_EXE_OBJ = local/local.o $(MASTER_OBJ) $(SLAVE_OBJ) $(COMMON_OBJ)	\
 		common/build.o
 
@@ -154,12 +161,14 @@ MESOS_MASTER_EXE = $(BINDIR)/mesos-master
 MESOS_SLAVE_EXE = $(BINDIR)/mesos-slave
 MESOS_LOCAL_EXE = $(BINDIR)/mesos-local
 MESOS_LAUNCHER_EXE = $(BINDIR)/mesos-launcher
+MESOS_LOG_EXE = $(BINDIR)/mesos-log
 MESOS_GETCONF_EXE = $(BINDIR)/mesos-getconf
 MESOS_PROJD_EXE = $(BINDIR)/mesos-projd
 MESOS_EXE = $(BINDIR)/mesos
 
 MESOS_EXES = $(MESOS_MASTER_EXE) $(MESOS_SLAVE_EXE) $(MESOS_LOCAL_EXE)	\
-             $(MESOS_LAUNCHER_EXE) $(MESOS_GETCONF_EXE) $(MESOS_EXE)
+             $(MESOS_LAUNCHER_EXE) $(MESOS_LOG_EXE)			\
+             $(MESOS_GETCONF_EXE) $(MESOS_EXE)
 
 ifeq ($(OS_NAME),solaris)
   MESOS_EXES += $(MESOS_PROJD_EXE)
@@ -301,6 +310,9 @@ $(MESOS_LAUNCHER_EXE): $(SRCDIR)/launcher/main.cpp $(LAUNCHER_EXE_OBJ) $(PROTOBU
 
 $(MESOS_LOCAL_EXE): $(SRCDIR)/local/main.cpp $(LOCAL_EXE_OBJ) $(PROTOBUF_OBJ)
 	$(CXX) $(CXXFLAGS) -o $@ $< $(LOCAL_EXE_OBJ) $(PROTOBUF_OBJ) $(LDFLAGS) $(LIBS)
+
+$(MESOS_LOG_EXE): $(SRCDIR)/log/main.cpp $(COMMON_OBJ) $(PROTOBUF_OBJ)
+	$(CXX) $(CXXFLAGS) -o $@ $< $(LOG_EXE_OBJ) $(COMMON_OBJ) $(PROTOBUF_OBJ) $(LDFLAGS) $(LIBS)
 
 $(MESOS_GETCONF_EXE): $(SRCDIR)/configurator/get_conf.cpp $(COMMON_OBJ) $(PROTOBUF_OBJ)
 	$(CXX) $(CXXFLAGS) -o $@ $< $(COMMON_OBJ) $(PROTOBUF_OBJ) $(LDFLAGS) $(LIBS)

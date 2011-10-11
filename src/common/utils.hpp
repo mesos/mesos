@@ -171,6 +171,19 @@ inline std::string basename(const std::string& path)
 }
 
 
+inline bool exists(const std::string& path, bool directory = false)
+{
+  struct stat s;
+
+  if (::stat(path.c_str(), &s) < 0) {
+    return false;
+  }
+
+  // Check if it's a directory if requested.
+  return directory ? S_ISDIR(s.st_mode) : true;
+}
+
+
 inline bool mkdir(const std::string& directory)
 {
   try {
@@ -199,7 +212,8 @@ inline bool mkdir(const std::string& directory)
 }
 
 
-// Recursively deletes a directory akin to: 'rm -r'.
+// Recursively deletes a directory akin to: 'rm -r'. Note that this
+// function expects an absolute path.
 bool rmdir(const std::string& directory);
 
 

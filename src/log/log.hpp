@@ -61,6 +61,7 @@ public:
     // to logs or across communication mediums.
     std::string identity() const
     {
+      CHECK(sizeof(value) == 8);
       char bytes[8];
       bytes[0] =(0xff & (value >> 56));
       bytes[1] = (0xff & (value >> 48));
@@ -213,6 +214,7 @@ public:
   // Position.identity().
   Position position(const std::string& identity) const
   {
+    CHECK(identity.size() == 8);
     const char* bytes = identity.c_str();
     uint64_t value =
       ((uint64_t) (bytes[0] & 0xff) << 56) |

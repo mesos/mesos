@@ -19,6 +19,7 @@ LIBPROCESS = third_party/libprocess
 PROTOBUF = third_party/protobuf-2.3.0
 GLOG = third_party/glog-0.3.1
 ZOOKEEPER = third_party/zookeeper-3.3.1/src/c
+LEVELDB = third_party/leveldb
 SETUPTOOLS = @SETUPTOOLS@
 
 default: all
@@ -30,6 +31,11 @@ third_party: setuptools
 	$(MAKE) -C $(LIBPROCESS)
 	$(MAKE) -C $(PROTOBUF)
 	$(MAKE) -C $(GLOG)
+ifneq (@top_srcdir@,@top_builddir@)
+	mkdir -p @top_builddir@/$(LEVELDB)
+	cp -r @top_srcdir@/$(LEVELDB) @top_builddir@/`dirname $(LEVELDB)`
+endif
+	$(MAKE) -C $(LEVELDB)
 ifeq ($(WITH_INCLUDED_ZOOKEEPER),1)
 	$(MAKE) -C $(ZOOKEEPER)
 endif
