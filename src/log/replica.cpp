@@ -855,21 +855,19 @@ void ReplicaProcess::recover(const string& path)
   // Only use the learned positions to help determine the holes.
   const std::set<uint64_t>& learned = state.get().learned;
 
-  // Assume that position 0 is a hole so a coordinator can attempt to
-  // fill it with a no-op when it gets elected. We remove position 0
-  // from the set of holes below if during recovery we find it.
-  holes.insert(0);
+  // We need to assume that position 0 is a hole for a brand new log
+  // (a coordinator will simply fill it with a no-op when it first
+  // gets elected), unless the position was found during recovery or
+  // it has been truncated.
+  if (learned.count(0) == 0 && unlearned.count(0) == 0 && begin == 0) {
+    holes.insert(0);
+  }
 
-  // Determine the holes.
+  // Now determine the rest of the holes.
   for (uint64_t position = begin; position < end; position++) {
     if (learned.count(position) == 0 && unlearned.count(position) == 0) {
       holes.insert(position);
     }
-  }
-
-  // Remove position 0 if found in the log or has not been truncated.
-  if (learned.count(0) != 0 || unlearned.count(0) != 0 || begin > 0) {
-    holes.erase(0);
   }
 
   LOG(INFO) << "Replica recovered with log positions "
