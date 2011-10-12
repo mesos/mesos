@@ -867,8 +867,8 @@ void ReplicaProcess::recover(const string& path)
     }
   }
 
-  // Remove position 0 if it was found in the log.
-  if (learned.count(0) != 0 || unlearned.count(0) != 0) {
+  // Remove position 0 if found in the log or has not been truncated.
+  if (learned.count(0) != 0 || unlearned.count(0) != 0 || begin > 0) {
     holes.erase(0);
   }
 
