@@ -69,12 +69,12 @@ jclass FindMesosClass(JNIEnv* env, const char* className)
   }
 
   jclass javaLangClassLoader = env->FindClass("java/lang/ClassLoader");
-  CHECK(javaLangClassLoader != NULL);
+  assert(javaLangClassLoader != NULL);
   jmethodID loadClass =
     env->GetMethodID(javaLangClassLoader,
                      "loadClass",
                      "(Ljava/lang/String;)Ljava/lang/Class;");
-  CHECK(loadClass != NULL);
+  assert(loadClass != NULL);
 
   // Create an object for the class name string; alloc could fail.
   jstring strClassName = env->NewStringUTF(convName.c_str());
@@ -116,17 +116,17 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* jvm, void* reserved)
   // Find this thread's context class loader; none of this is expected
   // to fail.
   javaLangThread = env->FindClass("java/lang/Thread");
-  CHECK(javaLangThread != NULL);
+  assert(javaLangThread != NULL);
   javaLangClassLoader = env->FindClass("java/lang/ClassLoader");
-  CHECK(javaLangClassLoader != NULL);
+  assert(javaLangClassLoader != NULL);
   currentThread = env->GetStaticMethodID(javaLangThread,
     "currentThread", "()Ljava/lang/Thread;");
   getContextClassLoader = env->GetMethodID(javaLangThread,
     "getContextClassLoader", "()Ljava/lang/ClassLoader;");
-  CHECK(currentThread != NULL);
-  CHECK(getContextClassLoader != NULL);
+  assert(currentThread != NULL);
+  assert(getContextClassLoader != NULL);
   thread = env->CallStaticObjectMethod(javaLangThread, currentThread);
-  CHECK(thread != NULL);
+  assert(thread != NULL);
   classLoader = env->CallObjectMethod(thread, getContextClassLoader);
   if (classLoader != NULL) {
     mesosClassLoader = env->NewWeakGlobalRef(classLoader);
