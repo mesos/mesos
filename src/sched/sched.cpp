@@ -398,7 +398,7 @@ protected:
       // but the master never receives it (message lost, master failover etc).
       // In the future, this should be solved by the replicated log and timeouts.
       foreach (const TaskDescription& task, tasks) {
-        VLOG(1) << "Sending TASK_FAILED update for task" << task.task_id().value();
+        VLOG(1) << "Sending TASK_LOST update for task" << task.task_id().value();
         StatusUpdate update;
         update.mutable_framework_id()->MergeFrom(frameworkId);
         TaskStatus* status = update.mutable_status();
@@ -419,6 +419,7 @@ protected:
     message.mutable_filters()->MergeFrom(filters);
 
     foreach (const TaskDescription& task, tasks) {
+      VLOG(1) << "Launching task id: " << task.task_id().value() << " name: " << task.name();
       // Keep only the slave PIDs where we run tasks so we can send
       // framework messages directly.
       savedSlavePids[task.slave_id()] = savedOffers[offerId][task.slave_id()];

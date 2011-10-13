@@ -327,8 +327,13 @@ TEST(FaultToleranceTest, FrameworkReregister)
   process::filter(NULL);
 }
 
-
-TEST(FaultToleranceTest, TaskLost)
+// TOOD(vinod): Disabling this test for now because
+// of the following race condition breaking this test:
+// We do a driver.launchTasks() after post(noMasterDetected)
+// but since dispatch (which is used by launchTasks()) uses
+// a different queue than post, it might so happen that the latter
+// message is dequeued before the former, thus breaking the test.
+TEST(FaultToleranceTest, DISABLED_TaskLost)
 {
   ASSERT_TRUE(GTEST_IS_THREADSAFE);
 
@@ -343,6 +348,15 @@ TEST(FaultToleranceTest, TaskLost)
   PID<Master> master = process::spawn(&m);
 
   MockExecutor exec;
+  EXPECT_CALL(exec, init(_, _))
+    .Times(0);
+
+  EXPECT_CALL(exec, launchTask(_, _))
+    .Times(0);
+
+  EXPECT_CALL(exec, shutdown(_))
+    .Times(0);
+
   map<ExecutorID, Executor*> execs;
   execs[DEFAULT_EXECUTOR_ID] = &exec;
 
@@ -393,7 +407,7 @@ TEST(FaultToleranceTest, TaskLost)
   EXPECT_NE(0, offers.size());
 
   TaskDescription task;
-  task.set_name("");
+  task.set_name("test task");
   task.mutable_task_id()->set_value("1");
   task.mutable_slave_id()->MergeFrom(offers[0].slave_id());
   task.mutable_resources()->MergeFrom(offers[0].resources());
