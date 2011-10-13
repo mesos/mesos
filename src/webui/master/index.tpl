@@ -98,10 +98,8 @@
 % offered_mem = 0
 % for framework in state['frameworks']:
 %   for offer in framework['offers']:
-%     for slave in offer['slaves']:
-%       offered_cpus += slave['resources']['cpus']
-%       offered_mem += slave['resources']['mem']
-%     end
+%     offered_cpus += offer['resources']['cpus']
+%     offered_mem += offer['resources']['mem']
 %   end
 % end
 
@@ -227,26 +225,18 @@
   <tr>
     <th class="lists">Offer ID</th>
     <th class="lists">Framework ID</th>
+    <th class="lists">Slave ID</th>
     <th class="lists">CPUs</th>
     <th class="lists">MEM</th>
-    <th class="lists">Slave IDs</th>
   </tr>
   % for framework in state['frameworks']:
   %   for offer in framework['offers']:
-  %     slave_ids = []
-  %     cpus = 0
-  %     mem = 0
-  %     for slave in offer['slaves']:
-  %       slave_ids.append(str(slave['id']))
-  %       cpus += slave['resources']['cpus']
-  %       mem += slave['resources']['mem']
-  %     end
   <tr>
     <td class="lists">{{offer['id']}}</td>
     <td class="lists">{{offer['framework_id']}}</td>
-    <td class="lists">{{cpus}}</td>
-    <td class="lists">{{format_mem(mem)}}</td>
-    <td class="lists">{{", ".join(slave_ids)}}</td>
+    <td class="lists">{{offer['slave_id']}}</td>
+    <td class="lists">{{offer['resources']['cpus']}}</td>
+    <td class="lists">{{format_mem(offer['resources']['mem'])}}</td>
   </tr>
   %   end
   % end

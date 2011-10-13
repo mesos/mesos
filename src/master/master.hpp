@@ -28,7 +28,7 @@
 #include "common/foreach.hpp"
 #include "common/hashmap.hpp"
 #include "common/hashset.hpp"
-#include "common/multimap.hpp"
+#include "common/multihashmap.hpp"
 #include "common/resources.hpp"
 #include "common/type_utils.hpp"
 #include "common/units.hpp"
@@ -42,25 +42,25 @@
 #include "messages/messages.hpp"
 
 
-namespace mesos { namespace internal { namespace master {
+namespace mesos {
+namespace internal {
+namespace master {
 
-using namespace process;
+using namespace process; // Included to make code easier to read.
 
 // Some forward declarations.
 class Allocator;
 class SlavesManager;
 struct Framework;
 struct Slave;
-struct SlaveResources;
 class SlaveObserver;
-struct Offer;
 
 
 class Master : public ProtobufProcess<Master>
 {
 public:
-  Master();
-  Master(const Configuration& conf);
+  Master(Allocator* _allocator);
+  Master(Allocator* _allocator, const Configuration& conf);
 
   virtual ~Master();
 
@@ -73,29 +73,32 @@ public:
   void registerFramework(const FrameworkInfo& frameworkInfo);
   void reregisterFramework(const FrameworkID& frameworkId,
                            const FrameworkInfo& frameworkInfo,
-                           int32_t generation);
+                           bool failover);
   void unregisterFramework(const FrameworkID& frameworkId);
-  void resourceOfferReply(const FrameworkID& frameworkId,
-                          const OfferID& offerId,
-                          const std::vector<TaskDescription>& tasks,
-                          const Params& params);
+  void deactivateFramework(const FrameworkID& frameworkId);
+  void resourceRequest(const FrameworkID& frameworkId,
+                       const std::vector<ResourceRequest>& requests);
+  void launchTasks(const FrameworkID& frameworkId,
+                   const OfferID& offerId,
+                   const std::vector<TaskDescription>& tasks,
+                   const Filters& filters);
   void reviveOffers(const FrameworkID& frameworkId);
   void killTask(const FrameworkID& frameworkId, const TaskID& taskId);
   void schedulerMessage(const SlaveID& slaveId,
-			const FrameworkID& frameworkId,
-			const ExecutorID& executorId,
-			const std::string& data);
+                        const FrameworkID& frameworkId,
+                        const ExecutorID& executorId,
+                        const std::string& data);
   void registerSlave(const SlaveInfo& slaveInfo);
   void reregisterSlave(const SlaveID& slaveId,
                        const SlaveInfo& slaveInfo,
-		       const std::vector<ExecutorInfo>& executorInfos,
+                       const std::vector<ExecutorInfo>& executorInfos,
                        const std::vector<Task>& tasks);
   void unregisterSlave(const SlaveID& slaveId);
   void statusUpdate(const StatusUpdate& update, const UPID& pid);
   void executorMessage(const SlaveID& slaveId,
-		       const FrameworkID& frameworkId,
-		       const ExecutorID& executorId,
-		       const std::string& data);
+                       const FrameworkID& frameworkId,
+                       const ExecutorID& executorId,
+                       const std::string& data);
   void exitedExecutor(const SlaveID& slaveId,
                       const FrameworkID& frameworkId,
                       const ExecutorID& executorId,
@@ -113,38 +116,32 @@ public:
   // Return connected slaves that are not in the process of being removed
   std::vector<Slave*> getActiveSlaves() const;
 
-  OfferID makeOffer(Framework* framework,
-		    const std::vector<SlaveResources>& resources);
+  void makeOffers(Framework* framework,
+                  const hashmap<Slave*, Resources>& offered);
 
 protected:
   virtual void operator () ();
-  
+
   void initialize();
 
-  // Process a resource offer reply (for a non-cancelled offer) by
+  // Process a launch tasks request (for a non-cancelled offer) by
   // launching the desired tasks (if the offer contains a valid set of
-  // tasks) and reporting any unused resources to the allocator
-  void processOfferReply(Offer* offer,
-                         const std::vector<TaskDescription>& tasks,
-                         const Params& params);
+  // tasks) and reporting any unused resources to the allocator.
+  void processTasks(Offer* offer,
+                    Framework* framework,
+                    Slave* slave,
+                    const std::vector<TaskDescription>& tasks,
+                    const Filters& filters);
 
-  // Launch a task described in an offer response.
-  void launchTask(Framework* framework, const TaskDescription& task);
-  
+  // Add a framework.
   void addFramework(Framework* framework);
 
   // Replace the scheduler for a framework with a new process ID, in
   // the event of a scheduler failover.
   void failoverFramework(Framework* framework, const UPID& newPid);
 
-  // Terminate a framework, sending it a particular error message
-  // TODO: Make the error codes and messages programmer-friendly
-  void terminateFramework(Framework* framework,
-                          int32_t code,
-                          const std::string& error);
-
   // Kill all of a framework's tasks, delete the framework object, and
-  // reschedule slot offers for slots that were assigned to this framework
+  // reschedule offers that were assigned to this framework.
   void removeFramework(Framework* framework);
 
   // Add a slave.
@@ -157,16 +154,17 @@ protected:
   // Lose all of a slave's tasks and delete the slave object
   void removeSlave(Slave* slave);
 
-  void removeTask(Framework* framework,
-                  Slave* slave,
-                  Task* task,
-                  TaskRemovalReason reason);
+  // Launch a task from a task description, and returned the consumed
+  // resources for the task and possibly it's executor.
+  Resources launchTask(const TaskDescription& task,
+                       Framework* framework,
+                       Slave* slave);
 
-  // Remove a slot offer (because it was replied to, or we want to rescind it,
-  // or we lost a framework or a slave)
-  void removeOffer(Offer* offer,
-                   OfferReturnReason reason,
-                   const std::vector<SlaveResources>& resourcesLeft);
+  // Remove a task.
+  void removeTask(Task* task);
+
+  // Remove an offer and optionally rescind the offer as well.
+  void removeOffer(Offer* offer, bool rescind = false);
 
   Framework* getFramework(const FrameworkID& frameworkId);
   Slave* getSlave(const SlaveID& slaveId);
@@ -177,6 +175,7 @@ protected:
   SlaveID newSlaveId();
 
 private:
+
   // TODO(benh): Remove once SimpleAllocator doesn't use Master::get*.
   friend class SimpleAllocator;
   friend struct SlaveRegistrar;
@@ -209,7 +208,7 @@ private:
   // IDs created by this master.
   std::string id;
 
-  multimap<std::string, uint16_t> slaveHostnamePorts;
+  multihashmap<std::string, uint16_t> slaveHostnamePorts;
 
   hashmap<FrameworkID, Framework*> frameworks;
   hashmap<SlaveID, Slave*> slaves;
@@ -233,20 +232,6 @@ private:
 
   // Failover timeout for frameworks, in seconds.
   int failoverTimeout;
-};
-
-
-// A resource offer.
-struct Offer
-{
-  Offer(const OfferID& _id,
-        const FrameworkID& _frameworkId,
-        const std::vector<SlaveResources>& _resources)
-    : id(_id), frameworkId(_frameworkId), resources(_resources) {}
-
-  const OfferID id;
-  const FrameworkID frameworkId;
-  std::vector<SlaveResources> resources;
 };
 
 
@@ -296,6 +281,20 @@ struct Slave
     resourcesInUse -= task->resources();
   }
 
+  void addOffer(Offer* offer)
+  {
+    CHECK(!offers.contains(offer));
+    offers.insert(offer);
+    resourcesOffered += offer->resources();
+  }
+
+  void removeOffer(Offer* offer)
+  {
+    CHECK(offers.contains(offer));
+    offers.erase(offer);
+    resourcesOffered -= offer->resources();
+  }
+
   bool hasExecutor(const FrameworkID& frameworkId,
 		   const ExecutorID& executorId)
   {
@@ -322,15 +321,14 @@ struct Slave
 
       executors[frameworkId].erase(executorId);
       if (executors[frameworkId].size() == 0) {
-	executors.erase(frameworkId);
+        executors.erase(frameworkId);
       }
     }
   }
 
   Resources resourcesFree()
   {
-    Resources resources = info.resources();
-    return resources - (resourcesOffered + resourcesInUse);
+    return info.resources() - (resourcesOffered + resourcesInUse);
   }
 
   const SlaveID id;
@@ -338,32 +336,23 @@ struct Slave
 
   UPID pid;
 
-  bool active; // Turns false when slave is being removed
+  bool active; // Turns false when slave is being removed.
   double registeredTime;
   double lastHeartbeat;
 
-  Resources resourcesOffered; // Resources currently in offers
-  Resources resourcesInUse;   // Resources currently used by tasks
+  Resources resourcesOffered; // Resources currently in offers.
+  Resources resourcesInUse;   // Resources currently used by tasks.
 
-  // Map of all executors running on this slave.
+  // Executors running on this slave.
   hashmap<FrameworkID, hashmap<ExecutorID, ExecutorInfo> > executors;
 
+  // Tasks running on this slave, indexed by FrameworkID x TaskID.
   hashmap<std::pair<FrameworkID, TaskID>, Task*> tasks;
 
-  hashset<Offer*> offers; // Active offers on this slave.
+  // Active offers on this slave.
+  hashset<Offer*> offers;
 
   SlaveObserver* observer;
-};
-
-
-// Resources offered on a particular slave.
-struct SlaveResources
-{
-  SlaveResources() {}
-  SlaveResources(Slave* s, Resources r): slave(s), resources(r) {}
-
-  Slave* slave;
-  Resources resources;
 };
 
 
@@ -394,39 +383,30 @@ struct Framework
 
   void addTask(Task* task)
   {
-    CHECK(tasks.count(task->task_id()) == 0);
+    CHECK(!tasks.contains(task->task_id()));
     tasks[task->task_id()] = task;
-    for (int i = 0; i < task->resources_size(); i++) {
-      resources += task->resources(i);
-    }
+    resources += task->resources();
   }
 
-  void removeTask(const TaskID& taskId)
+  void removeTask(Task* task)
   {
-    CHECK(tasks.count(taskId) > 0);
-    Task* task = tasks[taskId];
-    for (int i = 0; i < task->resources_size(); i++) {
-      resources -= task->resources(i);
-    }
-    tasks.erase(taskId);
+    CHECK(tasks.contains(task->task_id()));
+    tasks.erase(task->task_id());
+    resources -= task->resources();
   }
 
   void addOffer(Offer* offer)
   {
-    CHECK(offers.count(offer) == 0);
+    CHECK(!offers.contains(offer));
     offers.insert(offer);
-    foreach (const SlaveResources& sr, offer->resources) {
-      resources += sr.resources;
-    }
+    resources += offer->resources();
   }
 
   void removeOffer(Offer* offer)
   {
     CHECK(offers.find(offer) != offers.end());
     offers.erase(offer);
-    foreach (const SlaveResources& sr, offer->resources) {
-      resources -= sr.resources;
-    }
+    resources -= offer->resources();
   }
 
   bool hasExecutor(const SlaveID& slaveId,
@@ -480,14 +460,14 @@ struct Framework
 
   UPID pid;
 
-  bool active; // Turns false when framework is being removed
+  bool active; // Turns false when framework is being removed.
   double registeredTime;
   double reregisteredTime;
 
   hashmap<TaskID, Task*> tasks;
   hashset<Offer*> offers; // Active offers for framework.
 
-  Resources resources; // Total resources we own (tasks + offers + executors).
+  Resources resources; // Total resources (tasks + offers + executors).
   hashmap<SlaveID, hashmap<ExecutorID, ExecutorInfo> > executors;
 
   // Contains a time of unfiltering for each slave we've filtered,
@@ -495,29 +475,8 @@ struct Framework
   hashmap<Slave*, double> slaveFilter;
 };
 
-
-// Pretty-printing of Offers, Tasks, Frameworks, Slaves, etc.
-
-inline std::ostream& operator << (std::ostream& stream, const Offer *o)
-{
-  stream << "offer " << o->id;
-  return stream;
-}
-
-
-inline std::ostream& operator << (std::ostream& stream, const Slave *s)
-{
-  stream << "slave " << s->id;
-  return stream;
-}
-
-
-inline std::ostream& operator << (std::ostream& stream, const Framework *f)
-{
-  stream << "framework " << f->id;
-  return stream;
-}
-
-}}} // namespace mesos { namespace internal { namespace master {
+} // namespace master {
+} // namespace internal {
+} // namespace mesos {
 
 #endif // __MASTER_HPP__

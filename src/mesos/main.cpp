@@ -30,34 +30,6 @@ void usage(const char* programName, const Configurator& configurator)
 }
 
 
-class SubmitSchedulerProcess : public ProtobufProcess<SubmitSchedulerProcess>
-{
-public:
-  SubmitSchedulerProcess(const UPID& _master,
-                         const std::string& _name,
-                         const Promise<bool>& _promise)
-    : master(_master), name(_name), promise(_promise) {}
-
-protected:
-  virtual void operator () ()
-  {
-    cout << "Sending request to " << master << endl;
-    SubmitSchedulerRequest request;
-    request.set_name(name);
-    send(master, request);
-    receive();
-    SubmitSchedulerResponse response;
-    response.ParseFromString(body());
-    promise.set(response.okay());
-  }
-
-private:
-  const UPID master;
-  const std::string name;
-  Promise<bool> promise;
-};
-
-
 int main(int argc, char** argv)
 {
   // TODO(vinod): Add options!
@@ -98,43 +70,26 @@ int main(int argc, char** argv)
     exit(1);
   }
 
- /*
-  if (!conf.contains("num-replicas")) {
-    usage(argv[0], configurator);
-    exit(1);
-  }
-*/
-
   LOG(INFO) << "Submitting scheduler ...";
 
-  Promise<bool> promise;
+  Protocol<SubmitSchedulerRequest, SubmitSchedulerResponse> submit;
 
-  SubmitSchedulerProcess process(master, conf["name"], promise);
-  process::spawn(process);
+  SubmitSchedulerRequest request;
+  request.set_name(conf["name"]);
 
-  Future<bool> future = promise.future();
+  Future<SubmitSchedulerResponse> future = submit(master, request);
+
   future.await(5.0);
 
-  if (future.ready()) {
-    if (future.get()) {
+  if (future.isReady()) {
+    if (future.get().okay()) {
       cout << "Scheduler submitted successfully" << endl;
     } else {
       cout << "Failed to submit scheduler" << endl;
     }
   } else {
-    cout << "Timed out waiting for scheduler" << endl;
+    cout << "Timed out waiting for response from submitting scheduler" << endl;
   }
-
-  // TODO(vinod): This (or similar) code would be used when Ben
-  // implements the new Protocol mechanism for communication.
-  //   Protocol<SubmitSchedulerRequest, SubmitSchedulerResponse> submit;
-
-  //   SubmitSchedulerRequest request;
-  //   request.set_name(name);
-
-  //   Future<SubmitSchedulerResponse> future = submit(master, request);
-
-  //   future.await();
 
   return 0;
 }

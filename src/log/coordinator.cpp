@@ -16,15 +16,17 @@ using std::set;
 using std::string;
 
 
-namespace mesos { namespace internal { namespace log {
+namespace mesos {
+namespace internal {
+namespace log {
 
 Coordinator::Coordinator(int _quorum,
-                         ReplicaProcess* _replica,
-                         GroupProcess* _group)
+                         Replica* _replica,
+                         Network* _network)
   : elected(false),
     quorum(_quorum),
     replica(_replica),
-    group(_group),
+    network(_network),
     id(0),
     index(0) {}
 
@@ -32,31 +34,42 @@ Coordinator::Coordinator(int _quorum,
 Coordinator::~Coordinator() {}
 
 
-Result<uint64_t> Coordinator::elect(uint64_t _id)
+Result<uint64_t> Coordinator::elect()
 {
   CHECK(!elected);
 
-  id = _id;
+  // Get the highest known promise from our local replica.
+  Future<uint64_t> promise = replica->promised();
+
+  promise.await(); // TODO(benh): Take a timeout and use it here!
+
+  if (promise.isFailed()) {
+    return Result<uint64_t>::error(promise.failure());
+  }
+
+  CHECK(promise.isReady()) << "Not expecting a discarded future!";
+
+  id = std::max(id, promise.get()) + 1; // Try the next highest!
 
   PromiseRequest request;
   request.set_id(id);
 
-  // Broadcast the request to the group.
+  // Broadcast the request to the network.
   set<Future<PromiseResponse> > futures =
     broadcast(protocol::promise, request);
 
   Option<Future<PromiseResponse> > option;
   int okays = 0;
-  
-  Timeout timeout = 1.0;
+
+  Timeout timeout = 1.0; // TODO(benh): Have timeout get passed in!
 
   do {
     option = select(futures, timeout.remaining());
     if (option.isSome()) {
-      CHECK(option.get().ready());
+      CHECK(option.get().isReady());
       const PromiseResponse& response = option.get().get();
       if (!response.okay()) {
-        return Result<uint64_t>::error("Coordinator demoted");
+        return Result<uint64_t>::none(); // Lost an election, but can retry.
       } else if (response.okay()) {
         CHECK(response.has_position());
         index = std::max(index, response.position());
@@ -74,6 +87,7 @@ Result<uint64_t> Coordinator::elect(uint64_t _id)
 
   // Either we have a quorum or we timed out.
   if (okays >= quorum) {
+    LOG(INFO) << "Coordinator elected!";
     elected = true;
 
     // Need to "catchup" local replica (i.e., fill in any unlearned
@@ -81,11 +95,19 @@ Result<uint64_t> Coordinator::elect(uint64_t _id)
     // Usually we could do this lazily, however, a local learned
     // position might have been truncated, so we actually need to
     // catchup the local replica all the way to the end of the log
-    // before we can perform any local reads.
-    // TODO(benh): Dispatch and timed wait on future instead?
-    set<uint64_t> positions = call(replica, &ReplicaProcess::missing, index);
+    // before we can perform any up-to-date local reads.
 
-    foreach (uint64_t position, positions) {
+    Future<set<uint64_t> > positions = replica->missing(index);
+
+    positions.await();  // TODO(benh): Have timeout get passed in!
+
+    if (positions.isFailed()) {
+      return Result<uint64_t>::error(positions.failure());
+    }
+
+    CHECK(positions.isReady()) << "Not expecting a discarded future!";
+
+    foreach (uint64_t position, positions.get()) {
       Result<Action> result = fill(position);
       if (result.isError()) {
         return Result<uint64_t>::error(result.error());
@@ -102,6 +124,7 @@ Result<uint64_t> Coordinator::elect(uint64_t _id)
   }
 
   // Timed out ...
+  LOG(INFO) << "Coordinator timed out while trying to get elected";
   return Result<uint64_t>::none();
 }
 
@@ -163,72 +186,6 @@ Result<uint64_t> Coordinator::truncate(uint64_t to)
 }
 
 
-Result<list<pair<uint64_t, string> > > Coordinator::read(
-    uint64_t from,
-    uint64_t to)
-{
-  LOG(INFO) << "Coordinator requested read from " << from << " -> " << to;
-
-  if (!elected) {
-    return Result<list<pair<uint64_t, string> > >::error(
-        "Coordinator not elected");
-  } else if (from == 0) { // TODO(benh): Fix this hack!
-    return Result<list<pair<uint64_t, string> > >::error(
-        "Bad read range (from == 0)");
-  } else if (to < from) {
-    return Result<list<pair<uint64_t, string> > >::error(
-        "Bad read range (to < from)");
-  } else if (index <= from) {
-    return Result<list<pair<uint64_t, string> > >::error(
-        "Bad read range (index <= from)");
-  }
-
-  list<Future<Result<Action> > > futures;
-
-  for (uint64_t position = from; position <= to; position++) {
-    futures.push_back(dispatch(replica, &ReplicaProcess::read, position));
-  }
-
-  // TODO(benh): Implement 'collect' for lists of futures, use below.
-
-  // Collect actions for each position.
-  list<Action> actions;
-
-  foreach (const Future<Result<Action> >& future, futures) {
-    future.await(); // TODO(benh): Timeout?
-    CHECK(future.ready());
-    const Result<Action>& result = future.get();
-    if (result.isError()) {
-      return Result<list<pair<uint64_t, string> > >::error(result.error());
-    } else if (result.isNone()) {
-      LOG(FATAL) << "Coordinator's local replica missing positions!";
-    } else {
-      CHECK(result.isSome());
-      const Action& action = result.get();
-      CHECK(action.has_learned() && action.learned())
-        << "Coordinator's local replica has unlearned positions!";
-      actions.push_back(action);
-    }
-  }
-
-  // Filter out all the no-ops and truncates. TODO(benh): Get
-  // convinced that there can't be a truncate action someplace else in
-  // the log which would eliminate what we are about to return!
-  list<pair<uint64_t, string> > appends;
-
-  foreach (const Action& action, actions) {
-    CHECK(action.has_performed());
-    CHECK(action.has_learned() && action.learned());
-    CHECK(action.has_type());
-    if (action.type() == Action::APPEND) {
-      appends.push_back(make_pair(action.position(), action.append().bytes()));
-    }
-  }
-
-  return appends;
-}
-
-
 Result<uint64_t> Coordinator::write(const Action& action)
 {
   LOG(INFO) << "Coordinator attempting to write "
@@ -274,24 +231,25 @@ Result<uint64_t> Coordinator::write(const Action& action)
       LOG(FATAL) << "Unknown Action::Type!";
   }
 
-  // Broadcast the request to the group *excluding* the local replica.
+  // Broadcast the request to the network *excluding* the local replica.
   set<Future<WriteResponse> > futures =
     remotecast(protocol::write, request);
 
   Option<Future<WriteResponse> > option;
   int okays = 0;
 
-  Timeout timeout = 1.0;
+  Timeout timeout = 1.0; // TODO(benh): Have timeout get passed in!
 
   do {
     option = select(futures, timeout.remaining());
     if (option.isSome()) {
-      CHECK(option.get().ready());
+      CHECK(option.get().isReady());
       const WriteResponse& response = option.get().get();
       CHECK(response.id() == request.id());
       CHECK(response.position() == request.position());
 
       if (!response.okay()) {
+        elected = false;
         return Result<uint64_t>::error("Coordinator demoted");
       } else if (response.okay()) {
         if (++okays >= (quorum - 1)) { // N.B. Using (quorum - 1) here!
@@ -321,11 +279,16 @@ Result<uint64_t> Coordinator::write(const Action& action)
 
 Result<uint64_t> Coordinator::commit(const Action& action)
 {
+  LOG(INFO) << "Coordinator attempting to commit "
+            << Action::Type_Name(action.type())
+            << " action at position " << action.position();
+
   CHECK(elected);
 
-  CommitRequest request;
+  WriteRequest request;
   request.set_id(id);
   request.set_position(action.position());
+  request.set_learned(true); // A commit is just a learned write.
   request.set_type(action.type());
   switch (action.type()) {
     case Action::NOP:
@@ -344,24 +307,33 @@ Result<uint64_t> Coordinator::commit(const Action& action)
       LOG(FATAL) << "Unknown Action::Type!";
   }
 
-  Future<CommitResponse> future = protocol::commit(replica->self(), request);
+  // We send a write request to the *local* replica just as the
+  // others: asynchronously via messages. However, rather than add the
+  // complications of dealing with timeouts for local operations
+  // (especially since we are trying to commit something), we make
+  // things simpler and block on the response from the local replica.
+  // TODO(benh): Add a non-message based way to do this write.
 
-  Timeout timeout = 1.0;
+  Future<WriteResponse> future = protocol::write(replica->pid(), request);
 
-  if (!future.await(timeout.remaining())) {
-    future.discard();
-    return Result<uint64_t>::none();
+  future.await(); // TODO(benh): Let it timeout, but consider it a failure.
+
+  if (future.isFailed()) {
+    return Result<uint64_t>::error(future.failure());
   }
 
-  const CommitResponse& response = future.get();
+  CHECK(future.isReady()) << "Not expecting a discarded future!";
+
+  const WriteResponse& response = future.get();
   CHECK(response.id() == request.id());
   CHECK(response.position() == request.position());
 
   if (!response.okay()) {
+    elected = false;
     return Result<uint64_t>::error("Coordinator demoted");
   }
 
-  // Commit successful, send a learned message to the group
+  // Commit successful, send a learned message to the network
   // *excluding* the local replica and return the position.
 
   LearnedMessage message;
@@ -388,22 +360,23 @@ Result<Action> Coordinator::fill(uint64_t position)
   request.set_id(id);
   request.set_position(position);
 
-  // Broadcast the request to the group.
+  // Broadcast the request to the network.
   set<Future<PromiseResponse> > futures =
     broadcast(protocol::promise, request);
 
   Option<Future<PromiseResponse> > option;
   list<PromiseResponse> responses;
 
-  Timeout timeout = 1.0;
+  Timeout timeout = 1.0; // TODO(benh): Have timeout get passed in!
 
   do {
     option = select(futures, timeout.remaining());
     if (option.isSome()) {
-      CHECK(option.get().ready());
+      CHECK(option.get().isReady());
       const PromiseResponse& response = option.get().get();
       CHECK(response.id() == request.id());
       if (!response.okay()) {
+        elected = false;
         return Result<Action>::error("Coordinator demoted");
       } else if (response.okay()) {
         responses.push_back(response);
@@ -482,12 +455,11 @@ set<Future<Res> > Coordinator::broadcast(
     const Protocol<Req, Res>& protocol,
     const Req& req)
 {
-  // TODO(benh): Dispatch and timed wait on future instead?
-  return call(group,
-              &GroupProcess::template broadcast<Req, Res>,
-              protocol,
-              req,
-              set<UPID>());
+  Future<set<Future<Res> > > futures =
+    network->broadcast(protocol, req);
+  futures.await();
+  CHECK(futures.isReady());
+  return futures.get();
 }
 
 
@@ -497,14 +469,12 @@ set<Future<Res> > Coordinator::remotecast(
     const Req& req)
 {
   set<UPID> filter;
-  filter.insert(replica->self());
-
-  // TODO(benh): Dispatch and timed wait on future instead?
-  return call(group,
-              &GroupProcess::template broadcast<Req, Res>,
-              protocol,
-              req,
-              filter);
+  filter.insert(replica->pid());
+  Future<set<Future<Res> > > futures =
+    network->broadcast(protocol, req, filter);
+  futures.await();
+  CHECK(futures.isReady());
+  return futures.get();
 }
 
 
@@ -512,13 +482,10 @@ template <typename M>
 void Coordinator::remotecast(const M& m)
 {
   set<UPID> filter;
-  filter.insert(replica->self());
-
-  // Need to disambiguate overloaded function.
-  void (GroupProcess::*broadcast) (const M&, const std::set<process::UPID>&);
-  broadcast = &GroupProcess::broadcast<M>;
-
-  dispatch(group, broadcast, m, filter);
+  filter.insert(replica->pid());
+  network->broadcast(m, filter);
 }
 
-}}} // namespace mesos { namespace internal { namespace log {
+} // namespace log {
+} // namespace internal {
+} // namespace mesos {

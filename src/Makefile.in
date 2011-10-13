@@ -40,6 +40,7 @@ OS_NAME = @OS_NAME@
 JAVA_HOME = @JAVA_HOME@
 JAVA_HEADERS = @JAVA_HEADERS@
 
+PYTHON = @PYTHON@
 PYTHON_HEADERS = @PYTHON_HEADERS@
 PYTHON_LDFLAGS = @PYTHON_LDFLAGS@
 
@@ -56,9 +57,11 @@ WITH_INCLUDED_ZOOKEEPER = @WITH_INCLUDED_ZOOKEEPER@
 BOOST = third_party/boost-1.37.0
 PROTOBUF = third_party/protobuf-2.3.0
 GLOG = third_party/glog-0.3.1
+LEVELDB = third_party/leveldb
 ZOOKEEPER = third_party/zookeeper-3.3.1/src/c
 LIBPROCESS = third_party/libprocess
 LIBEV = $(LIBPROCESS)/third_party/libev-3.8
+SETUPTOOLS = @SETUPTOOLS@
 
 # Ensure that we get better debugging info.
 CFLAGS += -g
@@ -84,6 +87,10 @@ LDFLAGS += -L@top_builddir@/$(PROTOBUF)/src/.libs
 CXXFLAGS += -I@top_srcdir@/$(GLOG)/src -I@top_builddir@/$(GLOG)/src
 LDFLAGS += -L@top_builddir@/$(GLOG)/.libs
 
+# Add leveldb to include and lib paths.
+CXXFLAGS += -I@top_srcdir@/$(LEVELDB)/include
+LDFLAGS += -L@top_builddir@/$(LEVELDB)
+
 # Add libprocess to CFLAGS, CXXFLAGS, and LDFLAGS.
 CFLAGS += -I@top_srcdir@/$(LIBPROCESS)/include
 CXXFLAGS += -I@top_srcdir@/$(LIBPROCESS)/include
@@ -102,8 +109,8 @@ endif
 CFLAGS += -MMD -MP
 CXXFLAGS += -MMD -MP
 
-# Add protobuf, glog, libev, libprocess, pthread, and dl to LIBS.
-LIBS += -lprotobuf -lglog -lprocess -lev -lpthread -ldl
+# Add protobuf, glog, leveldb, libev, libprocess, pthread, and dl to LIBS.
+LIBS += -lprotobuf -lglog -lleveldb -lprocess -lev -lpthread -ldl
 
 # Add ZooKeeper if necessary.
 ifeq ($(WITH_ZOOKEEPER),1)
@@ -136,11 +143,12 @@ WEBUI_OBJ = $(MASTER_WEBUI_OBJ) $(SLAVE_WEBUI_OBJ)
 
 COMMON_OBJ = common/fatal.o common/lock.o detector/detector.o		\
 	     detector/url_processor.o configurator/configurator.o	\
-	     common/string_utils.o common/logging.o			\
-	     common/date_utils.o common/tokenize.o common/resources.o
+	     common/logging.o common/date_utils.o common/resources.o	\
+	     common/utils.o
 
 ifeq ($(WITH_ZOOKEEPER),1)
-  COMMON_OBJ += common/zookeeper.o
+  COMMON_OBJ += zookeeper/zookeeper.o zookeeper/authentication.o	\
+                zookeeper/group.o
 endif
 
 EXEC_LIB_OBJ = exec/exec.o
@@ -160,6 +168,8 @@ SLAVE_EXE_OBJ = $(SLAVE_OBJ) $(SLAVE_WEBUI_OBJ) $(COMMON_OBJ)	\
 
 LAUNCHER_EXE_OBJ = launcher/launcher.o $(COMMON_OBJ)
 
+LOG_EXE_OBJ = log/replica.o
+
 LOCAL_EXE_OBJ = local/local.o $(MASTER_OBJ) $(SLAVE_OBJ) $(COMMON_OBJ)	\
 		common/build.o
 
@@ -167,12 +177,14 @@ MESOS_MASTER_EXE = $(BINDIR)/mesos-master
 MESOS_SLAVE_EXE = $(BINDIR)/mesos-slave
 MESOS_LOCAL_EXE = $(BINDIR)/mesos-local
 MESOS_LAUNCHER_EXE = $(BINDIR)/mesos-launcher
+MESOS_LOG_EXE = $(BINDIR)/mesos-log
 MESOS_GETCONF_EXE = $(BINDIR)/mesos-getconf
 MESOS_PROJD_EXE = $(BINDIR)/mesos-projd
 MESOS_EXE = $(BINDIR)/mesos
 
 MESOS_EXES = $(MESOS_MASTER_EXE) $(MESOS_SLAVE_EXE) $(MESOS_LOCAL_EXE)	\
-             $(MESOS_LAUNCHER_EXE) $(MESOS_GETCONF_EXE) $(MESOS_EXE)
+             $(MESOS_LAUNCHER_EXE) $(MESOS_LOG_EXE)			\
+             $(MESOS_GETCONF_EXE) $(MESOS_EXE)
 
 ifeq ($(OS_NAME),solaris)
   MESOS_EXES += $(MESOS_PROJD_EXE)
@@ -194,7 +206,8 @@ MESOS_LIBS = $(MESOS_LIB) $(MESOS_SCHED_LIB) $(MESOS_EXEC_LIB)
 
 MESOS_JAVA_LIB_OBJ = java/jni/convert.o java/jni/construct.o		\
 	             java/jni/org_apache_mesos_MesosSchedulerDriver.o	\
-	             java/jni/org_apache_mesos_MesosExecutorDriver.o
+	             java/jni/org_apache_mesos_MesosExecutorDriver.o    \
+	             java/jni/org_apache_mesos_Log.o
 
 # Java and Python shared libraries which contain everything in
 # MESOS_LIB (note, Java requires the use of the .dylib suffix on Mac
@@ -208,15 +221,7 @@ endif
 
 MESOS_JAVA_JAR = $(LIBDIR)/java/mesos.jar
 
-MESOS_PYTHON_LIB = $(LIBDIR)/python/_mesos.so
-
-MESOS_PYTHON_LIB_OBJ = python/native/module.o \
-                       python/native/proxy_scheduler.o \
-                       python/native/mesos_scheduler_driver_impl.o \
-                       python/native/proxy_executor.o \
-                       python/native/mesos_executor_driver_impl.o
-
-MESOS_PYTHON_FILE = $(LIBDIR)/python/mesos.py
+MESOS_PYTHON_SOURCE = $(LIBDIR)/python/mesos.py
 
 # We copy all the webui files into the bin directory.
 WEBUI_FILES = $(BINDIR)/webui/bottle-0.8.3		\
@@ -225,6 +230,7 @@ WEBUI_FILES = $(BINDIR)/webui/bottle-0.8.3		\
               $(BINDIR)/webui/master/index.tpl		\
               $(BINDIR)/webui/master/webui.py		\
               $(BINDIR)/webui/slave/framework.tpl	\
+              $(BINDIR)/webui/slave/executor.tpl	\
               $(BINDIR)/webui/slave/index.tpl		\
               $(BINDIR)/webui/slave/webui.py		\
               $(BINDIR)/webui/static/stylesheet.css
@@ -232,7 +238,7 @@ WEBUI_FILES = $(BINDIR)/webui/bottle-0.8.3		\
 # We copy template config files into the conf directory.
 CONF_FILES = $(CONFDIR)/mesos.conf $(CONFDIR)/deploy-env.sh
 
-# We copy all the deploy scripts into the bin directory.
+# We copy all the deploy scripts into the deploy directory.
 DEPLOY_FILES = $(DEPLOYDIR)/deploy-to-slaves             \
 	       $(DEPLOYDIR)/mesos-daemon                 \
 	       $(DEPLOYDIR)/mesos-env.sh                 \
@@ -243,10 +249,13 @@ DEPLOY_FILES = $(DEPLOYDIR)/deploy-to-slaves             \
 	       $(DEPLOYDIR)/stop-mesos                   \
 	       $(DEPLOYDIR)/stop-slaves                  \
 
+# We copy all the script files into the bin directory.
+SCRIPT_FILES = $(BINDIR)/killtree.sh
+
 # Create rules for building the directories that aren't created
 # automagically by configure.
 OBJ_DIRECTORIES = common configurator detector exec launcher local log	\
-                  master messages sched slave
+                  master messages sched slave zookeeper
 
 WEBUI_DIRECTORIES = $(BINDIR)/webui/common $(BINDIR)/webui/master	\
                     $(BINDIR)/webui/slave $(BINDIR)/webui/static
@@ -318,6 +327,9 @@ $(MESOS_LAUNCHER_EXE): $(SRCDIR)/launcher/main.cpp $(LAUNCHER_EXE_OBJ) $(PROTOBU
 $(MESOS_LOCAL_EXE): $(SRCDIR)/local/main.cpp $(LOCAL_EXE_OBJ) $(PROTOBUF_OBJ)
 	$(CXX) $(CXXFLAGS) -o $@ $< $(LOCAL_EXE_OBJ) $(PROTOBUF_OBJ) $(LDFLAGS) $(LIBS)
 
+$(MESOS_LOG_EXE): $(SRCDIR)/log/main.cpp $(COMMON_OBJ) $(PROTOBUF_OBJ)
+	$(CXX) $(CXXFLAGS) -o $@ $< $(LOG_EXE_OBJ) $(COMMON_OBJ) $(PROTOBUF_OBJ) $(LDFLAGS) $(LIBS)
+
 $(MESOS_GETCONF_EXE): $(SRCDIR)/configurator/get_conf.cpp $(COMMON_OBJ) $(PROTOBUF_OBJ)
 	$(CXX) $(CXXFLAGS) -o $@ $< $(COMMON_OBJ) $(PROTOBUF_OBJ) $(LDFLAGS) $(LIBS)
 
@@ -341,6 +353,7 @@ ifdef JAVA_HOME
 	$(JAVA_HOME)/bin/jar cf $@ -C java/classes org
 	$(JAVA_HOME)/bin/javah -d java/jni -classpath @top_builddir@/$(PROTOBUF)/java/src/main/java:java/classes org.apache.mesos.MesosSchedulerDriver
 	$(JAVA_HOME)/bin/javah -d java/jni -classpath @top_builddir@/$(PROTOBUF)/java/src/main/java:java/classes org.apache.mesos.MesosExecutorDriver
+	$(JAVA_HOME)/bin/javah -d java/jni -classpath @top_builddir@/$(PROTOBUF)/java/src/main/java:java/classes org.apache.mesos.Log
 endif
 
 $(MESOS_JAVA_LIB_OBJ): %.o: $(SRCDIR)/%.cpp $(MESOS_JAVA_JAR)
@@ -351,27 +364,25 @@ ifdef JAVA_HOME
 	$(CXX) $(CXXFLAGS) -shared -o $@ $(MESOS_JAVA_LIB_OBJ) $(MESOS_SCHED_LIB) $(MESOS_EXEC_LIB) $(LDFLAGS) $(LIBS)
 endif
 
-python: $(MESOS_PYTHON_LIB) $(MESOS_PYTHON_FILE) $(MESOS_PYTHON_PROTOBUFS)
-
-$(MESOS_PYTHON_LIB_OBJ): %.o: $(SRCDIR)/%.cpp
+python: $(MESOS_SCHED_LIB) $(MESOS_EXEC_LIB) $(MESOS_PYTHON_SOURCE) | $(LIBDIR)/python
 ifdef PYTHON_HEADERS
-	mkdir -p python/native
-	$(CXX) -c $(CXXFLAGS) -Ipython/native -I$(PYTHON_HEADERS) -o $@ $<
+	mkdir -p python/src
+	cp $(MESOS_PYTHON_SOURCE) python/src
+	cp $(LIBDIR)/python/mesos_pb2.py python/src
+	LDFLAGS="$(LDFLAGS)" PYTHONPATH=@top_builddir@/$(SETUPTOOLS) $(PYTHON) python/setup.py bdist_egg
 endif
 
-$(MESOS_PYTHON_LIB): $(MESOS_PYTHON_LIB_OBJ) $(MESOS_SCHED_LIB) $(MESOS_EXEC_LIB) | $(LIBDIR)/python
-ifdef PYTHON_HEADERS
-	$(CXX) $(CXXFLAGS) -shared -o $@ $(MESOS_PYTHON_LIB_OBJ) $(MESOS_SCHED_LIB) $(MESOS_EXEC_LIB) $(LDFLAGS) $(PYTHON_LDFLAGS) $(LIBS)
-endif
-
-$(MESOS_PYTHON_FILE): $(SRCDIR)/python/src/mesos.py @top_srcdir@/include/mesos/mesos.proto | $(LIBDIR)/python
+$(MESOS_PYTHON_SOURCE): $(SRCDIR)/python/src/mesos.py @top_srcdir@/include/mesos/mesos.proto | $(LIBDIR)/python
 ifdef PYTHON_HEADERS
 ifneq (@top_srcdir@, @top_builddir@)
 	cp -r @top_srcdir@/$(PROTOBUF)/python @top_builddir@/$(PROTOBUF)/python
+	mkdir -p @top_builddir@/$(PROTOBUF)/src/google/protobuf
+	cp -f @top_srcdir@/$(PROTOBUF)/src/google/protobuf/descriptor.proto @top_builddir@/$(PROTOBUF)/src/google/protobuf/descriptor.proto
 endif
 	cp $< $@
 	$(PROTOC) --python_out=@top_builddir@/$(PROTOBUF)/python -I@top_srcdir@/$(PROTOBUF)/src @top_srcdir@/$(PROTOBUF)/src/google/protobuf/descriptor.proto
 	$(PROTOC) --python_out=$(LIBDIR)/python -I@top_srcdir@/include/mesos @top_srcdir@/include/mesos/mesos.proto
+	pushd @top_builddir@/$(PROTOBUF)/python ; PYTHONPATH=@top_builddir@/$(SETUPTOOLS) $(PYTHON) setup.py bdist_egg ; popd
 endif
 
 $(WEBUI_FILES): $(BINDIR)/%: $(SRCDIR)/% | $(WEBUI_DIRECTORIES)
@@ -380,6 +391,9 @@ ifeq ($(WITH_WEBUI),1)
 endif
 
 $(DEPLOY_FILES): $(DEPLOYDIR)/%: $(SRCDIR)/deploy/% | $(DEPLOYDIR)
+	cp -r $< $@
+
+$(SCRIPT_FILES): $(BINDIR)/%: $(SRCDIR)/scripts/% | $(BINDIR)
 	cp -r $< $@
 
 $(CONFDIR)/mesos.conf: | $(SRCDIR)/conf/mesos.conf.template $(CONFDIR)
@@ -391,7 +405,7 @@ $(CONFDIR)/deploy-env.sh: | $(SRCDIR)/conf/deploy-env.sh.template $(CONFDIR)
 test: all
 	$(MAKE) -C tests test
 
-all: $(MESOS_LIBS) $(MESOS_EXES) java python $(WEBUI_FILES) $(CONF_FILES) $(DEPLOY_FILES)
+all: $(MESOS_LIBS) $(MESOS_EXES) java python $(WEBUI_FILES) $(CONF_FILES) $(DEPLOY_FILES) $(SCRIPT_FILES)
 	$(MAKE) -C examples
 	$(MAKE) -C tests
 
@@ -404,11 +418,10 @@ clean:
 	rm -f $(ALL_OBJ)
 	rm -f $(MESOS_EXES) $(MESOS_LIBS)
 	rm -f $(MESOS_JAVA_JAR)
+	rm -rf python/build python/dist
 	rm -rf $(patsubst %.so, %.d, $(MESOS_JAVA_LIB))
 	rm -rf $(patsubst %.dylib, %.d, $(MESOS_JAVA_LIB))
-	rm -rf $(patsubst %.so, %.d, $(MESOS_PYTHON_LIB))
-	rm -rf $(MESOS_JAVA_LIB).dSYM $(MESOS_PYTHON_LIB).dSYM
-	rm -f $(MESOS_JAVA_LIB) $(MESOS_PYTHON_LIB)
+	rm -f $(MESOS_JAVA_LIB)
 	rm -rf $(WEBUI_FILES)
 	rm -f java/jni/org_apache_mesos_MesosSchedulerDriver.h
 	rm -f java/jni/org_apache_mesos_MesosSchedulerDriver.o
@@ -419,6 +432,7 @@ clean:
 	rm -f $(LIBDIR)/python/mesos.py
 	rm -f $(LIBDIR)/python/mesos.pyc
 	rm -f $(DEPLOY_FILES)
+	rm -f $(SCRIPT_FILES)
 	rm -f $(INCLUDEDIR)/mesos/mesos.hpp
 	rm -f mesos.pb.cc
 	rm -f mesos.pb.h

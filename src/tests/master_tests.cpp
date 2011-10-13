@@ -27,6 +27,7 @@
 
 #include "master/frameworks_manager.hpp"
 #include "master/master.hpp"
+#include "master/simple_allocator.hpp"
 
 #include <process/dispatch.hpp>
 #include <process/future.hpp>
@@ -43,6 +44,7 @@ using mesos::internal::master::FrameworksManager;
 using mesos::internal::master::FrameworksStorage;
 
 using mesos::internal::master::Master;
+using mesos::internal::master::SimpleAllocator;
 
 using mesos::internal::slave::Slave;
 
@@ -66,7 +68,8 @@ TEST(MasterTest, TaskRunning)
 {
   ASSERT_TRUE(GTEST_IS_THREADSAFE);
 
-  Master m;
+  SimpleAllocator a;
+  Master m(&a);
   PID<Master> master = process::spawn(&m);
 
   MockExecutor exec;
@@ -93,26 +96,19 @@ TEST(MasterTest, TaskRunning)
   BasicMasterDetector detector(master, slave, true);
 
   MockScheduler sched;
-  MesosSchedulerDriver driver(&sched, master);
+  MesosSchedulerDriver driver(&sched, "", DEFAULT_EXECUTOR_INFO, master);
 
-  OfferID offerId;
-  vector<SlaveOffer> offers;
+  vector<Offer> offers;
   TaskStatus status;
 
-  trigger resourceOfferCall, statusUpdateCall;
-
-  EXPECT_CALL(sched, getFrameworkName(&driver))
-    .WillOnce(Return(""));
-
-  EXPECT_CALL(sched, getExecutorInfo(&driver))
-    .WillOnce(Return(DEFAULT_EXECUTOR_INFO));
+  trigger resourceOffersCall, statusUpdateCall;
 
   EXPECT_CALL(sched, registered(&driver, _))
     .Times(1);
 
-  EXPECT_CALL(sched, resourceOffer(&driver, _, _))
-    .WillOnce(DoAll(SaveArg<1>(&offerId), SaveArg<2>(&offers),
-                    Trigger(&resourceOfferCall)))
+  EXPECT_CALL(sched, resourceOffers(&driver, _))
+    .WillOnce(DoAll(SaveArg<1>(&offers),
+                    Trigger(&resourceOffersCall)))
     .WillRepeatedly(Return());
 
   EXPECT_CALL(sched, statusUpdate(&driver, _))
@@ -120,7 +116,7 @@ TEST(MasterTest, TaskRunning)
 
   driver.start();
 
-  WAIT_UNTIL(resourceOfferCall);
+  WAIT_UNTIL(resourceOffersCall);
 
   EXPECT_NE(0, offers.size());
 
@@ -133,7 +129,7 @@ TEST(MasterTest, TaskRunning)
   vector<TaskDescription> tasks;
   tasks.push_back(task);
 
-  driver.replyToOffer(offerId, tasks);
+  driver.launchTasks(offers[0].id(), tasks);
 
   WAIT_UNTIL(statusUpdateCall);
 
@@ -154,7 +150,8 @@ TEST(MasterTest, KillTask)
 {
   ASSERT_TRUE(GTEST_IS_THREADSAFE);
 
-  Master m;
+  SimpleAllocator a;
+  Master m(&a);
   PID<Master> master = process::spawn(&m);
 
   MockExecutor exec;
@@ -186,26 +183,19 @@ TEST(MasterTest, KillTask)
   BasicMasterDetector detector(master, slave, true);
 
   MockScheduler sched;
-  MesosSchedulerDriver driver(&sched, master);
+  MesosSchedulerDriver driver(&sched, "", DEFAULT_EXECUTOR_INFO, master);
 
-  OfferID offerId;
-  vector<SlaveOffer> offers;
+  vector<Offer> offers;
   TaskStatus status;
 
-  trigger resourceOfferCall, statusUpdateCall;
-
-  EXPECT_CALL(sched, getFrameworkName(&driver))
-    .WillOnce(Return(""));
-
-  EXPECT_CALL(sched, getExecutorInfo(&driver))
-    .WillOnce(Return(DEFAULT_EXECUTOR_INFO));
+  trigger resourceOffersCall, statusUpdateCall;
 
   EXPECT_CALL(sched, registered(&driver, _))
     .Times(1);
 
-  EXPECT_CALL(sched, resourceOffer(&driver, _, _))
-    .WillOnce(DoAll(SaveArg<1>(&offerId), SaveArg<2>(&offers),
-                    Trigger(&resourceOfferCall)))
+  EXPECT_CALL(sched, resourceOffers(&driver, _))
+    .WillOnce(DoAll(SaveArg<1>(&offers),
+                    Trigger(&resourceOffersCall)))
     .WillRepeatedly(Return());
 
   EXPECT_CALL(sched, statusUpdate(&driver, _))
@@ -213,7 +203,7 @@ TEST(MasterTest, KillTask)
 
   driver.start();
 
-  WAIT_UNTIL(resourceOfferCall);
+  WAIT_UNTIL(resourceOffersCall);
 
   EXPECT_NE(0, offers.size());
 
@@ -229,7 +219,7 @@ TEST(MasterTest, KillTask)
   vector<TaskDescription> tasks;
   tasks.push_back(task);
 
-  driver.replyToOffer(offerId, tasks);
+  driver.launchTasks(offers[0].id(), tasks);
 
   WAIT_UNTIL(statusUpdateCall);
 
@@ -254,7 +244,8 @@ TEST(MasterTest, FrameworkMessage)
 {
   ASSERT_TRUE(GTEST_IS_THREADSAFE);
 
-  Master m;
+  SimpleAllocator a;
+  Master m(&a);
   PID<Master> master = process::spawn(&m);
 
   MockExecutor exec;
@@ -294,27 +285,20 @@ TEST(MasterTest, FrameworkMessage)
   // first status update message is sent to it (drop the message).
 
   MockScheduler sched;
-  MesosSchedulerDriver schedDriver(&sched, master);
+  MesosSchedulerDriver schedDriver(&sched, "", DEFAULT_EXECUTOR_INFO, master);
 
-  OfferID offerId;
-  vector<SlaveOffer> offers;
+  vector<Offer> offers;
   TaskStatus status;
   string schedData;
 
-  trigger resourceOfferCall, statusUpdateCall, schedFrameworkMessageCall;
-
-  EXPECT_CALL(sched, getFrameworkName(&schedDriver))
-    .WillOnce(Return(""));
-
-  EXPECT_CALL(sched, getExecutorInfo(&schedDriver))
-    .WillOnce(Return(DEFAULT_EXECUTOR_INFO));
+  trigger resourceOffersCall, statusUpdateCall, schedFrameworkMessageCall;
 
   EXPECT_CALL(sched, registered(&schedDriver, _))
     .Times(1);
 
-  EXPECT_CALL(sched, resourceOffer(&schedDriver, _, _))
-    .WillOnce(DoAll(SaveArg<1>(&offerId), SaveArg<2>(&offers),
-                    Trigger(&resourceOfferCall)))
+  EXPECT_CALL(sched, resourceOffers(&schedDriver, _))
+    .WillOnce(DoAll(SaveArg<1>(&offers),
+                    Trigger(&resourceOffersCall)))
     .WillRepeatedly(Return());
 
   EXPECT_CALL(sched, statusUpdate(&schedDriver, _))
@@ -326,7 +310,7 @@ TEST(MasterTest, FrameworkMessage)
 
   schedDriver.start();
 
-  WAIT_UNTIL(resourceOfferCall);
+  WAIT_UNTIL(resourceOffersCall);
 
   EXPECT_NE(0, offers.size());
 
@@ -339,7 +323,7 @@ TEST(MasterTest, FrameworkMessage)
   vector<TaskDescription> tasks;
   tasks.push_back(task);
 
-  schedDriver.replyToOffer(offerId, tasks);
+  schedDriver.launchTasks(offers[0].id(), tasks);
 
   WAIT_UNTIL(statusUpdateCall);
 
@@ -378,7 +362,8 @@ TEST(MasterTest, MultipleExecutors)
 {
   ASSERT_TRUE(GTEST_IS_THREADSAFE);
 
-  Master m;
+  SimpleAllocator a;
+  Master m(&a);
   PID<Master> master = process::spawn(&m);
 
   MockExecutor exec1;
@@ -431,26 +416,19 @@ TEST(MasterTest, MultipleExecutors)
   BasicMasterDetector detector(master, slave, true);
 
   MockScheduler sched;
-  MesosSchedulerDriver driver(&sched, master);
+  MesosSchedulerDriver driver(&sched, "", DEFAULT_EXECUTOR_INFO, master);
 
-  OfferID offerId;
-  vector<SlaveOffer> offers;
+  vector<Offer> offers;
   TaskStatus status1, status2;
 
-  trigger resourceOfferCall, statusUpdateCall1, statusUpdateCall2;
-
-  EXPECT_CALL(sched, getFrameworkName(&driver))
-    .WillOnce(Return(""));
-
-  EXPECT_CALL(sched, getExecutorInfo(&driver))
-    .WillOnce(Return(DEFAULT_EXECUTOR_INFO));
+  trigger resourceOffersCall, statusUpdateCall1, statusUpdateCall2;
 
   EXPECT_CALL(sched, registered(&driver, _))
     .Times(1);
 
-  EXPECT_CALL(sched, resourceOffer(&driver, _, _))
-    .WillOnce(DoAll(SaveArg<1>(&offerId), SaveArg<2>(&offers),
-                    Trigger(&resourceOfferCall)))
+  EXPECT_CALL(sched, resourceOffers(&driver, _))
+    .WillOnce(DoAll(SaveArg<1>(&offers),
+                    Trigger(&resourceOffersCall)))
     .WillRepeatedly(Return());
 
   EXPECT_CALL(sched, statusUpdate(&driver, _))
@@ -459,7 +437,7 @@ TEST(MasterTest, MultipleExecutors)
 
   driver.start();
 
-  WAIT_UNTIL(resourceOfferCall);
+  WAIT_UNTIL(resourceOffersCall);
 
   ASSERT_NE(0, offers.size());
 
@@ -483,7 +461,7 @@ TEST(MasterTest, MultipleExecutors)
   tasks.push_back(task1);
   tasks.push_back(task2);
 
-  driver.replyToOffer(offerId, tasks);
+  driver.launchTasks(offers[0].id(), tasks);
 
   WAIT_UNTIL(statusUpdateCall1);
 

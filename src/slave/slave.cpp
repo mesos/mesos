@@ -128,7 +128,7 @@ void Slave::registerOptions(Configurator* configurator)
       "environment or find hadoop on PATH)");
 
   configurator->addOption<bool>(
-      "switch_user", 
+      "switch_user",
       "Whether to run tasks as the user who\n"
       "submitted them rather than the user running\n"
       "the slave (requires setuid permission)",
@@ -163,6 +163,7 @@ void Slave::initialize()
   stats.invalidFrameworkMessages = 0;
 
   startTime = elapsedTime();
+  connected = false;
 
   // Install protobuf handlers.
   installProtobufHandler<NewMasterDetectedMessage>(
@@ -280,6 +281,8 @@ void Slave::operator () ()
   info.mutable_resources()->MergeFrom(resources);
 
   // Spawn and initialize the isolation module.
+  // TODO(benh): Seems like the isolation module should really be
+  // spawned before being passed to the slave.
   spawn(isolationModule);
   dispatch(isolationModule,
            &IsolationModule::initialize,
@@ -317,8 +320,47 @@ void Slave::newMasterDetected(const UPID& pid)
   master = pid;
   link(master);
 
+  connected = false;
+  doReliableRegistration();
+}
+
+
+void Slave::noMasterDetected()
+{
+  LOG(INFO) << "Lost master(s) ... waiting";
+  connected = false;
+  master = UPID();
+}
+
+
+void Slave::registered(const SlaveID& slaveId)
+{
+  LOG(INFO) << "Registered with master; given slave ID " << slaveId;
+  id = slaveId;
+  connected = true;
+}
+
+
+void Slave::reregistered(const SlaveID& slaveId)
+{
+  LOG(INFO) << "Re-registered with master";
+
+  if (!(id == slaveId)) {
+    LOG(FATAL) << "Slave re-registered but got wrong ID";
+  }
+  connected = true;
+}
+
+
+void Slave::doReliableRegistration()
+{
+  if (connected || !master) {
+    return;
+  }
+
   if (id == "") {
     // Slave started before master.
+    // (Vinod): Is the above comment true?
     RegisterSlaveMessage message;
     message.mutable_slave()->MergeFrom(info);
     send(master, message);
@@ -330,39 +372,19 @@ void Slave::newMasterDetected(const UPID& pid)
 
     foreachvalue (Framework* framework, frameworks) {
       foreachvalue (Executor* executor, framework->executors) {
-	message.add_executor_infos()->MergeFrom(executor->info);
-	foreachvalue (Task* task, executor->launchedTasks) {
+        message.add_executor_infos()->MergeFrom(executor->info);
+        foreachvalue (Task* task, executor->launchedTasks) {
           // TODO(benh): Also need to send queued tasks here ...
-	  message.add_tasks()->MergeFrom(*task);
-	}
+          message.add_tasks()->MergeFrom(*task);
+        }
       }
     }
 
     send(master, message);
   }
-}
 
-
-void Slave::noMasterDetected()
-{
-  LOG(INFO) << "Lost master(s) ... waiting";
-}
-
-
-void Slave::registered(const SlaveID& slaveId)
-{
-  LOG(INFO) << "Registered with master; given slave ID " << slaveId;
-  id = slaveId;
-}
-
-
-void Slave::reregistered(const SlaveID& slaveId)
-{
-  LOG(INFO) << "Re-registered with master";
-
-  if (!(id == slaveId)) {
-    LOG(FATAL) << "Slave re-registered but got wrong ID";
-  }
+  // Re-try registration if necessary.
+  delay(1.0, self(), &Slave::doReliableRegistration);
 }
 
 
@@ -433,7 +455,8 @@ void Slave::runTask(const FrameworkInfo& frameworkInfo,
     }
   } else {
     // Launch an executor for this task.
-    const string& directory = getUniqueWorkDirectory(framework->id, executorId);
+    const string& directory = createUniqueWorkDirectory(framework->id,
+                                                        executorId);
 
     LOG(INFO) << "Using '" << directory
               << "' as work directory for executor '" << executorId
@@ -819,7 +842,7 @@ void Slave::registerExecutor(const FrameworkID& frameworkId,
 //   // TODO(benh): Check that this update hasn't already been received
 //   // or acknowledged! This could happen if a slave receives a status
 //   // update from an executor, then crashes after it writes it to disk
-//   // but before it sends an ack back to 
+//   // but before it sends an ack back to
 
 //   // Okay, record this update as received.
 //   CHECK(stream->received != NULL);
@@ -1008,7 +1031,7 @@ void Slave::statusUpdateTimeout(
 //       LOG(WARNING) << "WARNING! Resending status update"
 //                 << " for task " << update.status().task_id()
 //                 << " of framework " << update.framework_id();
-      
+
 //       StatusUpdateMessage message;
 //       message.mutable_update()->MergeFrom(update);
 //       message.set_reliable(true);
@@ -1084,7 +1107,7 @@ Framework* Slave::getFramework(const FrameworkID& frameworkId)
 //   path = updates->directory + "/acknowledged";
 //   result = utils::os::open(path, O_CREAT | O_RDWR | O_SYNC);
 //   if (result.isError() || result.isNone()) {
-//     LOG(WARNING) << "Failed to open " << path << 
+//     LOG(WARNING) << "Failed to open " << path <<
 //                  << " for storing acknowledged status updates";
 //     cleanupStatusUpdateStream(stream);
 //     return NULL;
@@ -1216,8 +1239,7 @@ void Slave::executorStarted(const FrameworkID& frameworkId,
                             const ExecutorID& executorId,
                             pid_t pid)
 {
-  LOG(INFO) << "Executor '" << executorId << "' of framework "
-            << frameworkId << " has started at " << pid;
+
 }
 
 
@@ -1274,6 +1296,8 @@ void Slave::shutdownExecutor(Framework* framework, Executor* executor)
   LOG(INFO) << "Shutting down executor '" << executor->id
             << "' of framework " << framework->id;
 
+  // If the executor hasn't yet registered, this message
+  // will be dropped to the floor!
   send(executor->pid, ShutdownExecutorMessage());
 
   executor->shutdown = true;
@@ -1348,8 +1372,8 @@ void Slave::shutdownExecutorTimeout(const FrameworkID& frameworkId,
 // }
 
 
-string Slave::getUniqueWorkDirectory(const FrameworkID& frameworkId,
-                                     const ExecutorID& executorId)
+string Slave::createUniqueWorkDirectory(const FrameworkID& frameworkId,
+                                        const ExecutorID& executorId)
 {
   LOG(INFO) << "Generating a unique work directory for executor '"
             << executorId << "' of framework " << frameworkId;
@@ -1364,15 +1388,14 @@ string Slave::getUniqueWorkDirectory(const FrameworkID& frameworkId,
   workDir = workDir + "/work";
 
   std::ostringstream out(std::ios_base::app | std::ios_base::out);
-  out << workDir << "/slave-" << id
-     << "/fw-" << frameworkId << "-" << executorId;
-
-  // TODO(benh): Make executor id be in it's own directory.
+  out << workDir << "/slaves/" << id
+      << "/frameworks/" << frameworkId
+      << "/executors/" << executorId;
 
   // Find a unique directory based on the path given by the slave
   // (this is because we might launch multiple executors from the same
   // framework on this slave).
-  out << "/";
+  out << "/runs/";
 
   string dir;
   dir = out.str();
@@ -1387,7 +1410,13 @@ string Slave::getUniqueWorkDirectory(const FrameworkID& frameworkId,
     out.str(dir);
   }
 
-  return out.str();
+  dir = out.str();
+
+  bool created = utils::os::mkdir(out.str());
+
+  CHECK(created) << "Error creating work directory: " << dir;
+
+  return dir;
 }
 
 

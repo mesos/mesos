@@ -57,31 +57,14 @@ JSON::Object model(const Task& task)
 }
 
 
-// Returns a JSON object modeled on a SlaveResources.
-JSON::Object model(const SlaveResources& slaveResources)
-{
-  JSON::Object object;
-  object.values["id"] = slaveResources.slave->id.value();
-  object.values["resources"] = model(slaveResources.resources);
-  return object;
-}
-
-
 // Returns a JSON object modeled on an Offer.
 JSON::Object model(const Offer& offer)
 {
   JSON::Object object;
-  object.values["id"] = offer.id.value();
-  object.values["framework_id"] = offer.frameworkId.value();
-
-  // Model all of the resources associated with the offer.
-  JSON::Array array;
-  foreach (const SlaveResources& slaveResources, offer.resources) {
-    array.values.push_back(model(slaveResources));
-  }
-
-  object.values["slaves"] = array;
-
+  object.values["id"] = offer.id().value();
+  object.values["framework_id"] = offer.framework_id().value();
+  object.values["slave_id"] = offer.slave_id().value();
+  object.values["resources"] = model(offer.resources());
   return object;
 }
 
@@ -176,7 +159,7 @@ Promise<HttpResponse> stats(
   LOG(INFO) << "HTTP request for '" << request.path << "'";
 
   JSON::Object object;
-  object.values["uptime"] = Clock::elapsed() - master.startTime;
+  object.values["uptime"] = Clock::now() - master.startTime;
   object.values["elected"] = master.elected; // Note: using int not bool.
   object.values["total_schedulers"] = master.frameworks.size();
   object.values["active_schedulers"] = master.getActiveFrameworks().size();
@@ -192,19 +175,19 @@ Promise<HttpResponse> stats(
 
   // Get total and used (note, not offered) resources in order to
   // compute capacity of scalar resources.
-  Resources resources;
-  Resources resourcesUsed;
+  Resources totalResources;
+  Resources usedResources;
   foreach (Slave* slave, master.getActiveSlaves()) {
-    resources += slave->info.resources();
-    resourcesUsed += slave->resourcesInUse;
+    totalResources += slave->info.resources();
+    usedResources += slave->resourcesInUse;
   }
 
-  foreach (const Resource& resource, resources) {
+  foreach (const Resource& resource, totalResources) {
     if (resource.type() == Resource::SCALAR) {
       CHECK(resource.has_scalar());
       double total = resource.scalar().value();
       object.values[resource.name() + "_total"] = total;
-      Option<Resource> option = resourcesUsed.get(resource);
+      Option<Resource> option = usedResources.get(resource);
       CHECK(!option.isSome() || option.get().has_scalar());
       double used = option.isSome() ? option.get().scalar().value() : 0.0;
       object.values[resource.name() + "_used"] = used;

@@ -6,7 +6,6 @@
 #include <map>
 
 #include <process/process.hpp>
-#include <process/promise.hpp>
 
 #include "common/option.hpp"
 #include "common/result.hpp"

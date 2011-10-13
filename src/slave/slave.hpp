@@ -65,6 +65,7 @@ public:
   void masterDetectionFailure();
   void registered(const SlaveID& slaveId);
   void reregistered(const SlaveID& slaveId);
+  void doReliableRegistration();
   void runTask(const FrameworkInfo& frameworkInfo,
                const FrameworkID& frameworkId,
                const std::string& pid,
@@ -132,8 +133,8 @@ protected:
   // Helper function for generating a unique work directory for this
   // framework/executor pair (non-trivial since a framework/executor
   // pair may be launched more than once on the same slave).
-  std::string getUniqueWorkDirectory(const FrameworkID& frameworkId,
-                                     const ExecutorID& executorId);
+  std::string createUniqueWorkDirectory(const FrameworkID& frameworkId,
+                                        const ExecutorID& executorId);
 
 private:
   // Http handlers, friends of the slave in order to access state,
@@ -177,6 +178,7 @@ private:
 
   double startTime;
 
+  bool connected; // Flag to indicate if slave is registered.
 //   typedef std::pair<FrameworkID, TaskID> StatusUpdateStreamID;
 //   hashmap<std::pair<FrameworkID, TaskID>, StatusUpdateStream*> statusUpdateStreams;
 

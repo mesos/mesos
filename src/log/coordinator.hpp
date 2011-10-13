@@ -1,31 +1,34 @@
 #ifndef __LOG_COORDINATOR_HPP__
 #define __LOG_COORDINATOR_HPP__
 
-#include <list>
 #include <string>
+#include <vector>
 
 #include <process/process.hpp>
 
 #include "common/result.hpp"
 
+#include "log/network.hpp"
 #include "log/replica.hpp"
 
 #include "messages/log.hpp"
 
 
-namespace mesos { namespace internal { namespace log {
+namespace mesos {
+namespace internal {
+namespace log {
 
 using namespace process;
 
-// TODO(benh): Abstract away the concept of a "group" so that we can
-// inject a ZooKeeper based group.
+// TODO(benh): Pass timeouts into the coordinator functions rather
+// than have hard coded timeouts within.
 
 class Coordinator
 {
 public:
   Coordinator(int quorum,
-              ReplicaProcess* replica,
-              GroupProcess* group);
+              Replica* replica,
+              Network* group);
 
   ~Coordinator();
 
@@ -33,7 +36,7 @@ public:
   // coordinator failed to achieve a quorum (e.g., due to timeout) but
   // can be retried. A some result returns the last committed log
   // position.
-  Result<uint64_t> elect(uint64_t id);
+  Result<uint64_t> elect();
   Result<uint64_t> demote();
 
   // Returns the result of trying to append the specified bytes. A
@@ -47,22 +50,16 @@ public:
   // retried.
   Result<uint64_t> truncate(uint64_t to);
 
-  // Returns the result of trying to read entries between from and to,
-  // with no-ops and truncates filtered out. A result of none means
-  // the read failed (e.g., due to timeout), but can be retried.
-  Result<std::list<std::pair<uint64_t, std::string> > > read(
-      uint64_t from,
-      uint64_t to);
-
 private:
   // Helper that tries to achieve consensus of the specified action. A
   // result of none means the write failed (e.g., due to timeout), but
   // can be retried.
   Result<uint64_t> write(const Action& action);
 
-  // Helper that handles commiting an action.
+  // Helper that handles commiting an action (i.e., writing to the
+  // local replica and then sending out learned messages).
   Result<uint64_t> commit(const Action& action);
- 
+
   // Helper that tries to fill a position in the log.
   Result<Action> fill(uint64_t position);
 
@@ -87,15 +84,17 @@ private:
 
   int quorum; // Quorum size.
 
-  ReplicaProcess* replica; // Local log replica.
+  Replica* replica; // Local log replica.
 
-  GroupProcess* group; // Used to broadcast requests and messages to replicas.
+  Network* network; // Used to broadcast requests and messages to replicas.
 
   uint64_t id; // Coordinator ID.
 
   uint64_t index; // Last position written in the log.
 };
 
-}}} // namespace mesos { namespace internal { namespace log {
+} // namespace log {
+} // namespace internal {
+} // namespace mesos {
 
 #endif // __LOG_COORDINATOR_HPP__

@@ -25,8 +25,6 @@
 #include "common/foreach.hpp"
 
 
-namespace mesos { namespace internal {
-
 // Provides a hash map via Boost's 'unordered_map'. For most intensive
 // purposes this could be accomplished with a templated typedef, but
 // those don't exist (until C++-0x). Also, doing it this way allows us
@@ -66,7 +64,5 @@ public:
     }
   }
 };
-
-}} // namespace mesos { namespace internal {
 
 #endif // __HASHMAP_HPP__

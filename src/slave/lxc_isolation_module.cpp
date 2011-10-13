@@ -53,29 +53,6 @@ const int32_t CPU_SHARES_PER_CPU = 1024;
 const int32_t MIN_CPU_SHARES = 10;
 const int64_t MIN_MEMORY_MB = 128 * Megabyte;
 
-
-// TODO(benh): Factor this out into common/utils or possibly into
-// libprocess so that it can handle blocking.
-// Run a shell command formatted with varargs and return its exit code.
-int shell(const char* format, ...)
-{
-  char* cmd;
-  FILE* f;
-  int ret;
-  va_list args;
-  va_start(args, format);
-  if (vasprintf(&cmd, format, args) == -1)
-    return -1;
-  if ((f = popen(cmd, "w")) == NULL)
-    return -1;
-  ret = pclose(f);
-  if (ret == -1)
-    LOG(INFO) << "pclose error: " << strerror(errno);
-  free(cmd);
-  va_end(args);
-  return ret;
-}
-
 } // namespace {
 
 
@@ -108,7 +85,7 @@ void LxcIsolationModule::initialize(
   conf = _conf;
   local = _local;
   slave = _slave;
-  
+
   // Check if Linux Container tools are available.
   if (system("lxc-version > /dev/null") != 0) {
     LOG(FATAL) << "Could not run lxc-version; make sure Linux Container "
@@ -132,9 +109,7 @@ void LxcIsolationModule::launchExecutor(
     const string& directory,
     const Resources& resources)
 {
-  if (!initialized) {
-    LOG(FATAL) << "Cannot launch executors before initialization!";
-  }
+  CHECK(initialized) << "Cannot launch executors before initialization!";
 
   const ExecutorID& executorId = executorInfo.executor_id();
 
@@ -183,16 +158,16 @@ void LxcIsolationModule::launchExecutor(
     // specified file numbers (0, 1, 2).
     foreach (const string& entry, utils::os::listdir("/proc/self/fd")) {
       if (entry != "." && entry != "..") {
-	try {
-	  int fd = boost::lexical_cast<int>(entry);
-	  if (fd != STDIN_FILENO &&
-	      fd != STDOUT_FILENO &&
-	      fd != STDERR_FILENO) {
-	    close(fd);
-	  }
-	} catch (boost::bad_lexical_cast&) {
-	  LOG(FATAL) << "Failed to close file descriptors";
-	}
+        try {
+          int fd = boost::lexical_cast<int>(entry);
+          if (fd != STDIN_FILENO &&
+            fd != STDOUT_FILENO &&
+            fd != STDERR_FILENO) {
+            close(fd);
+          }
+        } catch (boost::bad_lexical_cast&) {
+          LOG(FATAL) << "Failed to close file descriptors";
+        }
       }
     }
 
@@ -256,6 +231,7 @@ void LxcIsolationModule::killExecutor(
     const FrameworkID& frameworkId,
     const ExecutorID& executorId)
 {
+  CHECK(initialized) << "Cannot kill executors before initialization!";
   if (!infos.contains(frameworkId) ||
       !infos[frameworkId].contains(executorId)) {
     LOG(ERROR) << "ERROR! Asked to kill an unknown executor!";
@@ -268,9 +244,15 @@ void LxcIsolationModule::killExecutor(
 
   LOG(INFO) << "Stopping container " << info->container;
 
-  int ret = shell("lxc-stop -n %s", info->container.c_str());
-  if (ret != 0) {
-    LOG(ERROR) << "lxc-stop returned " << ret;
+  Try<int> status =
+    utils::os::shell(NULL, "lxc-stop -n %s", info->container.c_str());
+
+  if (status.isError()) {
+    LOG(ERROR) << "Failed to stop container " << info->container
+               << ": " << status.error();
+  } else if (status.get() != 0) {
+    LOG(ERROR) << "Failed to stop container " << info->container
+               << ", lxc-stop returned: " << status.get();
   }
 
   if (infos[frameworkId].size() == 1) {
@@ -291,6 +273,7 @@ void LxcIsolationModule::resourcesChanged(
     const ExecutorID& executorId,
     const Resources& resources)
 {
+  CHECK(initialized) << "Cannot change resources before initialization!";
   if (!infos.contains(frameworkId) ||
       !infos[frameworkId].contains(executorId)) {
     LOG(ERROR) << "ERROR! Asked to update resources for an unknown executor!";
@@ -367,14 +350,19 @@ bool LxcIsolationModule::setControlGroupValue(
             << " for container " << container
             << " to " << value;
 
-  int ret = shell("lxc-cgroup -n %s %s %lld",
-                  container.c_str(),
-                  property.c_str(),
-                  value);
-  if (ret != 0) {
+  Try<int> status =
+    utils::os::shell(NULL, "lxc-cgroup -n %s %s %lld",
+                     container.c_str(), property.c_str(), value);
+
+  if (status.isError()) {
     LOG(ERROR) << "Failed to set " << property
                << " for container " << container
-               << ": lxc-cgroup returned " << ret;
+               << ": " << status.error();
+    return false;
+  } else if (status.get() != 0) {
+    LOG(ERROR) << "Failed to set " << property
+               << " for container " << container
+               << ": lxc-cgroup returned " << status.get();
     return false;
   }
 

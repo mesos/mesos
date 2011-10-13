@@ -34,7 +34,8 @@
 #include "common/fatal.hpp"
 #include "common/foreach.hpp"
 #include "common/result.hpp"
-#include "common/zookeeper.hpp"
+
+#include "zookeeper/zookeeper.hpp"
 
 #include "log/coordinator.hpp"
 #include "log/replica.hpp"
@@ -369,7 +370,7 @@ void LogProcess::connected()
 
     if (ret != ZOK && ret != ZNODEEXISTS) {
       LOG(FATAL) << "Failed to create '" << prefix
-                 << "' in ZooKeeper: " << zk->error(ret);
+                 << "' in ZooKeeper: " << zk->message(ret);
     }
   }
 
@@ -384,7 +385,7 @@ void LogProcess::connected()
 
   if (ret != ZOK && ret != ZNODEEXISTS) {
     LOG(FATAL) << "Failed to create '" << znode << "/replicas"
-               << "' in ZooKeeper: " << zk->error(ret);
+               << "' in ZooKeeper: " << zk->message(ret);
   }
 
   // Now create the "coordinators" znode.
@@ -398,7 +399,7 @@ void LogProcess::connected()
 
   if (ret != ZOK && ret != ZNODEEXISTS) {
     LOG(FATAL) << "Failed to create '" << znode << "/coordinators"
-               << "' in ZooKeeper: " << zk->error(ret);
+               << "' in ZooKeeper: " << zk->message(ret);
   }
 
   // Okay, create our replica, group, and coordinator.
@@ -415,7 +416,7 @@ void LogProcess::connected()
 
   if (ret != ZOK) {
     LOG(FATAL) << "Failed to set a watch on '" << znode << "/replicas"
-               << "' in ZooKeeper: " << zk->error(ret);
+               << "' in ZooKeeper: " << zk->message(ret);
   }
 
   // Set a watch on the coordinators.
@@ -423,7 +424,7 @@ void LogProcess::connected()
 
   if (ret != ZOK) {
     LOG(FATAL) << "Failed to set a watch on '" << znode << "/replicas"
-               << "' in ZooKeeper: " << zk->error(ret);
+               << "' in ZooKeeper: " << zk->message(ret);
   }
 
   // Add an ephemeral znode for our replica and coordinator.
@@ -433,7 +434,7 @@ void LogProcess::connected()
 
   if (ret != ZOK) {
     LOG(FATAL) << "Failed to create an ephmeral node at '" << znode
-               << "/replica/" << "' in ZooKeeper: " << zk->error(ret);
+               << "/replica/" << "' in ZooKeeper: " << zk->message(ret);
   }
 
   ret = zk->create(znode + "/coordinators/", "", ZOO_OPEN_ACL_UNSAFE,
@@ -442,7 +443,7 @@ void LogProcess::connected()
 
   if (ret != ZOK) {
     LOG(FATAL) << "Failed to create an ephmeral node at '" << znode
-               << "/replica/" << "' in ZooKeeper: " << zk->error(ret);
+               << "/replica/" << "' in ZooKeeper: " << zk->message(ret);
   }
 
   // Save the sequence id but only grab the basename, e.g.,
@@ -489,7 +490,7 @@ void LogProcess::updated(const string& path)
 
     if (ret != ZOK) {
       LOG(FATAL) << "Failed to set a watch on '" << znode << "/replicas"
-                 << "' in ZooKeeper: " << zk->error(ret);
+                 << "' in ZooKeeper: " << zk->message(ret);
     }
   } else {
     CHECK(znode + "/coordinators" == path);
@@ -501,7 +502,7 @@ void LogProcess::updated(const string& path)
 
     if (ret != ZOK) {
       LOG(FATAL) << "Failed to set a watch on '" << znode << "/replicas"
-                 << "' in ZooKeeper: " << zk->error(ret);
+                 << "' in ZooKeeper: " << zk->message(ret);
     }
   }
 }
@@ -525,7 +526,7 @@ void LogProcess::regroup()
 
   if (ret != ZOK) {
     LOG(FATAL) << "Failed to get children of '" << znode << "/replicas"
-               << "' in ZooKeeper: " << zk->error(ret);
+               << "' in ZooKeeper: " << zk->message(ret);
   }
 
   set<UPID> current;
@@ -571,7 +572,7 @@ void LogProcess::elect()
 
   if (ret != ZOK) {
     LOG(FATAL) << "Failed to get children of '" << znode << "/coordinators"
-               << "' in ZooKeeper: " << zk->error(ret);
+               << "' in ZooKeeper: " << zk->message(ret);
   }
 
   // "Elect" the minimum ephemeral znode.

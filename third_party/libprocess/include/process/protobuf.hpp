@@ -382,16 +382,16 @@ public:
   {
     send(pid, req);
     std::tr1::function<void(const process::Future<Res>&)> callback =
-      std::tr1::bind(&ReqResProcess<Req, Res>::discard,
+      std::tr1::bind(&ReqResProcess<Req, Res>::terminate,
                      std::tr1::placeholders::_1, Super::self());
-    promise.future().onDiscarded(callback);
+    promise.future().onAny(callback);
     return promise;
   }
 
 private:
   void response(const Res& res) { promise.set(res); }
 
-  static void discard(
+  static void terminate(
       const process::Future<Res>& future,
       const process::PID<ReqResProcess<Req, Res> >& pid)
   {
@@ -421,79 +421,6 @@ struct Protocol
     process::spawn(process, true);
     return process::dispatch(process, &ReqResProcess<Req, Res>::run);
   }
-};
-
-
-// A "group" is a collection of protobuf processes (both local and
-// remote). A group can be used to abstract away the details of
-// maintaining membership as processes come and go (e.g., due to
-// failures).
-class GroupProcess : public ProtobufProcess<GroupProcess>
-{
-public:
-  GroupProcess() {}
-
-  GroupProcess(const std::set<process::UPID>& _pids) : pids(_pids) {}
-
-  virtual ~GroupProcess() {}
-
-  void add(const process::UPID& pid)
-  {
-    link(pid);
-    pids.insert(pid);
-  }
-
-  void remove(const process::UPID& pid)
-  {
-    // TODO(benh): unlink(pid);
-    pids.erase(pid);
-  }
-
-  // Returns the current set of known members.
-  std::set<process::UPID> members()
-  {
-    return pids;
-  }
-
-  // Sends a request to each of the groups members and returns a set
-  // of futures that represent their responses.
-  template <typename Req, typename Res>
-  std::set<process::Future<Res> > broadcast(
-      const Protocol<Req, Res>& protocol,
-      const Req& req,
-      const std::set<process::UPID>& filter = std::set<process::UPID>())
-  {
-    std::set<process::Future<Res> > futures;
-    typename std::set<process::UPID>::const_iterator iterator;
-    for (iterator = pids.begin(); iterator != pids.end(); ++iterator) {
-      const process::UPID& pid = *iterator;
-      if (filter.count(pid) == 0) {
-        futures.insert(protocol(pid, req));
-      }
-    }
-    return futures;
-  }
-
-  template <typename M>
-  void broadcast(
-      const M& m,
-      const std::set<process::UPID>& filter = std::set<process::UPID>())
-  {
-    std::set<process::UPID>::const_iterator iterator;
-    for (iterator = pids.begin(); iterator != pids.end(); ++iterator) {
-      const process::UPID& pid = *iterator;
-      if (filter.count(pid) == 0) {
-        process::post(pid, m);
-      }
-    }
-  }
-
-private:
-  // Not copyable, not assignable.
-  GroupProcess(const GroupProcess&);
-  GroupProcess& operator = (const GroupProcess&);
-
-  std::set<process::UPID> pids;
 };
 
 #endif // __PROCESS_PROTOBUF_HPP__

@@ -26,6 +26,8 @@
 
 #include "common/foreach.hpp"
 #include "common/type_utils.hpp"
+#include "common/utils.hpp"
+#include "common/process_utils.hpp"
 
 using namespace mesos;
 using namespace mesos::internal;
@@ -82,9 +84,7 @@ void ProcessBasedIsolationModule::launchExecutor(
     const string& directory,
     const Resources& resources)
 {
-  if (!initialized) {
-    LOG(FATAL) << "Cannot launch executors before initialization!";
-  }
+  CHECK(initialized) << "Cannot launch executors before initialization!";
 
   const ExecutorID& executorId = executorInfo.executor_id();
 
@@ -93,6 +93,16 @@ void ProcessBasedIsolationModule::launchExecutor(
             << " in " << directory
             << " with resources " << resources
             << "' for framework " << frameworkId;
+
+  // Store the working directory, so that in the future we can use it
+  // to retrieve the os pid when calling killtree on the executor.
+  ProcessInfo* info = new ProcessInfo();
+  info->frameworkId = frameworkId;
+  info->executorId = executorId;
+  info->directory = directory;
+  info->pid = -1; // Initialize this variable to handle corner cases.
+
+  infos[frameworkId][executorId] = info;
 
   pid_t pid;
   if ((pid = fork()) == -1) {
@@ -103,8 +113,8 @@ void ProcessBasedIsolationModule::launchExecutor(
     // In parent process.
     LOG(INFO) << "Forked executor at = " << pid;
 
-    // Record the pid (as a pgid to be used by killpg).
-    pgids[frameworkId][executorId] = pid;
+    // Record the pid (should also be the pgis since we setsid below).
+    infos[frameworkId][executorId]->pid = pid;
 
     // Tell the slave this executor has started.
     dispatch(slave, &Slave::executorStarted,
@@ -115,7 +125,7 @@ void ProcessBasedIsolationModule::launchExecutor(
       PLOG(FATAL) << "Failed to put executor in own session";
     }
 
-    ExecutorLauncher* launcher = 
+    ExecutorLauncher* launcher =
       createExecutorLauncher(frameworkId, frameworkInfo,
                              executorInfo, directory);
 
@@ -123,42 +133,37 @@ void ProcessBasedIsolationModule::launchExecutor(
   }
 }
 
-
+// NOTE: This function can be called by the isolation module itself or
+// by the slave if it doesn't hear about an executor exit after it sends
+// a shutdown message.
 void ProcessBasedIsolationModule::killExecutor(
     const FrameworkID& frameworkId,
     const ExecutorID& executorId)
 {
-  if (!pgids.contains(frameworkId) ||
-      !pgids[frameworkId].contains(executorId)) {
-    LOG(ERROR) << "ERROR! Asked to kill an unknown executor!";
+  CHECK(initialized) << "Cannot kill executors before initialization!";
+  if (!infos.contains(frameworkId) ||
+      !infos[frameworkId].contains(executorId)) {
+    LOG(ERROR) << "ERROR! Asked to kill an unknown executor! " << executorId;
     return;
   }
 
-  if (pgids[frameworkId][executorId] != -1) {
-    // TODO(benh): Consider sending a SIGTERM, then after so much time
-    // if it still hasn't exited do a SIGKILL (can use a libprocess
-    // process for this). This might not be necessary because we have
-    // higher-level semantics via the first shut down phase that gets
-    // initiated by the slave.
-    LOG(INFO) << "Sending SIGKILL to process group "
-              << pgids[frameworkId][executorId];
+  pid_t pid = infos[frameworkId][executorId]->pid;
 
-    killpg(pgids[frameworkId][executorId], SIGKILL);
+  if (pid != -1) {
+    // TODO(vinod): Call killtree on the pid of the actual executor process
+    // that is running the tasks (stored in the local storage by the
+    // executor module).
+    utils::process::killtree(pid, SIGKILL, true, true);
 
-    if (pgids[frameworkId].size() == 1) {
-      pgids.erase(frameworkId);
+    ProcessInfo* info = infos[frameworkId][executorId];
+
+    if (infos[frameworkId].size() == 1) {
+      infos.erase(frameworkId);
     } else {
-      pgids[frameworkId].erase(executorId);
+      infos[frameworkId].erase(executorId);
     }
 
-    // NOTE: Both frameworkId and executorId are no longer valid
-    // because they have just been deleted above!
-
-    // TODO(benh): Kill all of the process's descendants? Perhaps
-    // create a new libprocess process that continually tries to kill
-    // all the processes that are a descendant of the executor, trying
-    // to kill the executor last ... maybe this is just too much of a
-    // burden?
+    delete info;
   }
 }
 
@@ -168,6 +173,7 @@ void ProcessBasedIsolationModule::resourcesChanged(
     const ExecutorID& executorId,
     const Resources& resources)
 {
+  CHECK(initialized) << "Cannot do resourcesChanged before initialization!";
   // Do nothing; subclasses may override this.
 }
 
@@ -182,7 +188,7 @@ ExecutorLauncher* ProcessBasedIsolationModule::createExecutorLauncher(
   map<string, string> params;
 
   for (int i = 0; i < executorInfo.params().param_size(); i++) {
-    params[executorInfo.params().param(i).key()] = 
+    params[executorInfo.params().param(i).key()] =
       executorInfo.params().param(i).value();
   }
 
@@ -197,25 +203,26 @@ ExecutorLauncher* ProcessBasedIsolationModule::createExecutorLauncher(
                               conf.get("hadoop_home", ""),
                               !local,
                               conf.get("switch_user", true),
-			      "",
+                              "",
                               params);
 }
 
 
 void ProcessBasedIsolationModule::processExited(pid_t pid, int status)
 {
-  foreachkey (const FrameworkID& frameworkId, pgids) {
-    foreachpair (const ExecutorID& executorId, pid_t pgid, pgids[frameworkId]) {
-      if (pgid == pid) {
+  foreachkey (const FrameworkID& frameworkId, infos) {
+    foreachpair (
+        const ExecutorID& executorId, ProcessInfo* info, infos[frameworkId]) {
+      if (info->pid == pid) {
         LOG(INFO) << "Telling slave of lost executor " << executorId
-                  << " of framework " << frameworkId;
+          << " of framework " << frameworkId;
 
         dispatch(slave, &Slave::executorExited,
                  frameworkId, executorId, status);
 
         // Try and cleanup after the executor.
         killExecutor(frameworkId, executorId);
-	return;
+        return;
       }
     }
   }

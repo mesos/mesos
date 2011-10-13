@@ -55,12 +55,6 @@ message StatusUpdate {
 }
 
 
-message ResourceOffer {
-  required SlaveInfo slave = 1;
-  repeated Resource resources = 2;
-}
-
-
 message SubmitSchedulerRequest
 {
   required string name = 1;
@@ -97,7 +91,7 @@ message RegisterFrameworkMessage {
 message ReregisterFrameworkMessage {
   required FrameworkID framework_id = 1;
   required FrameworkInfo framework = 2;
-  required int32 generation = 3;
+  required bool failover = 3;
 }
 
 
@@ -105,24 +99,37 @@ message FrameworkRegisteredMessage {
   required FrameworkID framework_id = 1;
 }
 
+message FrameworkReregisteredMessage {
+  required FrameworkID framework_id = 1;
+}
 
 message UnregisterFrameworkMessage {
   required FrameworkID framework_id = 1;
 }
 
 
-message ResourceOfferMessage {
-  required OfferID offer_id = 1;
-  repeated SlaveOffer offers = 2;
-  repeated string pids = 3;
+message DeactivateFrameworkMessage {
+  required FrameworkID framework_id = 1;
 }
 
 
-message ResourceOfferReplyMessage {
+message ResourceRequestMessage {
+  required FrameworkID framework_id = 1;
+  repeated ResourceRequest requests = 2;
+}
+
+
+message ResourceOffersMessage {
+  repeated Offer offers = 1;
+  repeated string pids = 2;
+}
+
+
+message LaunchTasksMessage {
   required FrameworkID framework_id = 1;
   required OfferID offer_id = 2;
   repeated TaskDescription tasks = 3;
-  optional Params params = 4;
+  required Filters filters = 5;
 }
 
 

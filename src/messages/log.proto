@@ -104,14 +104,18 @@ message PromiseResponse {
 }
 
 
-// Represents a write request for a specific type of action.
+// Represents a write request for a specific type of action. Note that
+// we deliberately do not include the entire Action as it contains
+// fields that are not relevant to a write request (e.g., promised,
+// performed) and rather than ignore them we exclude them for safety.
 message WriteRequest {
   required uint64 id = 1;
   required uint64 position = 2;
-  required Action.Type type = 3;
-  optional Action.Nop nop = 4;
-  optional Action.Append append = 5;
-  optional Action.Truncate truncate = 6;
+  optional bool learned = 3;
+  required Action.Type type = 4;
+  optional Action.Nop nop = 5;
+  optional Action.Append append = 6;
+  optional Action.Truncate truncate = 7;
 }
 
 
@@ -120,26 +124,6 @@ message WriteRequest {
 // position should always correspond to the id and position set in the
 // request.
 message WriteResponse {
-  required bool okay = 1;
-  required uint64 id = 2;
-  required uint64 position = 3;
-}
-
-
-// Represents a commit request which is a write request that if
-// successfully persisted represents a learned value.
-message CommitRequest {
-  required uint64 id = 1;
-  required uint64 position = 2;
-  required Action.Type type = 3;
-  optional Action.Nop nop = 4;
-  optional Action.Append append = 5;
-  optional Action.Truncate truncate = 6;
-}
-
-
-// Represents a commit response corresponding to a commit request.
-message CommitResponse {
   required bool okay = 1;
   required uint64 id = 2;
   required uint64 position = 3;
