@@ -214,6 +214,10 @@ private:
   hashmap<SlaveID, Slave*> slaves;
   hashmap<OfferID, Offer*> offers;
 
+  std::list<std::map<std::string, std::string> > completedFrameworks;
+  int numCompletedFrameworks;
+  int maxCompletedFrameworks;
+
   int64_t nextFrameworkId; // Used to give each framework a unique ID.
   int64_t nextOfferId;     // Used to give each slot offer a unique ID.
   int64_t nextSlaveId;     // Used to give each slave a unique ID.

@@ -116,6 +116,16 @@ JSON::Object model(const Slave& slave)
   return object;
 }
 
+JSON::Object model(std::map<string, string> m)
+{
+  JSON::Object object;
+  std::map<string, string>::iterator it;
+  for(it = m.begin(); it != m.end(); it++) {
+    object.values[(*it).first] = (*it).second;
+  }
+
+  return object;
+}
 
 namespace http {
 
@@ -240,6 +250,17 @@ Promise<HttpResponse> state(
 
     object.values["frameworks"] = array;
   }
+
+  // Model all of the completed frameworks.
+      {
+        JSON::Array array;
+        std::list<std::map<std::string, std::string> >::const_iterator it;
+        for (it = master.completedFrameworks.begin(); it != master.completedFrameworks.end(); it++) {
+          array.values.push_back(model(*it));
+        }
+
+        object.values["completedFrameworks"] = array;
+      }
 
   std::ostringstream out;
 
