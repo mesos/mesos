@@ -90,6 +90,16 @@ JSON::Object model(const Framework& framework)
     object.values["tasks"] = array;
   }
 
+  {
+      JSON::Array array;
+      std::list<Task*>::const_iterator it;
+      for (it = framework.completedTasks.begin(); it != framework.completedTasks.end(); it++) {
+        array.values.push_back(model(**it));
+      }
+
+      object.values["completedTasks"] = array;
+  }
+
   // Model all of the offers associated with a framework.
   {
     JSON::Array array;
@@ -252,15 +262,15 @@ Promise<HttpResponse> state(
   }
 
   // Model all of the completed frameworks.
-      {
-        JSON::Array array;
-        std::list<std::map<std::string, std::string> >::const_iterator it;
-        for (it = master.completedFrameworks.begin(); it != master.completedFrameworks.end(); it++) {
-          array.values.push_back(model(*it));
-        }
-
-        object.values["completedFrameworks"] = array;
+   {
+      JSON::Array array;
+      std::list<Framework*>::const_iterator it;
+      for (it = master.completedFrameworks.begin(); it != master.completedFrameworks.end(); it++) {
+        array.values.push_back(model(**it));
       }
+
+      object.values["completedFrameworks"] = array;
+    }
 
   std::ostringstream out;
 

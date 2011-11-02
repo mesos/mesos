@@ -1568,28 +1568,16 @@ void Master::removeFramework(Framework* framework)
 
   // TODO(benh): unlink(framework->pid);
 
-  std::map<string, string> finalState;
-  finalState["id"] = framework->id.value();
-  finalState["name"] = framework->info.name();
-  finalState["user"] = framework->info.user();
-  //std::ostringstream s;
-  //s << fixed << setprecision(400) << framework->registeredTime;
-  char s[36];
-  sprintf(s, "%.23f", framework->registeredTime);
-  finalState["connect_time"] = string(s);
-  sprintf(s, "%.23f", elapsedTime());
-  finalState["disconnect_time"] = string(s);
-  completedFrameworks.push_back(finalState);
-  numCompletedFrameworks++;
+  completedFrameworks.push_back(framework);
 
-  if(numCompletedFrameworks > maxCompletedFrameworks) {
+  if(completedFrameworks.size() > maxCompletedFrameworks) {
 	  completedFrameworks.pop_front();
   }
 
   // Delete it.
   frameworks.erase(framework->id);
   allocator->frameworkRemoved(framework);
-  delete framework;
+  //delete framework;
 }
 
 
@@ -1783,7 +1771,7 @@ void Master::removeTask(Task* task)
   // Tell the allocator about the recovered resources.
   allocator->resourcesRecovered(framework->id, slave->id, task->resources());
 
-  delete task;
+  //delete task;
 }
 
 

@@ -30,8 +30,6 @@ TASK_STATES = ['STARTING', 'RUNNING', 'FINISHED', 'FAILED', 'KILLED', 'LOST']
 def format_time(timestamp):
   if type(timestamp) in [types.IntType, types.LongType, types.FloatType]:
     return datetime.fromtimestamp(timestamp).strftime(DATE_FORMAT)
-  elif type(timestamp) in [types.StringType, types.UnicodeType]:
-    return datetime.fromtimestamp(float(timestamp)).strftime(DATE_FORMAT)
   else: # Assume it's a datetime object
     return timestamp.strftime(DATE_FORMAT)
   

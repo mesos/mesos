@@ -87,11 +87,6 @@ JSON::Object model(const Framework& framework)
     array.values.push_back(model(*executor));
   }
 
-  std::map<string, string>::iterator it;
-  for(it = framework.completedTasks.begin(); it != framework.completedTasks.end(); it++) {
-    object.values[(*it).first] = (*it).second;
-  }
-
   object.values["executors"] = array;
 
   return object;

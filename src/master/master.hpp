@@ -214,8 +214,7 @@ private:
   hashmap<SlaveID, Slave*> slaves;
   hashmap<OfferID, Offer*> offers;
 
-  std::list<std::map<std::string, std::string> > completedFrameworks;
-  int numCompletedFrameworks;
+  std::list<Framework*> completedFrameworks;
   int maxCompletedFrameworks;
 
   int64_t nextFrameworkId; // Used to give each framework a unique ID.
@@ -372,7 +371,9 @@ struct Framework
       pid(_pid),
       active(true),
       registeredTime(time),
-      reregisteredTime(time) {}
+      reregisteredTime(time) {
+	  maxCompletedTasks = 100;
+  }
 
   ~Framework() {}
 
@@ -396,9 +397,11 @@ struct Framework
   {
     CHECK(tasks.contains(task->task_id()));
 
-    map<string, string> finalState;
-    finalState["id"] = task->task_id();
-    completedTasks.push_back(finalState);
+    completedTasks.push_back(task);
+
+    if(completedTasks.size() > maxCompletedTasks) {
+    	completedTasks.pop_front();
+    }
 
     tasks.erase(task->task_id());
     resources -= task->resources();
@@ -475,7 +478,8 @@ struct Framework
 
   hashmap<TaskID, Task*> tasks;
 
-  list<map<string, string> > completedTasks;
+  std::list<Task*> completedTasks;
+  int maxCompletedTasks;
 
   hashset<Offer*> offers; // Active offers for framework.
 

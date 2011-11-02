@@ -256,27 +256,44 @@
 % end
 
 <h2>Framework History</h2>
-%if len(state['completedFrameworks']) > 0:
+% if len(state['completedFrameworks']) > 0:
 <table class="lists">
   <tr>
-  	<th class="lists">ID</th>
-  	<th class="lists">User</th>
-  	<th class="lists">Name</th>
-  	<th class="lists">Connected</th>
-  	<th class="lists">Disconnected</th>
+    <th class="lists">ID</th>
+    <th class="lists">User</th>
+    <th class="lists">Name</th>
+    <th class="lists">Running Tasks</th>
+    <th class="lists">CPUs</th>
+    <th class="lists">MEM</th>
+    <th class="lists">Max Share</th>
+    <th class="lists">Connected</th>
   </tr>
   % for framework in state['completedFrameworks']:
+  % cpu_share = 0
+  % if total_cpus > 0:
+  %   cpu_share = framework['resources']['cpus'] / float(total_cpus)
+  % end
+  % mem_share = 0
+  % if total_mem > 0:
+  %   mem_share = framework['resources']['mem'] / float(total_mem)
+  % end
+  % max_share = max(cpu_share, mem_share)
   <tr>
-  	<td class="lists">{{framework['id']}}</td>
-  	<td class="lists">{{framework['user']}}</td>
-  	<td class="lists">{{framework['name']}}</td>
-  	<td class="lists">{{format_time(framework['connect_time'])}}</td>
-  	<td class="lists">{{format_time(framework['disconnect_time'])}}</td>
+    <td class="lists">{{framework['id']}}</td>
+    <td class="lists">{{framework['user']}}</td>
+    <td class="lists">
+      <a href="/framework/{{framework['id']}}">{{framework['name']}}</a>
+    </td>
+    <td class="lists">{{len(framework['tasks'])}}</td>
+    <td class="lists">{{framework['resources']['cpus']}}</td>
+    <td class="lists">{{format_mem(framework['resources']['mem'])}}</td>
+    <td class="lists">{{'%.2f' % max_share}}</td>
+    <td class="lists">{{format_time(framework['connect_time'])}}</td>
   </tr>
   % end
 </table>
-%else:
-<p>No previously exectued frameworks.</p>
-%end
+% else:
+<p>No frameworks are connected.</p>
+% end
 </body>
 </html>
