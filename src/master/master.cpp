@@ -1568,6 +1568,7 @@ void Master::removeFramework(Framework* framework)
 
   // TODO(benh): unlink(framework->pid);
 
+  framework->completedTime = elapsedTime();
   completedFrameworks.push_back(framework);
 
   if(completedFrameworks.size() > maxCompletedFrameworks) {

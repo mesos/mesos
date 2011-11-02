@@ -25,6 +25,14 @@
 %   end
 % end
 
+% if framework == None:
+%   for i in range(len(state['completedFrameworks'])):
+%     if state['completedFrameworks'][i]['id'] == framework_id:
+%       framework = state['completedFrameworks'][i]
+%     end
+%   end
+% end
+
 % # Build a dict from slave ID to slave for quick lookups of slaves.
 % slaves = {}
 % for i in range(len(state['slaves'])):

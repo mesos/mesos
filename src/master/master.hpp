@@ -475,6 +475,7 @@ struct Framework
   bool active; // Turns false when framework is being removed.
   double registeredTime;
   double reregisteredTime;
+  double completedTime;
 
   hashmap<TaskID, Task*> tasks;
 

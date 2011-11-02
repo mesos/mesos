@@ -78,6 +78,7 @@ JSON::Object model(const Framework& framework)
   object.values["user"] = framework.info.user();
   object.values["executor_uri"] = framework.info.executor().uri();
   object.values["connect_time"] = framework.registeredTime;
+  object.values["disconnect_time"] = framework.completedTime;
   object.values["resources"] = model(framework.resources);
 
   // Model all of the tasks associated with a framework.
