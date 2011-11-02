@@ -127,17 +127,6 @@ JSON::Object model(const Slave& slave)
   return object;
 }
 
-JSON::Object model(std::map<string, string> m)
-{
-  JSON::Object object;
-  std::map<string, string>::iterator it;
-  for(it = m.begin(); it != m.end(); it++) {
-    object.values[(*it).first] = (*it).second;
-  }
-
-  return object;
-}
-
 namespace http {
 
 Promise<HttpResponse> vars(
