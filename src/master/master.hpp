@@ -395,6 +395,11 @@ struct Framework
   void removeTask(Task* task)
   {
     CHECK(tasks.contains(task->task_id()));
+
+    map<string, string> finalState;
+    finalState["id"] = task->task_id();
+    completedTasks.push_back(finalState);
+
     tasks.erase(task->task_id());
     resources -= task->resources();
   }
@@ -469,6 +474,9 @@ struct Framework
   double reregisteredTime;
 
   hashmap<TaskID, Task*> tasks;
+
+  list<map<string, string> > completedTasks;
+
   hashset<Offer*> offers; // Active offers for framework.
 
   Resources resources; // Total resources (tasks + offers + executors).

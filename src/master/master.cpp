@@ -1572,6 +1572,13 @@ void Master::removeFramework(Framework* framework)
   finalState["id"] = framework->id.value();
   finalState["name"] = framework->info.name();
   finalState["user"] = framework->info.user();
+  //std::ostringstream s;
+  //s << fixed << setprecision(400) << framework->registeredTime;
+  char s[36];
+  sprintf(s, "%.23f", framework->registeredTime);
+  finalState["connect_time"] = string(s);
+  sprintf(s, "%.23f", elapsedTime());
+  finalState["disconnect_time"] = string(s);
   completedFrameworks.push_back(finalState);
   numCompletedFrameworks++;
 

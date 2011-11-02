@@ -262,12 +262,16 @@
   	<th class="lists">ID</th>
   	<th class="lists">User</th>
   	<th class="lists">Name</th>
+  	<th class="lists">Connected</th>
+  	<th class="lists">Disconnected</th>
   </tr>
   % for framework in state['completedFrameworks']:
   <tr>
   	<td class="lists">{{framework['id']}}</td>
   	<td class="lists">{{framework['user']}}</td>
   	<td class="lists">{{framework['name']}}</td>
+  	<td class="lists">{{format_time(framework['connect_time'])}}</td>
+  	<td class="lists">{{format_time(framework['disconnect_time'])}}</td>
   </tr>
   % end
 </table>
