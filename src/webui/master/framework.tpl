@@ -25,6 +25,14 @@
 %   end
 % end
 
+% if framework == None:
+%   for i in range(len(state['completedFrameworks'])):
+%     if state['completedFrameworks'][i]['id'] == framework_id:
+%       framework = state['completedFrameworks'][i]
+%     end
+%   end
+% end
+
 % # Build a dict from slave ID to slave for quick lookups of slaves.
 % slaves = {}
 % for i in range(len(state['slaves'])):
@@ -56,6 +64,35 @@
   </tr>
   % for i in range(len(framework['tasks'])):
   %   task = framework['tasks'][i]
+  <tr>
+    <td class="lists">{{task['id']}}</td>
+    <td class="lists">{{task['name']}}</td>
+    <td class="lists">{{task['state']}}</td>
+    % if task['slave_id'] in slaves:
+    %   slave = slaves[task['slave_id']]
+    <td class="lists"><a href="http://{{slave['web_ui_url']}}:8081/">{{slave['hostname']}}</a></td>
+    % else:
+    <td class="lists">Slave {{task['slave_id']}} (disconnected)</td>
+    % end
+  </tr>
+  % end
+</table>
+% else:
+<p>No tasks are running.</p>
+% end
+
+<h2>Completed Tasks</h2>
+
+% if len(framework['completedTasks']) > 0:
+<table class="lists">
+  <tr>
+    <th class="lists">ID</th>
+    <th class="lists">Name</th>
+    <th class="lists">State</th>
+    <th class="lists">Running On</th>
+  </tr>
+  % for i in range(len(framework['completedTasks'])):
+  %   task = framework['completedTasks'][i]
   <tr>
     <td class="lists">{{task['id']}}</td>
     <td class="lists">{{task['name']}}</td>

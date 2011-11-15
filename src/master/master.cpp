@@ -311,6 +311,8 @@ void Master::initialize()
   nextSlaveId = 0;
   nextOfferId = 0;
 
+  maxCompletedFrameworks = 100;
+
   failoverTimeout = conf.get<int>("failover_timeout", 60 * 60 * 24);
 
   // Start all the statistics at 0.
@@ -1566,10 +1568,17 @@ void Master::removeFramework(Framework* framework)
 
   // TODO(benh): unlink(framework->pid);
 
+  framework->completedTime = elapsedTime();
+  completedFrameworks.push_back(framework);
+
+  if(completedFrameworks.size() > maxCompletedFrameworks) {
+	  completedFrameworks.pop_front();
+  }
+
   // Delete it.
   frameworks.erase(framework->id);
   allocator->frameworkRemoved(framework);
-  delete framework;
+  //delete framework;
 }
 
 
@@ -1763,7 +1772,7 @@ void Master::removeTask(Task* task)
   // Tell the allocator about the recovered resources.
   allocator->resourcesRecovered(framework->id, slave->id, task->resources());
 
-  delete task;
+  //delete task;
 }
 
 

@@ -78,6 +78,7 @@ JSON::Object model(const Framework& framework)
   object.values["user"] = framework.info.user();
   object.values["executor_uri"] = framework.info.executor().uri();
   object.values["connect_time"] = framework.registeredTime;
+  object.values["disconnect_time"] = framework.completedTime;
   object.values["resources"] = model(framework.resources);
 
   // Model all of the tasks associated with a framework.
@@ -88,6 +89,16 @@ JSON::Object model(const Framework& framework)
     }
 
     object.values["tasks"] = array;
+  }
+
+  {
+      JSON::Array array;
+      std::list<Task*>::const_iterator it;
+      for (it = framework.completedTasks.begin(); it != framework.completedTasks.end(); it++) {
+        array.values.push_back(model(**it));
+      }
+
+      object.values["completedTasks"] = array;
   }
 
   // Model all of the offers associated with a framework.
@@ -115,7 +126,6 @@ JSON::Object model(const Slave& slave)
   object.values["resources"] = model(slave.info.resources());
   return object;
 }
-
 
 namespace http {
 
@@ -240,6 +250,17 @@ Promise<HttpResponse> state(
 
     object.values["frameworks"] = array;
   }
+
+  // Model all of the completed frameworks.
+   {
+      JSON::Array array;
+      std::list<Framework*>::const_iterator it;
+      for (it = master.completedFrameworks.begin(); it != master.completedFrameworks.end(); it++) {
+        array.values.push_back(model(**it));
+      }
+
+      object.values["completedFrameworks"] = array;
+    }
 
   std::ostringstream out;
 

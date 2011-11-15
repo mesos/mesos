@@ -81,9 +81,13 @@
 % else:
 <p> No executors for this framework are active on this slave.</p>
 % end
+<h2>Completed Tasks</h2>
 % else:
 <p>No framework with ID {{framework_id}} is active on this slave.</p>
 % end
+
+
+
 
 <p><a href="/">Back to Slave</a></p>
 
