@@ -10,8 +10,9 @@
 
 #include "common/lock.hpp"
 
+#include "jvm/jvm.hpp"
+
 #include "tests/base_zookeeper_test.hpp"
-#include "tests/jvm.hpp"
 #include "tests/utils.hpp"
 #include "tests/zookeeper_server.hpp"
 

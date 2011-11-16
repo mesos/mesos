@@ -29,14 +29,12 @@
 #include "common/fatal.hpp"
 #include "common/foreach.hpp"
 
-#ifdef WITH_ZOOKEEPER
-#include "zookeeper/zookeeper.hpp"
-#endif
+#include "detector/detector.hpp"
+#include "detector/url_processor.hpp"
 
 #include "messages/messages.hpp"
 
-#include "detector.hpp"
-#include "url_processor.hpp"
+#include "zookeeper/zookeeper.hpp"
 
 using namespace mesos;
 using namespace mesos::internal;
@@ -51,7 +49,6 @@ using std::string;
 using std::vector;
 
 
-#ifdef WITH_ZOOKEEPER
 class ZooKeeperMasterDetector : public MasterDetector, public Watcher
 {
 public:
@@ -134,7 +131,6 @@ private:
   string currentMasterSeq;
   UPID currentMasterPID;
 };
-#endif // WITH_ZOOKEEPER
 
 
 MasterDetector::~MasterDetector() {}
@@ -160,7 +156,6 @@ MasterDetector* MasterDetector::create(const string &url,
   switch (urlPair.first) {
     // ZooKeeper URL.
     case UrlProcessor::ZOO: {
-#ifdef WITH_ZOOKEEPER
       // TODO(benh): Consider actually using the chroot feature of
       // ZooKeeper, rather than just using it's syntax.
       size_t index = urlPair.second.find("/");
@@ -191,10 +186,6 @@ MasterDetector* MasterDetector::create(const string &url,
         detector = new ZooKeeperMasterDetector(username, password, endpoints,
             znode, pid, contend, quiet);
       }
-#else
-      fatal("Cannot detect masters with 'zoo://', "
-            "ZooKeeper is not supported in this build");
-#endif // WITH_ZOOKEEPER
       break;
     }
 
@@ -308,7 +299,6 @@ BasicMasterDetector::BasicMasterDetector(const UPID& _master,
 BasicMasterDetector::~BasicMasterDetector() {}
 
 
-#ifdef WITH_ZOOKEEPER
 ZooKeeperMasterDetector::ZooKeeperMasterDetector(const string& servers,
                                                  const string& znode,
                                                  const UPID& pid,
@@ -610,5 +600,3 @@ void ZooKeeperMasterDetector::detectMaster()
     }
   }
 }
-
-#endif // WITH_ZOOKEEPER

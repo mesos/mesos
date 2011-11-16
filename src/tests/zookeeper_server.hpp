@@ -7,7 +7,7 @@
 
 #include "common/utils.hpp"
 
-#include "tests/jvm.hpp"
+#include "jvm/jvm.hpp"
 
 #include "zookeeper/zookeeper.hpp"
 

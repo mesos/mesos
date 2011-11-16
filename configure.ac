@@ -18,50 +18,70 @@
 # Process this file with autoconf to produce a configure script.
 
 AC_PREREQ(2.61)
-AC_INIT
+AC_INIT([mesos], [1.0])
 
-if test -z "$PYTHON"; then
-  PYTHON=python2.6
-fi
-AC_SUBST(PYTHON)
-if test -z "$PYTHON_CONFIG"; then
-  PYTHON_CONFIG=python2.6-config
-fi
-SETUPTOOLS=third_party/distribute-0.6.19/distribute-0.6.19-py2.6.egg
-AC_SUBST(SETUPTOOLS)
+# Have autoconf setup some variables related to the system.
+AC_CANONICAL_SYSTEM
+
+# Initialize automake.
+AM_INIT_AUTOMAKE([-Wall -Werror silent-rules foreign])
+
+# Allow less verbose output when building.
+AM_SILENT_RULES
+
+# Initialize libtool.
+LT_PREREQ([2.2])
+LT_INIT
+
+AC_LANG(C++)
+
+AC_CONFIG_MACRO_DIR([m4])
 
 # Update CFLAGS and CXXFLAGS with environment args.
-CFLAGS="-O2 -fno-strict-aliasing -fPIC ${CFLAGS}"
-CXXFLAGS="-O2 -fno-strict-aliasing -fPIC ${CXXFLAGS}"
+# TODO(benh): Stop passing -fPIC, instead assume libtool will do the
+# right thing and get libprocess to correctly use autotools.
+dnl CFLAGS="-O2 -fno-strict-aliasing -fPIC ${CFLAGS}"
+dnl CXXFLAGS="-O2 -fno-strict-aliasing -fPIC ${CXXFLAGS}"
 
-export CFLAGS
-export CXXFLAGS
+dnl export CFLAGS
+dnl export CXXFLAGS
 
 # Update CFLAGS and CXXFLAGS in configure args.
 # TODO(benh): Don't send args just for us (e.g., --with-webui).
-ac_configure_args=`echo $ac_configure_args | \
-                   sed -e "s/CFLAGS=/CFLAGS=-O2 -fno-strict-aliasing /"`
-ac_configure_args=`echo $ac_configure_args | \
-                   sed -e "s/CXXFLAGS=/CXXFLAGS=-O2 -fno-strict-aliasing /"`
-ac_configure_args="$ac_configure_args --enable-shared=no --with-pic"
+dnl ac_configure_args=`echo $ac_configure_args | \
+dnl                    sed -e "s/CFLAGS=/CFLAGS=-O2 -fno-strict-aliasing /"`
+dnl ac_configure_args=`echo $ac_configure_args | \
+dnl                    sed -e "s/CXXFLAGS=/CXXFLAGS=-O2 -fno-strict-aliasing /"`
 
-AC_CONFIG_FILES([Makefile
-                 src/Makefile
-                 src/examples/Makefile
-                 src/examples/java/Makefile
-                 src/examples/python/Makefile
-                 src/tests/Makefile
-                 src/config/config.hpp
-                 src/python/setup.py])
-AC_CONFIG_SUBDIRS([third_party/libprocess])
+dnl ac_configure_args="$ac_configure_args --enable-shared=no --with-pic"
+
+# Force all third_party libraries to only build static libraries so
+# that we can produce a final shared library which includes everything
+# necessary (this is a well recognized hack for passing configure
+# arguments to subdirs).
+ac_configure_args="$ac_configure_args --enable-shared=no"
+
 AC_CONFIG_SUBDIRS([third_party/protobuf-2.3.0])
 AC_CONFIG_SUBDIRS([third_party/glog-0.3.1])
 AC_CONFIG_SUBDIRS([third_party/zookeeper-3.3.1/src/c])
+AC_CONFIG_SUBDIRS([third_party/libprocess])
 
-AC_CANONICAL_SYSTEM
+AC_CONFIG_FILES([Makefile])
+AC_CONFIG_FILES([src/Makefile])
+dnl AC_CONFIG_FILES([src/examples/Makefile])
+dnl AC_CONFIG_FILES([src/examples/java/Makefile])
+dnl AC_CONFIG_FILES([src/examples/python/Makefile])
+dnl AC_CONFIG_FILES([src/tests/Makefile])
+AC_CONFIG_FILES([src/config/config.hpp])
 
-UNSUPPORTED_OS="Mesos is currently unsupported on your platform."
 
+# TODO(benh): Force Python 2.6?
+if test -z "$PYTHON"; then
+  PYTHON=python2.6
+fi
+
+
+# Determine the current OS (TODO(benh): Does autotools do this for us?).
 case "${target_os}" in
   linux*)
     echo ===========================================================
@@ -91,12 +111,46 @@ case "${target_os}" in
     OS_NAME=solaris
     ;;
   *)
-    AC_MSG_ERROR($UNSUPPORTED_OS)
+    AC_MSG_ERROR("Mesos is currently unsupported on your platform.")
   esac
 
 # Export OS name to Makefiles
 AC_SUBST(OS_NAME)
 
+
+JAVA_HOME=""
+JAVA_LDFLAGS=""
+HAS_JAVA="0"
+AC_ARG_WITH([java-home],
+  AC_HELP_STRING([--with-java-home=DIR],
+                 [find Java Development Kit in DIR]),
+	         [case "$with_java_home" in
+		    yes) 
+                      AC_MSG_ERROR([
+*** --with-java-home requires an argument]) ;;
+		    *)
+                      JAVA_HOME="$withval"
+                      HAS_JAVA="1"
+                      has_java=true
+                      if test -z "$JAVA_HEADERS"; then
+                        JAVA_HEADERS="$JAVA_HOME/include/$OS_NAME"
+                      fi
+                      if test "$OS_NAME" = "darwin"; then
+                        JAVA_LDFLAGS="-framework JavaVM"
+                      elif test "$OS_NAME" = "linux"; then
+                        # TODO(John Sirois): Select directory based on arch.
+                        JAVA_LDFLAGS="-L$(JAVA_HOME)/jre/lib/amd64/server -ljvm"
+                      fi
+                      ;;
+	          esac],
+	         [])
+AC_SUBST(JAVA_HOME)
+AC_SUBST(JAVA_LDFLAGS)
+AC_SUBST(HAS_JAVA)
+AM_CONDITIONAL([HAS_JAVA], [test x$has_java = xtrue])
+
+
+# TODO(benh): Make the default here be -I$JAVA_HOME/include".
 JAVA_HEADERS=""
 AC_ARG_WITH([java-headers],
   AC_HELP_STRING([--with-java-headers=DIR],
@@ -112,26 +166,8 @@ AC_ARG_WITH([java-headers],
 	         [])
 AC_SUBST(JAVA_HEADERS)
 
-JAVA_HOME=""
-HAS_JAVA="0"
-AC_ARG_WITH([java-home],
-  AC_HELP_STRING([--with-java-home=DIR],
-                 [find Java Development Kit in DIR]),
-	         [case "$with_java_home" in
-		    yes) 
-                      AC_MSG_ERROR([
-*** --with-java-home requires an argument]) ;;
-		    *)
-                      JAVA_HOME="$withval"
-                      HAS_JAVA="1"
-                      if test -z "$JAVA_HEADERS"; then
-                        JAVA_HEADERS="$JAVA_HOME/include/$OS_NAME"
-                      fi
-                      ;;
-	          esac],
-	         [])
-AC_SUBST(JAVA_HOME)
-AC_SUBST(HAS_JAVA)
+# TODO(benh): Make sure that JAVA_HEADERS is set iff JAVA_HOME is set.
+
 
 PYTHON_HEADERS=""
 PYTHON_LDFLAGS=""
@@ -145,80 +181,58 @@ AC_ARG_WITH([python-headers],
 *** --with-python-headers requires an argument]) ;;
 		    *)
                       PYTHON_HEADERS="$withval"
-                      if test -x `which $PYTHON_CONFIG`; then
-                        echo running $PYTHON_CONFIG to find compiler flags for creating the Mesos Python library...
-                        PYTHON_LDFLAGS=`$PYTHON_CONFIG --ldflags`
-                      else
-                        echo running $PYTHON to find compiler flags for creating the Mesos Python library...
-                        PYTHON_LDFLAGS=`$PYTHON -c 'from distutils import sysconfig; print sysconfig.get_config_var("LINKFORSHARED") + " -lpython" + sysconfig.get_config_var("VERSION")'`
-                      fi
+                      echo running $PYTHON to find compiler flags for creating the Mesos Python library...
+                      PYTHON_LDFLAGS=`$PYTHON -c 'from distutils import sysconfig; print sysconfig.get_config_var("LINKFORSHARED") + " -lpython" + sysconfig.get_config_var("VERSION")'`
                       HAS_PYTHON="1"
+                      has_python=true
                       ;;
 	          esac],
 	         [])
 AC_SUBST(PYTHON_HEADERS)
 AC_SUBST(PYTHON_LDFLAGS)
 AC_SUBST(HAS_PYTHON)
+AM_CONDITIONAL([HAS_PYTHON], [test x$has_python = xtrue])
+
 
 WITH_WEBUI="0"
-WEBUI_CFLAGS=""
-WEBUI_CXXFLAGS=""
-WEBUI_LDFLAGS=""
 AC_ARG_WITH([webui],
   AC_HELP_STRING([--with-webui],
                  [enable web UI (requires Python)]),
-	         [case "$with_webui" in
-		    yes) WITH_WEBUI="1"
-                         if test -x `which $PYTHON_CONFIG`; then
-                           WEBUI_CFLAGS=`$PYTHON_CONFIG --includes`
-                           WEBUI_LDFLAGS=`$PYTHON_CONFIG --ldflags`
-                         else
-                           echo running $PYTHON to find compiler flags for embedding it...
-                           WEBUI_CFLAGS=`$PYTHON -c 'from distutils import sysconfig; print "-I" + sysconfig.get_config_var("INCLUDEPY")'`
-                           WEBUI_LDFLAGS=`$PYTHON -c 'from distutils import sysconfig; print sysconfig.get_config_var("LINKFORSHARED") + " -lpython" + sysconfig.get_config_var("VERSION")'`
-                         fi
-                         WEBUI_CXXFLAGS=$WEBUI_CFLAGS
-                         if [[ "$?" -ne "0" ]]; then
-                           AC_MSG_ERROR([
+            [case "$with_webui" in
+              yes) webui=true
+                   WITH_WEBUI=1
+                   echo running $PYTHON to find compiler flags for embedding it...
+                   WEBUI_CPPFLAGS=`$PYTHON -c 'from distutils import sysconfig; print "-I" + sysconfig.get_config_var("INCLUDEPY")'`
+                   WEBUI_LDFLAGS=`$PYTHON -c 'from distutils import sysconfig; print sysconfig.get_config_var("LINKFORSHARED") + " -lpython" + sysconfig.get_config_var("VERSION")'`
+                   if [[ "$?" -ne "0" ]]; then
+                     AC_MSG_ERROR([
 *** Failed to determine compiler flags for embedding Python, needed by web UI.
 *** Check that you have Python 2.6 development packages installed.])
-                         fi ;;
-                    no) WITH_WEBUI="0" ;;
-		    *) AC_MSG_ERROR([
+                   fi ;;
+              no) webui=false
+                  WITH_WEBUI=0 ;;
+              *) AC_MSG_ERROR([
 *** --with-webui does not take arguments]) ;;
-	          esac],
-	         [])
-AC_SUBST(WITH_WEBUI)
-AC_SUBST(WEBUI_CFLAGS)
-AC_SUBST(WEBUI_CXXFLAGS)
+	    esac],
+	    [])
+AC_SUBST(WEBUI_CPPFLAGS)
 AC_SUBST(WEBUI_LDFLAGS)
+AC_SUBST(WITH_WEBUI)
+AM_CONDITIONAL([WITH_WEBUI], [test x$webui = xtrue])
 
-WITH_ZOOKEEPER="0"
-AC_ARG_WITH([zookeeper],
-  AC_HELP_STRING([--with-zookeeper],
-                 [use ZooKeeper support]),
-	         [case "$with_zookeeper" in
-		    yes) WITH_ZOOKEEPER="1" ;;
-                    no) WITH_ZOOKEEPER="0" ;;
-		    *) AC_MSG_ERROR([
-*** --with-zookeeper does not take arguments]) ;;
-	          esac],
-	         [])
-AC_SUBST(WITH_ZOOKEEPER)
 
-WITH_INCLUDED_ZOOKEEPER="0"
 AC_ARG_WITH([included-zookeeper],
   AC_HELP_STRING([--with-included-zookeeper],
                  [build with included ZooKeeper]),
-	         [case "$with_included_zookeeper" in
-		    yes) WITH_ZOOKEEPER="1"
-                         WITH_INCLUDED_ZOOKEEPER="1" ;;
-                    no) WITH_INCLUDED_ZOOKEEPER="0" ;;
-		    *) AC_MSG_ERROR([
+	    [case "$with_included_zookeeper" in
+              yes) included_zookeeper=true ;;
+              no) included_zookeeper=false ;;
+              *) AC_MSG_ERROR([
 *** --with-included-zookeeper does not take arguments]) ;;
-	          esac],
-	         [])
-AC_SUBST(WITH_INCLUDED_ZOOKEEPER)
+	    esac],
+	    [])
+AM_CONDITIONAL([WITH_INCLUDED_ZOOKEEPER],
+               [test x$included_zookeeper = xtrue])
 
 # Checks for programs.
 AC_PROG_CXX([g++])

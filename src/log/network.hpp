@@ -20,9 +20,7 @@
 #include "common/seconds.hpp"
 #include "common/utils.hpp"
 
-#ifdef WITH_ZOOKEEPER
 #include "zookeeper/group.hpp"
-#endif
 
 // Forward declaration.
 class NetworkProcess;
@@ -70,7 +68,6 @@ private:
 };
 
 
-#ifdef WITH_ZOOKEEPER
 class ZooKeeperNetwork : public Network
 {
 public:
@@ -94,7 +91,6 @@ private:
 
   async::Dispatch dispatch;
 };
-#endif // WITH_ZOOKEEPER
 
 
 class NetworkProcess : public ProtobufProcess<NetworkProcess>
@@ -232,7 +228,6 @@ void Network::broadcast(
   process::dispatch(process, broadcast, m, filter);
 }
 
-#ifdef WITH_ZOOKEEPER
 inline ZooKeeperNetwork::ZooKeeperNetwork(zookeeper::Group* _group)
   : group(_group)
 {
@@ -303,6 +298,5 @@ inline void ZooKeeperNetwork::discarded() const
 {
   LOG(FATAL) << "Unexpected discarded future while watching ZooKeeper group";
 }
-#endif // WITH_ZOOKEEPER
 
 #endif // __NETWORK_HPP__
