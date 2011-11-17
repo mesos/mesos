@@ -32,21 +32,20 @@ LIBEV = $(LIBPROCESS)/third_party/libev-3.8
 # Used for building Python eggs.
 SETUPTOOLS = third_party/distribute-0.6.19/distribute-0.6.19-py2.6.egg
 
-
 # Protocol buffer compiler.
 PROTOC = $(top_builddir)/$(PROTOBUF)/src/protoc
 
-# Initialize here so we can use += operator everywhere else.
+# Initialize variables here so we can use += operator everywhere else.
 lib_LTLIBRARIES =
 noinst_LTLIBRARIES =
 bin_PROGRAMS =
+bin_SCRIPTS =
 check_PROGRAMS =
 BUILT_SOURCES =
 TESTS =
 CLEANFILES =
 
 
-# TODO(benh): Add optimization flags when building the core library.
 # TODO(benh): Remove $(PTHREAD_LIBS) from each LDADD.
 
 # Our library!
@@ -76,6 +75,8 @@ libmesos_la_CPPFLAGS = -I$(top_srcdir)/include                          \
                        -I$(top_builddir)/$(GLOG)/src                    \
                        -I$(top_srcdir)/$(LIBPROCESS)/include            \
                        $(AM_CPPFLAGS)
+
+libmesos_la_CXXFLAGS = -O2 -g2 $(AM_CXXFLAGS)
 
 # TODO(benh): Make libprocess be autotoolized too!
 libmesos_la_LIBADD = libbuild.la					  \
@@ -118,17 +119,28 @@ noinst_LTLIBRARIES += libwebui.la
 libwebui_la_SOURCES = master/webui.cpp slave/webui.cpp
 libwebui_la_CPPFLAGS = $(WEBUI_CPPFLAGS) $(libmesos_la_CPPFLAGS)
 
+WEBUISCRIPTS = webui/bottle-0.8.3			\
+               webui/common/webui_lib.py		\
+               webui/master/framework.tpl		\
+               webui/master/index.tpl			\
+               webui/master/webui.py			\
+               webui/slave/framework.tpl		\
+               webui/slave/executor.tpl			\
+               webui/slave/index.tpl			\
+               webui/slave/webui.py			\
+               webui/static/stylesheet.css
 
-# TODO(benh): "Build" the Python webui files so that we can run the
-# binaries directly out of the build directory.
+# We need to copy the webui scripts into .libs so that we can run the
+# binaries out of the build directory.
 
-BUILT_SOURCES += examples/java/test_framework
+libwebui_la_DEPENDENCIES = COPYWEBUISCRIPTS
 
-examples/java/test_framework:
-	@cp -f $(srcdir)/$@ $@
+COPYWEBUISCRIPTS:
+	for path in $(WEBUISCRIPTS); do			\
+          mkdir -p `dirname .libs/$$path`;		\
+          cp -rf $(srcdir)/$$path .libs/$$path; done
 
-examples/java/test_exception_framework:
-	@cp -f $(srcdir)/$@ $@
+bin_SCRIPTS += $(WEBUISCRIPTS)
 
 
 # Targets for generating the protocol buffer code we generate the C++,
@@ -266,15 +278,15 @@ if HAS_JAVA
                    java/jni/org_apache_mesos_Log.h
 
 java/jni/org_apache_mesos_MesosSchedulerDriver.h: $(MESOS_JAR)
-	$(JAVA_HOME)/bin/javah -d java/jni -classpath                         \
+	@$(JAVA_HOME)/bin/javah -d java/jni -classpath                        \
           $(PROTOBUF_JAR):java/classes org.apache.mesos.MesosSchedulerDriver
 
 java/jni/org_apache_mesos_MesosExecutorDriver.h: $(MESOS_JAR)
-	$(JAVA_HOME)/bin/javah -d java/jni -classpath                         \
+	@$(JAVA_HOME)/bin/javah -d java/jni -classpath                        \
           $(PROTOBUF_JAR):java/classes org.apache.mesos.MesosExecutorDriver
 
 java/jni/org_apache_mesos_Log.h: $(MESOS_JAR)
-	$(JAVA_HOME)/bin/javah -d java/jni -classpath                         \
+	@$(JAVA_HOME)/bin/javah -d java/jni -classpath                        \
           $(PROTOBUF_JAR):java/classes org.apache.mesos.Log
 endif
 
@@ -301,22 +313,22 @@ endif
 
 # TODO(*): Build standalone replicated log library and jar file.
 
-all-local: $(MESOS_JAR) $(PYTHON_EGG)
+all-local: $(PYTHON_EGG)
 
-check_PROGRAMS += test-scheduler
-test_scheduler_SOURCES = examples/test_scheduler.cpp
-test_scheduler_CPPFLAGS = $(libmesos_la_CPPFLAGS)
-test_scheduler_LDADD = $(PTHREAD_LIBS) libmesos.la
+check_PROGRAMS += test-framework
+test_framework_SOURCES = examples/test_framework.cpp
+test_framework_CPPFLAGS = $(libmesos_la_CPPFLAGS)
+test_framework_LDADD = $(PTHREAD_LIBS) libmesos.la
 
 check_PROGRAMS += test-executor
 test_executor_SOURCES = examples/test_executor.cpp
 test_executor_CPPFLAGS = $(libmesos_la_CPPFLAGS)
 test_executor_LDADD = $(PTHREAD_LIBS) libmesos.la
 
-check_PROGRAMS += long-lived-scheduler
-long_lived_scheduler_SOURCES = examples/long_lived_scheduler.cpp
-long_lived_scheduler_CPPFLAGS = $(libmesos_la_CPPFLAGS)
-long_lived_scheduler_LDADD = $(PTHREAD_LIBS) libmesos.la
+check_PROGRAMS += long-lived-framework
+long_lived_framework_SOURCES = examples/long_lived_framework.cpp
+long_lived_framework_CPPFLAGS = $(libmesos_la_CPPFLAGS)
+long_lived_framework_LDADD = $(PTHREAD_LIBS) libmesos.la
 
 check_PROGRAMS += long-lived-executor
 long_lived_executor_SOURCES = examples/long_lived_executor.cpp
@@ -381,8 +393,12 @@ mesos_tests_CPPFLAGS = -DROOT_DIR=\"$(abs_top_srcdir)\"                 \
                        -I$(top_srcdir)/$(GMOCK)/include                 \
                        $(libmesos_la_CPPFLAGS)
 
+mesos_tests_CXXFLAGS = -g2 $(AM_CXXFLAGS)
+
 mesos_tests_LDADD = $(PTHREAD_LIBS) $(top_builddir)/.libs/libgmock.la	\
                     libmesos.la
+
+mesos_tests_DEPENDENCIES = # Empty definition to allow += below.
 
 if HAS_JAVA
   mesos_tests_SOURCES += tests/zookeeper_server.cpp		\
@@ -395,12 +411,49 @@ if HAS_JAVA
 
   mesos_tests_LDFLAGS = $(JAVA_LDFLAGS) $(AM_LDFLAGS)
 
-  # TODO(benh): Figure out how to build the Java examples independently.
-  mesos_tests_DEPENDENCIES = $(EXAMPLES_JAR)
+  # TODO(benh): Consider building the Java examples independently.
+  mesos_tests_DEPENDENCIES += $(EXAMPLES_JAR)
 endif
 
+# We need to copy the examples scripts to run the tests.
 
-# TODO(benh): Get external (i.e., script based) tests working.
+EXAMPLESSCRIPTS = examples/java/test-framework				\
+                  examples/java/test-executor				\
+                  examples/java/test-exception-framework		\
+                  examples/java/test-multiple-executors-framework	\
+                  examples/python/test_framework.py			\
+                  examples/python/test-framework			\
+                  examples/python/test_executor.py			\
+                  examples/python/test-executor
+
+mesos_tests_DEPENDENCIES += COPYEXAMPLESSCRIPTS
+
+COPYEXAMPLESSCRIPTS:
+	test $(srcdir) == $(builddir) ||	\
+	for path in $(EXAMPLESSCRIPTS); do	\
+          mkdir -p `dirname $$path`;		\
+          cp -f $(srcdir)/$$path $$path; done
+
+# We also need to copy the external scripts to run the tests.
+
+EXTERNALSCRIPTS =						\
+  tests/external/LxcIsolation/HoldMoreMemThanRequested.sh	\
+  tests/external/LxcIsolation/ScaleUpAndDown.sh			\
+  tests/external/LxcIsolation/TwoSeparateTasks.sh		\
+  tests/external/LxcIsolation/run_scheduled_memhog_test.sh	\
+  tests/external/SampleFrameworks/CppFramework.sh		\
+  tests/external/SampleFrameworks/JavaExceptionFramework.sh	\
+  tests/external/SampleFrameworks/JavaFramework.sh		\
+  tests/external/SampleFrameworks/PythonFramework.sh		\
+  tests/external/KillTree/KillTreeTest.sh
+
+mesos_tests_DEPENDENCIES += COPYEXTERNALSCRIPTS
+
+COPYEXTERNALSCRIPTS:
+	test $(srcdir) == $(builddir) ||	\
+	for path in $(EXTERNALSCRIPTS); do	\
+          mkdir -p `dirname $$path`;		\
+          cp -f $(srcdir)/$$path $$path; done
 
 
 TESTS += mesos-tests

@@ -153,7 +153,7 @@ int main(int argc, char** argv)
   // Find this executable's directory to locate executor
   char buf[4096];
   realpath(dirname(argv[0]), buf);
-  string uri = string(buf) + "/cpp-test-executor";
+  string uri = string(buf) + "/test-executor";
   // Run a Mesos scheduler
   MyScheduler sched;
 

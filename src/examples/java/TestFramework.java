@@ -117,7 +117,7 @@ public class TestFramework {
     } else {
       ExecutorInfo executorInfo;
 
-      File file = new File("./test_executor");
+      File file = new File("./test-executor");
       executorInfo = ExecutorInfo.newBuilder()
                        .setExecutorId(ExecutorID.newBuilder().setValue("default").build())
                        .setUri(file.getCanonicalPath())

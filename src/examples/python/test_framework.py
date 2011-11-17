@@ -77,7 +77,7 @@ if __name__ == "__main__":
   print "Connecting to %s" % sys.argv[1]
 
   frameworkDir = os.path.abspath(os.path.dirname(sys.argv[0]))
-  execPath = os.path.join(frameworkDir, "test_executor")
+  execPath = os.path.join(frameworkDir, "test-executor")
   execInfo = mesos_pb2.ExecutorInfo()
   execInfo.executor_id.value = "default"
   execInfo.uri = execPath

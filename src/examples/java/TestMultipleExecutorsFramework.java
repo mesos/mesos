@@ -53,7 +53,7 @@ public class TestMultipleExecutorsFramework {
     public void resourceOffers(SchedulerDriver driver,
                                List<Offer> offers) {
       try {
-        File file = new File("./test_executor");
+        File file = new File("./test-executor");
 
         for (Offer offer : offers) {
           List<TaskDescription> tasks = new ArrayList<TaskDescription>();
@@ -178,7 +178,7 @@ public class TestMultipleExecutorsFramework {
     } else {
       ExecutorInfo executorInfo;
 
-      File file = new File("./test_executor");
+      File file = new File("./test-executor");
       executorInfo = ExecutorInfo.newBuilder()
                        .setExecutorId(ExecutorID.newBuilder().setValue("default").build())
                        .setUri(file.getCanonicalPath())

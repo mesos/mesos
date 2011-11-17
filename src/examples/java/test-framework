@@ -1,0 +1,17 @@
+#!/bin/sh
+
+cd `dirname $0`
+
+MESOS_HOME=`cd ../../..; pwd`
+
+# This script should only get used after building, which means
+# both protobuf.jar and mesos.jar should exist.
+
+test -e $MESOS_HOME/protobuf.jar || \
+  ( echo "Can't find protobuf.jar" && exit 1 )
+
+test -e $MESOS_HOME/src/mesos.jar || \
+  ( echo "Can't find mesos.jar" && exit 1 )
+
+exec java -cp .:$MESOS_HOME/protobuf.jar:$MESOS_HOME/src/mesos.jar \
+  -Djava.library.path=$MESOS_HOME/src/.libs TestFramework $@
