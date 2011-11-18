@@ -123,6 +123,7 @@ AC_SUBST(OS_NAME)
 
 JAVA_HOME=""
 JAVA_LDFLAGS=""
+JAVA_HEADERS=""
 HAS_JAVA="0"
 AC_ARG_WITH([java-home],
   AC_HELP_STRING([--with-java-home=DIR],
@@ -142,7 +143,7 @@ AC_ARG_WITH([java-home],
                         JAVA_LDFLAGS="-framework JavaVM"
                       elif test "$OS_NAME" = "linux"; then
                         # TODO(John Sirois): Select directory based on arch.
-                        JAVA_LDFLAGS="-L$(JAVA_HOME)/jre/lib/amd64/server -ljvm"
+                        JAVA_LDFLAGS="-L$JAVA_HOME/jre/lib/amd64/server -ljvm"
                       fi
                       ;;
 	          esac],
@@ -152,9 +153,6 @@ AC_SUBST(JAVA_LDFLAGS)
 AC_SUBST(HAS_JAVA)
 AM_CONDITIONAL([HAS_JAVA], [test x$has_java = xtrue])
 
-
-# TODO(benh): Make the default here be -I$JAVA_HOME/include".
-JAVA_HEADERS=""
 AC_ARG_WITH([java-headers],
   AC_HELP_STRING([--with-java-headers=DIR],
                  [find Java headers in DIR (if different from JAVA_HOME/include)]),
