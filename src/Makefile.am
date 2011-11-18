@@ -132,10 +132,10 @@ libmesos_la_LIBADD = libbuild.la					  \
                      liblog.la     				          \
 		     libmesos_proto.la
 
-libmesos_la_LIBADD += $(top_builddir)/$(PROTOBUF)/src/.libs/libprotobuf.a
-libmesos_la_LIBADD += $(top_builddir)/$(GLOG)/.libs/libglog.a
+libmesos_la_LIBADD += $(top_builddir)/$(PROTOBUF)/src/.libs/libprotobuf.la
+libmesos_la_LIBADD += $(top_builddir)/$(GLOG)/.libs/libglog.la
 libmesos_la_LIBADD += $(top_builddir)/$(LIBPROCESS)/libprocess.a
-libmesos_la_LIBADD += $(top_builddir)/$(LIBEV)/.libs/libev.a
+libmesos_la_LIBADD += $(top_builddir)/$(LIBEV)/.libs/libev.la
 
 libmesos_la_LDFLAGS = -version-info 0:0 -shared
 
