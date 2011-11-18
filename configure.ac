@@ -59,15 +59,12 @@ dnl ac_configure_args="$ac_configure_args --enable-shared=no --with-pic"
 # that we can produce a final shared library which includes everything
 # necessary (this is a well recognized hack for passing configure
 # arguments to subdirs).
-old_ac_configure_args="$ac_configure_args"
 ac_configure_args="$ac_configure_args --enable-shared=no"
 
 AC_CONFIG_SUBDIRS([third_party/protobuf-2.3.0])
 AC_CONFIG_SUBDIRS([third_party/glog-0.3.1])
 AC_CONFIG_SUBDIRS([third_party/zookeeper-3.3.1/src/c])
 AC_CONFIG_SUBDIRS([third_party/libprocess])
-
-ac_configure_args="$old_ac_configure_args"
 
 AC_CONFIG_FILES([Makefile])
 AC_CONFIG_FILES([src/Makefile])
