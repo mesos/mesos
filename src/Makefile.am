@@ -130,16 +130,19 @@ libmesos_la_CXXFLAGS = -O2 -g2 $(AM_CXXFLAGS)
 # TODO(benh): Make libprocess be autotoolized too!
 libmesos_la_LIBADD = libbuild.la					  \
                      liblog.la     				          \
-                     $(top_builddir)/$(PROTOBUF)/src/.libs/libprotobuf.la \
-                     $(top_builddir)/$(GLOG)/.libs/libglog.la		  \
-                     $(top_builddir)/$(LIBPROCESS)/libprocess.a 	  \
-                     $(top_builddir)/$(LIBEV)/.libs/libev.la
+		     libmesos_proto.la
 
+libmesos_la_LIBADD += $(top_builddir)/$(PROTOBUF)/src/.libs/libprotobuf.a
+libmesos_la_LIBADD += $(top_builddir)/$(GLOG)/.libs/libglog.a
+libmesos_la_LIBADD += $(top_builddir)/$(LIBPROCESS)/libprocess.a
+libmesos_la_LIBADD += $(top_builddir)/$(LIBEV)/.libs/libev.a
+
+libmesos_la_LDFLAGS = -version-info 0:0 -shared
 
 if WITH_INCLUDED_ZOOKEEPER
   libmesos_la_CPPFLAGS += -I$(top_srcdir)/$(ZOOKEEPER)/include \
                           -I$(top_srcdir)/$(ZOOKEEPER)/generated
-  libmesos_la_LIBADD += $(top_builddir)/$(ZOOKEEPER)/.libs/libzookeeper_mt.la
+  libmesos_la_LIBADD += $(top_builddir)/$(ZOOKEEPER)/.libs/libzookeeper_mt.a
 endif
 
 
@@ -191,34 +194,57 @@ COPYWEBUISCRIPTS:
 
 bin_SCRIPTS += $(WEBUISCRIPTS)
 
-
 # Targets for generating the protocol buffer code we generate the C++,
 # Java, and Python code even if we aren't building Java or Python.
-mesos.pb.cc: $(top_srcdir)/include/mesos/mesos.proto
-	@mkdir -p java/generated
-	@mkdir -p python
+#
+# TODO(charles): These targets need to include _all_ built files.
+# TODO(charles): do protobuf header files belong in sources lists for libraries
+# below?
+
+PROTOS_JAVA_GEN = java/generated/org/apache/mesos/Protos.java
+
+MESOS_PROTO_GEN_FILES = mesos.pb.cc mesos.pb.h \
+			java/generated/org/apache/mesos/Protos.java \
+			python/mesos_pb2.py
+
+BUILT_SOURCES += $(MESOS_PROTO_GEN_FILES)
+
+# TODO(charles): make general rule for running protoc
+
+$(MESOS_PROTO_GEN_FILES): $(top_srcdir)/include/mesos/mesos.proto
 	$(PROTOC) -I$(top_srcdir)/include/mesos                  \
             --cpp_out=.                                          \
             --java_out=java/generated                            \
             --python_out=python                                  \
             $(top_srcdir)/include/mesos/mesos.proto
 
-messages/messages.pb.cc: $(srcdir)/messages/messages.proto
+# Convenience library so other convenience libraries can depend on mesos.proto
+noinst_LTLIBRARIES += libmesos_proto.la
+
+libmesos_proto_la_SOURCES = $(top_srcdir)/include/mesos/mesos.proto \
+			    mesos.pb.h \
+			    $(top_srcdir)/includes/mesos/mesos.hpp
+nodist_libmesos_proto_la_SOURCES = mesos.pb.cc
+libmesos_proto_la_CPPFLAGS = $(libmesos_la_CPPFLAGS)
+
+MESSAGES_PROTO_GEN_FILES = messages/messages.pb.cc messages/messages.pb.h
+BUILT_SOURCES += $(MESSAGES_PROTO_GEN_FILES)
+
+$(MESSAGES_PROTO_GEN_FILES): $(srcdir)/messages/messages.proto
 	@mkdir -p messages
 	$(PROTOC) -I$(srcdir)/messages -I$(top_srcdir)/include/mesos \
             --cpp_out=messages $(srcdir)/messages/messages.proto
 
-messages/log.pb.cc: $(srcdir)/messages/log.proto
+LOG_PROTO_GEN_FILES = messages/log.pb.cc messages/log.pb.h
+BUILT_SOURCES += $(LOG_PROTO_GEN_FILES)
+
+$(LOG_PROTO_GEN_FILES): $(srcdir)/messages/log.proto
 	@mkdir -p messages
 	$(PROTOC) -I$(srcdir)/messages -I$(top_srcdir)/include/mesos \
             --cpp_out=messages $(srcdir)/messages/log.proto
 
-CLEANFILES += mesos.pb.h mesos.pb.cc messages/messages.pb.h	\
-              messages/messages.pb.cc messages/log.pb.h		\
-              messages/log.pb.cc				\
-              java/generated/org/apache/mesos/*.java            \
-              python/mesos_pb2.py
-
+CLEANFILES += $(MESOS_PROTO_GEN_FILES) $(MESSAGES_PROTO_GEN_FILES) \
+	      $(LOG_PROTO_GEN_FILES)
 
 # Binaries.
 bin_PROGRAMS += mesos-master
@@ -263,6 +289,7 @@ mesos_mesos_LDADD = $(PTHREAD_LIBS) libmesos.la
 # Protocol buffers JAR for Java.
 PROTOBUF_JAR = $(top_builddir)/protobuf.jar
 
+# TODO(charles): Specify dependencies for the jar.
 $(PROTOBUF_JAR):
 if HAS_JAVA
 	@mkdir -p $(top_builddir)/$(PROTOBUF)/java/src/main/java
@@ -304,10 +331,14 @@ if HAS_JAVA
 	               java/jni/org_apache_mesos_MesosExecutorDriver.cpp  \
 	               java/jni/org_apache_mesos_Log.cpp                  \
                        jvm/jvm.cpp
+  libjava_la_SOURCES += java/jni/convert.hpp java/jni/construct.hpp \
+		       	jvm/jvm.hpp
   libjava_la_CPPFLAGS = -I$(srcdir)/java/jni -Ijava/jni                 \
                         -I$(JAVA_HOME)/include                          \
                         -I$(JAVA_HOME)/include/$(OS_NAME)               \
                         -I$(JAVA_HEADERS) $(libmesos_la_CPPFLAGS)
+  libjava_la_DEPENDENCIES = libmesos_proto.la
+  libjava_la_LIBADD = $(JAVA_LDFLAGS)
   libmesos_la_LIBADD += libjava.la
 
   # We need to generate the JNI header files before we build the
