@@ -308,19 +308,21 @@ CLEANFILES += $(PROTOBUF_JAR)
 # Java Mesos JAR.
 MESOS_JAR = $(top_builddir)/src/mesos.jar
 
-$(MESOS_JAR): $(PROTOBUF_JAR) $(srcdir)/java/src/org/apache/mesos/*.java mesos.pb.cc
+MESOS_JAR_SRCDIR = $(srcdir)/java/src/org/apache/mesos
+MESOS_JAR_SRC = $(MESOS_JAR_SRCDIR)/*.java $(PROTOS_JAVA_GEN)
+
+EXTRA_DIST += $(MESOS_JAR_SRCDIR)/*.java
+
+$(MESOS_JAR): $(PROTOBUF_JAR) $(MESOS_JAR_SRC)
 if HAS_JAVA
 	@rm -f java/classes/org/apache/mesos/*
 	@mkdir -p java/classes/org/apache/mesos
 	$(JAVA_HOME)/bin/javac -cp $(PROTOBUF_JAR) -sourcepath java/generated \
-          -d java/classes java/generated/org/apache/mesos/*.java
-	$(JAVA_HOME)/bin/javac -cp $(PROTOBUF_JAR):java/classes               \
-          -sourcepath $(srcdir)/java/src -d java/classes                      \
-          $(srcdir)/java/src/org/apache/mesos/*.java
+          -d java/classes $(MESOS_JAR_SRC)
 	$(JAVA_HOME)/bin/jar cf $@ -C java/classes org
 endif
 
-CLEANFILES += java/classes/org/apache/mesos/*.java $(MESOS_JAR)
+CLEANFILES += java/classes $(MESOS_JAR)
 
 
 # Support library for Java bindings.
