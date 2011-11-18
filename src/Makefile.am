@@ -44,6 +44,7 @@ check_PROGRAMS =
 BUILT_SOURCES =
 TESTS =
 CLEANFILES =
+EXTRA_DIST =
 
 
 # TODO(benh): Remove $(PTHREAD_LIBS) from each LDADD.
@@ -51,9 +52,11 @@ CLEANFILES =
 # Our library!
 lib_LTLIBRARIES += libmesos.la
 
-libmesos_la_SOURCES = mesos.pb.cc messages/messages.pb.cc		\
-                      messages/log.pb.cc sched/sched.cpp		\
-                      local/local.cpp master/master.cpp			\
+nodist_libmesos_la_SOURCES = messages/messages.pb.cc        \
+			     messages/log.pb.cc \
+			     messages/messages.pb.h messages/log.pb.h
+
+libmesos_la_SOURCES = sched/sched.cpp local/local.cpp master/master.cpp \
                       master/http.cpp master/slaves_manager.cpp		\
                       master/frameworks_manager.cpp			\
                       master/allocator_factory.cpp			\
@@ -67,6 +70,52 @@ libmesos_la_SOURCES = mesos.pb.cc messages/messages.pb.cc		\
                       common/utils.cpp common/date_utils.cpp		\
                       common/resources.cpp zookeeper/zookeeper.cpp	\
                       zookeeper/authentication.cpp zookeeper/group.cpp
+
+if OS_LINUX
+libmesos_la_SOURCES += slave/lxc_isolation_module.cpp
+else
+EXTRA_DIST += slave/lxc_isolation_module.cpp
+endif
+
+EXTRA_DIST += slave/solaris_project_isolation_module.cpp
+
+libmesos_la_SOURCES += common/build.hpp common/date_utils.hpp		\
+		       common/factory.hpp common/fatal.hpp 		\
+		       common/foreach.hpp common/hashmap.hpp 		\
+		       common/hashset.hpp common/json.hpp 		\
+		       common/lock.hpp common/logging.hpp		\
+		       common/lambda.hpp common/option.hpp		\
+		       common/resources.hpp common/result.hpp 		\
+		       common/multihashmap.hpp common/process_utils.hpp \
+		       common/seconds.hpp common/try.hpp 		\
+		       common/type_utils.hpp common/units.hpp 		\
+		       common/uuid.hpp common/strings.hpp		\
+		       configurator/configuration.hpp			\
+		       configurator/configurator.hpp			\
+		       configurator/option.hpp detector/detector.hpp	\
+		       detector/url_processor.hpp launcher/launcher.hpp \
+		       local/local.hpp log/cache.hpp log/coordinator.hpp\
+		       log/replica.hpp log/log.hpp log/network.hpp 	\
+		       master/allocator.hpp master/allocator_factory.hpp\
+		       master/constants.hpp				\
+		       master/frameworks_manager.hpp			\
+		       master/http.hpp master/master.hpp 		\
+		       master/simple_allocator.hpp 			\
+		       master/slaves_manager.hpp master/webui.hpp	\
+		       messages/log.hpp messages/messages.hpp		\
+		       slave/constants.hpp slave/http.hpp		\
+		       slave/isolation_module.hpp			\
+		       slave/isolation_module_factory.hpp		\
+		       slave/lxc_isolation_module.hpp			\
+		       slave/process_based_isolation_module.hpp		\
+		       slave/reaper.hpp slave/slave.hpp			\
+		       slave/solaris_project_isolation_module.hpp	\
+		       slave/webui.hpp tests/external_test.hpp		\
+		       tests/base_zookeeper_test.hpp tests/jvm.hpp	\
+		       tests/utils.hpp tests/zookeeper_server.hpp	\
+		       zookeeper/authentication.hpp zookeeper/group.hpp \
+		       zookeeper/watcher.hpp zookeeper/zookeeper.hpp	\
+                       jvm/jvm.hpp
 
 libmesos_la_CPPFLAGS = -I$(top_srcdir)/include                          \
                        -I$(top_srcdir)/$(BOOST)                         \

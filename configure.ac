@@ -120,6 +120,7 @@ case "${target_os}" in
 # Export OS name to Makefiles
 AC_SUBST(OS_NAME)
 
+AM_CONDITIONAL([OS_LINUX], [test x$OS_NAME = xlinux])
 
 JAVA_HOME=""
 JAVA_LDFLAGS=""
