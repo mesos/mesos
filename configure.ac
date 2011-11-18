@@ -57,9 +57,17 @@ dnl ac_configure_args="$ac_configure_args --enable-shared=no --with-pic"
 
 # Force all third_party libraries to only build static libraries so
 # that we can produce a final shared library which includes everything
-# necessary (this is a well recognized hack for passing configure
-# arguments to subdirs).
-ac_configure_args="$ac_configure_args --enable-shared=no"
+# necessary.
+orig_ac_configure_args="$ac_configure_args"
+new_ac_configure_args="$ac_configure_args --enable-shared=no"
+ac_configure_args="$new_ac_configure_args"
+
+# Make sure config.status doesn't get the changed configure arguments, so it
+# can rerun configure in the root directory correctly. This is necessary for
+# Makefile rules which would regenerate (e.g.) 'Makefile' after configure.ac
+# was updated to work correctly.
+AC_CONFIG_COMMANDS_PRE([ac_configure_args="$orig_ac_configure_args"])
+AC_CONFIG_COMMANDS_POST([ac_configure_args="$new_ac_configure_args"])
 
 AC_CONFIG_SUBDIRS([third_party/protobuf-2.3.0])
 AC_CONFIG_SUBDIRS([third_party/glog-0.3.1])
