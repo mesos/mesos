@@ -140,8 +140,16 @@ AC_ARG_WITH([java-home],
                       if test "$OS_NAME" = "darwin"; then
                         JAVA_LDFLAGS="-framework JavaVM"
                       elif test "$OS_NAME" = "linux"; then
-                        # TODO(John Sirois): Select directory based on arch.
-                        JAVA_LDFLAGS="-L$JAVA_HOME/jre/lib/amd64/server -ljvm"
+                        JAVA_LDFLAGS=""
+                        for arch in amd64 i386; do
+                          if test -e "$JAVA_HOME/jre/lib/$arch"; then
+                            JAVA_LDFLAGS="-L$JAVA_HOME/jre/lib/$arch/server -ljvm"
+                            break;
+                          fi
+                        done
+                      fi
+                      if test -z "$JAVA_LDFLAGS"; then
+                        AC_MSG_ERROR([Could not find -ljvm. (Bad --with-java-home or missing support for your architecture?)])
                       fi
                       ;;
 	          esac],
