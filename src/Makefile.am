@@ -29,6 +29,11 @@ ZOOKEEPER = third_party/zookeeper-3.3.1/src/c
 LIBPROCESS = third_party/libprocess
 LIBEV = $(LIBPROCESS)/third_party/libev-3.8
 
+webuidir = $(pkgdatadir)
+
+AM_CPPFLAGS = -DMESOS_WEBUIDIR=\"$(webuidir)\" \
+	      -DMESOS_LIBEXECDIR=\"$(pkglibexecdir)\"
+
 # Used for building Python eggs.
 SETUPTOOLS = third_party/distribute-0.6.19/distribute-0.6.19-py2.6.egg
 
@@ -38,14 +43,16 @@ PROTOC = $(top_builddir)/$(PROTOBUF)/src/protoc
 # Initialize variables here so we can use += operator everywhere else.
 lib_LTLIBRARIES =
 noinst_LTLIBRARIES =
+sbin_PROGRAMS =
 bin_PROGRAMS =
-bin_SCRIPTS =
+pkglibexec_PROGRAMS =
+webui_SCRIPTS =
+nobase_dist_webui_SCRIPTS =
 check_PROGRAMS =
 BUILT_SOURCES =
 TESTS =
 CLEANFILES =
 EXTRA_DIST =
-
 
 # TODO(benh): Remove $(PTHREAD_LIBS) from each LDADD.
 
@@ -192,7 +199,7 @@ COPYWEBUISCRIPTS:
           mkdir -p `dirname .libs/$$path`;		\
           cp -rf $(srcdir)/$$path .libs/$$path; done
 
-bin_SCRIPTS += $(WEBUISCRIPTS)
+nobase_dist_webui_SCRIPTS += $(WEBUISCRIPTS)
 
 # Targets for generating the protocol buffer code we generate the C++,
 # Java, and Python code even if we aren't building Java or Python.
@@ -247,13 +254,13 @@ CLEANFILES += $(MESOS_PROTO_GEN_FILES) $(MESSAGES_PROTO_GEN_FILES) \
 	      $(LOG_PROTO_GEN_FILES)
 
 # Binaries.
-bin_PROGRAMS += mesos-master
+sbin_PROGRAMS += mesos-master
 mesos_master_SOURCES = master/main.cpp
 mesos_master_CPPFLAGS = $(libmesos_la_CPPFLAGS)
 mesos_master_LDFLAGS = $(WEBUI_LDFLAGS) $(AM_LDFLAGS)
 mesos_master_LDADD = $(PTHREAD_LIBS) libwebui.la libmesos.la
 
-bin_PROGRAMS += mesos-slave
+sbin_PROGRAMS += mesos-slave
 mesos_slave_SOURCES = slave/main.cpp
 mesos_slave_CPPFLAGS = $(libmesos_la_CPPFLAGS)
 mesos_slave_LDFLAGS = $(WEBUI_LDFLAGS) $(AM_LDFLAGS)
@@ -264,7 +271,7 @@ mesos_local_SOURCES = local/main.cpp
 mesos_local_CPPFLAGS = $(libmesos_la_CPPFLAGS)
 mesos_local_LDADD = $(PTHREAD_LIBS) libmesos.la
 
-bin_PROGRAMS += mesos-launcher
+pkglibexec_PROGRAMS += mesos-launcher
 mesos_launcher_SOURCES = launcher/main.cpp launcher/launcher.cpp
 mesos_launcher_CPPFLAGS = $(libmesos_la_CPPFLAGS)
 mesos_launcher_LDADD = $(PTHREAD_LIBS) libmesos.la
