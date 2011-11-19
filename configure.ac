@@ -130,7 +130,17 @@ AM_CONDITIONAL([OS_LINUX], [test x$OS_NAME = xlinux])
 JAVA_HOME=""
 JAVA_LDFLAGS=""
 JAVA_HEADERS=""
-HAS_JAVA="0"
+JAVA_REQUIRED=no
+JAVA_REQUESTED=yes
+
+AC_ARG_ENABLE([java], AC_HELP_STRING([--enable-java=yes],
+                                     [Build Java bindings (default: enabled)]),
+              if test x$enableval = xyes; then
+                JAVA_REQUIRED=yes
+              elif test x$enableval = xno; then
+                JAVA_REQUESTED=no
+              fi,[])
+
 AC_ARG_WITH([java-home],
   AC_HELP_STRING([--with-java-home=DIR],
                  [find Java Development Kit in DIR]),
@@ -140,32 +150,10 @@ AC_ARG_WITH([java-home],
 *** --with-java-home requires an argument]) ;;
 		    *)
                       JAVA_HOME="$withval"
-                      HAS_JAVA="1"
-                      has_java=true
-                      if test -z "$JAVA_HEADERS"; then
-                        JAVA_HEADERS="$JAVA_HOME/include/$OS_NAME"
-                      fi
-                      if test "$OS_NAME" = "darwin"; then
-                        JAVA_LDFLAGS="-framework JavaVM"
-                      elif test "$OS_NAME" = "linux"; then
-                        JAVA_LDFLAGS=""
-                        for arch in amd64 i386; do
-                          if test -e "$JAVA_HOME/jre/lib/$arch"; then
-                            JAVA_LDFLAGS="-L$JAVA_HOME/jre/lib/$arch/server -ljvm"
-                            break;
-                          fi
-                        done
-                      fi
-                      if test -z "$JAVA_LDFLAGS"; then
-                        AC_MSG_ERROR([Could not find -ljvm. (Bad --with-java-home or missing support for your architecture?)])
-                      fi
+                      JAVA_REQUIRED=yes
                       ;;
 	          esac],
 	         [])
-AC_SUBST(JAVA_HOME)
-AC_SUBST(JAVA_LDFLAGS)
-AC_SUBST(HAS_JAVA)
-AM_CONDITIONAL([HAS_JAVA], [test x$has_java = xtrue])
 
 AC_ARG_WITH([java-headers],
   AC_HELP_STRING([--with-java-headers=DIR],
@@ -176,10 +164,87 @@ AC_ARG_WITH([java-headers],
 *** --with-java-headers requires an argument]) ;;
 		    *)
                       JAVA_HEADERS="$withval"
+                      JAVA_REQUIRED=yes
                       ;;
 	          esac],
 	         [])
 AC_SUBST(JAVA_HEADERS)
+
+if test x$JAVA_REQUESTED = xyes; then
+  if test -z "$JAVA_HOME"; then
+    # try to run java to find value for JAVA_HOME
+    AC_PATH_PROG(JAVAC_ON_PATH, javac, no)
+    AC_PATH_PROG(JAVA_ON_PATH, java, no)
+    if test $JAVA_ON_PATH != no -a $JAVAC_ON_PATH != no; then
+      AC_MSG_CHECKING([value of java.home Java system property])
+      cat <<'EOF' >conftest.java [
+public class conftest {
+  public static void main(String[] args) {
+    System.out.print(System.getProperty("java.home"));
+  }
+}]
+EOF
+      if $JAVAC_ON_PATH conftest.java; then
+        if JAVA_HOME_PROP="`$JAVA_ON_PATH -cp . conftest`"; then
+          # do nothing
+          true
+        else
+          # assume failure means we didn't find it.
+          JAVA_HOME_PROP=""
+        fi
+      else
+        JAVA_HOME_PROP=""
+      fi
+      rm -f conftest.java conftest.class
+      if test -z "$JAVA_HOME_PROP"; then
+        AC_MSG_RESULT([not found])
+      else
+        AC_MSG_RESULT($JAVA_HOME_PROP)
+      fi
+      possible_javac_locations="$JAVA_HOME_PROP/bin:`echo "$JAVA_HOME_PROP" | sed -e 's!/jre!!'`/bin"
+      AC_PATH_PROG(JAVAC_IN_JAVA_HOME,javac,no,$possible_javac_locations)
+      if test "x$JAVAC_IN_JAVA_HOME" != xno; then
+        JAVA_HOME="`echo "$JAVAC_IN_JAVA_HOME" | sed -e 's/\/bin\/javac$//'`"
+      fi
+      if test -z "$JAVA_HOME" -a x$JAVA_REQUIRED = xyes; then
+        AC_MSG_ERROR([Could not guess JAVA_HOME.])
+      else
+        AC_MSG_NOTICE(Using JAVA_HOME=$JAVA_HOME)
+      fi
+    fi
+  fi
+else
+  # disable java
+  JAVA_HOME=
+fi
+
+has_java=false
+HAS_JAVA=0
+if test -z "$JAVA_HOME"; then
+  has_java=true
+  HAS_JAVA=1
+  if test -z "$JAVA_HEADERS"; then
+    JAVA_HEADERS="$JAVA_HOME/include/$OS_NAME"
+  fi
+  if test "$OS_NAME" = "darwin"; then
+    JAVA_LDFLAGS="-framework JavaVM"
+  elif test "$OS_NAME" = "linux"; then
+    JAVA_LDFLAGS=""
+    for arch in amd64 i386; do
+      if test -e "$JAVA_HOME/jre/lib/$arch"; then
+        JAVA_LDFLAGS="-L$JAVA_HOME/jre/lib/$arch/server -ljvm"
+        break;
+      fi
+    done
+  fi
+  if test -z "$JAVA_LDFLAGS"; then
+    AC_MSG_ERROR([Could not find -ljvm. (Bad --with-java-home or missing support for your architecture?)])
+  fi
+fi
+AC_SUBST(JAVA_HOME)
+AC_SUBST(JAVA_LDFLAGS)
+AC_SUBST(HAS_JAVA)
+AM_CONDITIONAL([HAS_JAVA], [test x$has_java = xtrue])
 
 # TODO(benh): Make sure that JAVA_HEADERS is set iff JAVA_HOME is set.
 
