@@ -59,7 +59,7 @@ dnl ac_configure_args="$ac_configure_args --enable-shared=no --with-pic"
 # that we can produce a final shared library which includes everything
 # necessary.
 orig_ac_configure_args="$ac_configure_args"
-new_ac_configure_args="$ac_configure_args --enable-shared=no"
+new_ac_configure_args="$ac_configure_args --enable-shared=no --with-pic"
 ac_configure_args="$new_ac_configure_args"
 
 # Make sure config.status doesn't get the changed configure arguments, so it
