@@ -19,6 +19,8 @@
 # master/http.cpp and slave/http.cpp.
 AUTOMAKE_OPTIONS = subdir-objects
 
+SUFFIXES = .pb.cc .pb.h .proto
+
 BOOST = third_party/boost-1.37.0
 PROTOBUF = third_party/protobuf-2.3.0
 GLOG = third_party/glog-0.3.1
@@ -39,6 +41,7 @@ SETUPTOOLS = third_party/distribute-0.6.19/distribute-0.6.19-py2.6.egg
 
 # Protocol buffer compiler.
 PROTOC = $(top_builddir)/$(PROTOBUF)/src/protoc
+PROTOCFLAGS = -I$(top_srcdir)/include/mesos -I$(srcdir)
 
 # Initialize variables here so we can use += operator everywhere else.
 lib_LTLIBRARIES =
@@ -210,46 +213,47 @@ nobase_dist_webui_SCRIPTS += $(WEBUISCRIPTS)
 # below?
 
 PROTOS_JAVA_GEN = java/generated/org/apache/mesos/Protos.java
+PROTOS_PYTHON_GEN = python/mesos_pb2.py
 
-MESOS_PROTO_GEN_FILES = mesos.pb.cc mesos.pb.h \
-			java/generated/org/apache/mesos/Protos.java \
-			python/mesos_pb2.py
+MESOS_PROTO_GEN_FILES = mesos.pb.cc \
+			mesos.pb.h \
+			$(PROTOS_JAVA_GEN) \
+			$(PROTOS_PYTHON_GEN)
+
+MESOS_PROTO = $(top_srcdir)/include/mesos/mesos.proto
 
 BUILT_SOURCES += $(MESOS_PROTO_GEN_FILES)
 
-# TODO(charles): make general rule for running protoc
+%.pb.cc %.pb.h: $(top_srcdir)/include/mesos/%.proto
+	$(MKDIR_P) $(@D)
+	$(PROTOC) $(PROTOCFLAGS) --cpp_out=. $^
 
-$(MESOS_PROTO_GEN_FILES): $(top_srcdir)/include/mesos/mesos.proto
-	$(PROTOC) -I$(top_srcdir)/include/mesos                  \
-            --cpp_out=.                                          \
-            --java_out=java/generated                            \
-            --python_out=python                                  \
-            $(top_srcdir)/include/mesos/mesos.proto
+%.pb.cc %.pb.h: %.proto
+	$(MKDIR_P) $(@D)
+	$(PROTOC) $(PROTOCFLAGS) --cpp_out=. $^
+
+java/generated/org/apache/mesos/Protos.java: $(MESOS_PROTO)
+
+$(PROTOS_JAVA_GEN): $(MESOS_PROTO)
+	$(MKDIR_P)  $(@D)
+	$(PROTOC) $(PROTOCFLAGS) --java_out=java/generated $^
+
+$(PROTOS_PYTHON_GEN): $(MESOS_PROTO)
+	$(MKDIR_P) $(@D)
+	$(PROTOC) $(PROTOCFLAGS) --python_out=python $^
 
 # Convenience library so other convenience libraries can depend on mesos.proto
 noinst_LTLIBRARIES += libmesos_proto.la
 
-libmesos_proto_la_SOURCES = $(top_srcdir)/include/mesos/mesos.proto \
-			    mesos.pb.h \
-			    $(top_srcdir)/includes/mesos/mesos.hpp
+libmesos_proto_la_SOURCES = mesos.pb.h $(MESOS_PROTO)
 nodist_libmesos_proto_la_SOURCES = mesos.pb.cc
 libmesos_proto_la_CPPFLAGS = $(libmesos_la_CPPFLAGS)
 
 MESSAGES_PROTO_GEN_FILES = messages/messages.pb.cc messages/messages.pb.h
 BUILT_SOURCES += $(MESSAGES_PROTO_GEN_FILES)
 
-$(MESSAGES_PROTO_GEN_FILES): $(srcdir)/messages/messages.proto
-	@mkdir -p messages
-	$(PROTOC) -I$(srcdir)/messages -I$(top_srcdir)/include/mesos \
-            --cpp_out=messages $(srcdir)/messages/messages.proto
-
 LOG_PROTO_GEN_FILES = messages/log.pb.cc messages/log.pb.h
 BUILT_SOURCES += $(LOG_PROTO_GEN_FILES)
-
-$(LOG_PROTO_GEN_FILES): $(srcdir)/messages/log.proto
-	@mkdir -p messages
-	$(PROTOC) -I$(srcdir)/messages -I$(top_srcdir)/include/mesos \
-            --cpp_out=messages $(srcdir)/messages/log.proto
 
 CLEANFILES += $(MESOS_PROTO_GEN_FILES) $(MESSAGES_PROTO_GEN_FILES) \
 	      $(LOG_PROTO_GEN_FILES)
