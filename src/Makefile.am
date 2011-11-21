@@ -182,7 +182,7 @@ libwebui_la_SOURCES = master/webui.cpp slave/webui.cpp common/webui_utils.cpp
 libwebui_la_SOURCES += master/webui.hpp slave/webui.hpp common/webui_utils.hpp
 libwebui_la_CPPFLAGS = $(WEBUI_CPPFLAGS) $(libmesos_la_CPPFLAGS)
 
-WEBUISCRIPTS = webui/bottle-0.8.3			\
+WEBUISCRIPTS = webui/bottle-0.8.3/bottle.py		\
                webui/common/webui_lib.py		\
                webui/master/framework.tpl		\
                webui/master/index.tpl			\
