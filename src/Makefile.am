@@ -366,6 +366,9 @@ CLEANFILES += java/classes $(MESOS_JAR)
 
 # Support library for Java bindings.
 if HAS_JAVA
+  # TODO(Charles Reiss): We really should be building the Java library
+  # with -module, which means it should be a different library than the main
+  # libmesos.so
   noinst_LTLIBRARIES += libjava.la
   libjava_la_SOURCES = java/jni/convert.cpp java/jni/construct.cpp	  \
 	               java/jni/org_apache_mesos_MesosSchedulerDriver.cpp \
