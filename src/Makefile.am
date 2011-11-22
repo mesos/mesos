@@ -71,6 +71,9 @@ libmesos_la_SOURCES =
 libmesos_la_LIBADD = libmesos_pre.la
 
 libmesos_la_LDFLAGS = -version-info 0:0 -shared
+# Since we don't have any sources, we need to tell automake that this is a
+# C++ library
+libmesos_la_LIBTOOLFLAGS = --tag=CXX
 
 # Convenience version of libmesos for building python extension.
 noinst_LTLIBRARIES += libmesos_pre.la

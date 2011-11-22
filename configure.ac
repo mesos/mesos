@@ -32,6 +32,7 @@ AM_SILENT_RULES
 # Initialize libtool.
 LT_PREREQ([2.2])
 LT_INIT
+LT_LANG([C++])
 
 AC_LANG(C++)
 
