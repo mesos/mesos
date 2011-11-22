@@ -48,6 +48,10 @@ libgmock_la_CPPFLAGS = -I$(top_srcdir)/$(GTEST)/include         \
                        -I$(top_srcdir)/$(GTEST)                 \
                        -I$(top_srcdir)/$(GMOCK)
 
+# Since we generate several files in src/ with config.status, make they're
+# regenerated before we recurse into the src directory.
+all-recursive: $(CONFIG_CLEAN_FILES)
+
 # Most of our third party libraries support VPATH builds so we can
 # simply invoke make on them provided they have been configured
 # properly in our configure.ac. Unfortunately, this is not the case
