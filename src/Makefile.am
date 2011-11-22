@@ -479,11 +479,18 @@ memhog_executor_SOURCES = examples/memhog_executor.cpp
 memhog_executor_CPPFLAGS = $(MESOS_CPPFLAGS)
 memhog_executor_LDADD = $(PTHREAD_LIBS) libmesos.la
 
-
 # Build Java examples into their own JAR.
 EXAMPLES_JAR = examples.jar
+JAVA_EXAMPLES_SRC = $(srcdir)/examples/TestExceptionFramework.java \
+		    $(srcdir)/examples/TestExecutor.java \
+		    $(srcdir)/examples/TestFramework.java \
+		    $(srcidr)/examples/TestMultipleExecutorsFramework.java
 
-$(EXAMPLES_JAR): $(srcdir)/examples/java/*.java
+EXTRA_DIST += $(JAVA_EXAMPLES_SOURCES)
+
+check_DATA = $(EXAMPLES_JAR)
+
+$(EXAMPLES_JAR): $(JAVA_EXAMPLES_SOURCES)
 if HAS_JAVA
 	@mkdir -p examples/java
 	$(JAVA_HOME)/bin/javac -cp					\
