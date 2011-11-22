@@ -53,6 +53,7 @@ pkglibexec_PROGRAMS =
 webui_SCRIPTS =
 nobase_dist_webui_SCRIPTS =
 check_PROGRAMS =
+dist_check_SCRIPTS = 
 BUILT_SOURCES =
 TESTS =
 CLEANFILES =
@@ -563,6 +564,8 @@ EXAMPLESSCRIPTS = examples/java/test-framework				\
                   examples/python/test_executor.py			\
                   examples/python/test-executor
 
+dist_check_SCRIPTS += $(EXAMPLESSCRIPTS)
+
 mesos_tests_DEPENDENCIES += COPYEXAMPLESSCRIPTS
 
 COPYEXAMPLESSCRIPTS:
@@ -583,6 +586,8 @@ EXTERNALSCRIPTS =						\
   tests/external/SampleFrameworks/JavaFramework.sh		\
   tests/external/SampleFrameworks/PythonFramework.sh		\
   tests/external/KillTree/KillTreeTest.sh
+
+dist_check_SCRIPTS += $(EXTERNALSCRIPTS)
 
 mesos_tests_DEPENDENCIES += COPYEXTERNALSCRIPTS
 
