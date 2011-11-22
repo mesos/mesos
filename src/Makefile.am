@@ -488,8 +488,6 @@ JAVA_EXAMPLES_SRC = $(srcdir)/examples/TestExceptionFramework.java \
 
 EXTRA_DIST += $(JAVA_EXAMPLES_SOURCES)
 
-check_DATA = $(EXAMPLES_JAR)
-
 $(EXAMPLES_JAR): $(JAVA_EXAMPLES_SOURCES)
 if HAS_JAVA
 	@mkdir -p examples/java
