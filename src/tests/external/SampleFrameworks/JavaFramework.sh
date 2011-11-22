@@ -4,4 +4,4 @@
 export MESOS_NUM_SLAVES=3
 
 # Check that the Java test framework executes without crashing (returns 0).
-exec $MESOS_HOME/src/examples/java/test-framework local
+exec $MESOS_BUILD_DIR/src/examples/java/test-framework local

@@ -16,7 +16,7 @@
 #include "tests/utils.hpp"
 #include "tests/zookeeper_server.hpp"
 
-using mesos::internal::test::mesosRoot;
+using mesos::internal::test::mesosSourceDirectory;
 using std::tr1::bind;
 using std::tr1::function;
 
@@ -59,7 +59,7 @@ void BaseZooKeeperTest::SetUpTestCase()
   if (singleton == NULL) {
     std::vector<std::string> opts;
 
-    std::string zkHome = mesosRoot + "/third_party/zookeeper-3.3.1";
+    std::string zkHome = mesosSourceDirectory + "/third_party/zookeeper-3.3.1";
     std::string classpath = "-Djava.class.path=" +
         zkHome + "/zookeeper-3.3.1.jar:" +
         zkHome + "/lib/log4j-1.2.15.jar";

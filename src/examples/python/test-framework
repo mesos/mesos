@@ -4,5 +4,5 @@ if [ "x$PYTHON" == "x" ]; then
 fi
 FRAMEWORK_DIR="`cd $(dirname $0); pwd`"
 MESOS_HOME="$FRAMEWORK_DIR/../../.."
-export PYTHONPATH=`echo $MESOS_HOME/third_party/distribute-*/distribute-*.egg`:`echo $MESOS_HOME/src/python/dist/*.egg`:$MESOS_HOME/third_party/protobuf-2.3.0/python:$PYTHONPATH
+export PYTHONPATH=`echo $MESOS_SOURCE_DIR/third_party/distribute-*/distribute-*.egg`:`echo $MESOS_BUILD_DIR/src/python/dist/*.egg`:$MESOS_BUILD_DIR/third_party/protobuf-2.3.0/python:$PYTHONPATH
 exec $PYTHON $FRAMEWORK_DIR/test_framework.py "$@"
