@@ -221,7 +221,7 @@ fi
 
 has_java=false
 HAS_JAVA=0
-if test -z "$JAVA_HOME"; then
+if test x"$JAVA_HOME" != x; then
   has_java=true
   HAS_JAVA=1
   if test -z "$JAVA_HEADERS"; then
