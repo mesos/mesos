@@ -54,8 +54,7 @@ LIBRARY_OBJECTS = [
 LIBRARY_DIRS = []
 
 EXTRA_STATIC_LINKS = [
-  os.path.join(mesos_build, 'lib', 'libmesos_sched.a'),
-  os.path.join(mesos_build, 'lib', 'libmesos_exec.a'),
+  os.path.join(mesos_build, 'src', '.libs', 'libmesos_pre.a'),
 ]
 
 SOURCES = [
@@ -92,7 +91,7 @@ if os.path.abspath(mesos_src) != os.path.abspath(mesos_build):
       raise
 
 setup(name = 'mesos',
-      version = '1.0',  # TODO(wickman)  This should be versioned along w/ mesos-core.
+      version = '@PACKAGE_VERSION@',
       description = 'This is mesos',
       package_dir = { '': 'src' },
       packages = ['.'],

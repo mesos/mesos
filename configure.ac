@@ -81,6 +81,7 @@ dnl AC_CONFIG_FILES([src/examples/java/Makefile])
 dnl AC_CONFIG_FILES([src/examples/python/Makefile])
 dnl AC_CONFIG_FILES([src/tests/Makefile])
 AC_CONFIG_FILES([src/config/config.hpp])
+AC_CONFIG_FILES([src/python/setup.py])
 
 
 # TODO(benh): Force Python 2.6?
@@ -249,27 +250,17 @@ AM_CONDITIONAL([HAS_JAVA], [test x$has_java = xtrue])
 # TODO(benh): Make sure that JAVA_HEADERS is set iff JAVA_HOME is set.
 
 
-PYTHON_HEADERS=""
-PYTHON_LDFLAGS=""
+PYTHON_EGG_POSTFIX=""
 HAS_PYTHON="0"
-AC_ARG_WITH([python-headers],
-  AC_HELP_STRING([--with-python-headers=DIR],
-                 [find Python headers in DIR]),
-	         [case "$with_python_headers" in
-		    yes)
-                      AC_MSG_ERROR([
-*** --with-python-headers requires an argument]) ;;
-		    *)
-                      PYTHON_HEADERS="$withval"
-                      echo running $PYTHON to find compiler flags for creating the Mesos Python library...
-                      PYTHON_LDFLAGS=`$PYTHON -c 'from distutils import sysconfig; print sysconfig.get_config_var("LINKFORSHARED") + " -lpython" + sysconfig.get_config_var("VERSION")'`
-                      HAS_PYTHON="1"
-                      has_python=true
-                      ;;
-	          esac],
-	         [])
-AC_SUBST(PYTHON_HEADERS)
-AC_SUBST(PYTHON_LDFLAGS)
+has_python=false
+AM_PATH_PYTHON(,,[:])
+if test "$PYTHON" != :; then
+  HAS_PYTHON="1"
+  has_python=true
+  PYTHON_EGG_POSTFIX=`$PYTHON -c 'import sys; from distutils.util import get_platform; print "-py" + sys.version[[0:3]] + "-" + get_platform()'`
+fi
+AC_SUBST(PYTHON)
+AC_SUBST(PYTHON_EGG_POSTFIX)
 AC_SUBST(HAS_PYTHON)
 AM_CONDITIONAL([HAS_PYTHON], [test x$has_python = xtrue])
 
