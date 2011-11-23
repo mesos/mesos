@@ -83,6 +83,9 @@ dnl AC_CONFIG_FILES([src/examples/python/Makefile])
 dnl AC_CONFIG_FILES([src/tests/Makefile])
 AC_CONFIG_FILES([src/config/config.hpp])
 AC_CONFIG_FILES([src/python/setup.py])
+AC_CONFIG_FILES([mesos-build-env.sh])
+AC_CONFIG_FILES([mesos-master-dev], [chmod +x src/mesos-master-dev])
+AC_CONFIG_FILES([mesos-slave-dev], [chmod +x src/mesos-slave-dev])
 
 
 # TODO(benh): Force Python 2.6?
