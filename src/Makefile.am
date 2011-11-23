@@ -221,16 +221,6 @@ WEBUISCRIPTS = webui/bottle-0.8.3/bottle.py		\
                webui/slave/webui.py			\
                webui/static/stylesheet.css
 
-# We need to copy the webui scripts into .libs so that we can run the
-# binaries out of the build directory.
-
-libwebui_la_DEPENDENCIES = COPYWEBUISCRIPTS
-
-COPYWEBUISCRIPTS:
-	for path in $(WEBUISCRIPTS); do			\
-          mkdir -p `dirname .libs/$$path`;		\
-          cp -rf $(srcdir)/$$path .libs/$$path; done
-
 nobase_dist_webui_SCRIPTS += $(WEBUISCRIPTS)
 
 # Targets for generating the protocol buffer code we generate the C++,
@@ -558,8 +548,6 @@ if HAS_JAVA
   mesos_tests_DEPENDENCIES += $(EXAMPLES_JAR)
 endif
 
-# We need to copy the examples scripts to run the tests.
-
 EXAMPLESSCRIPTS = examples/java/test-framework				\
                   examples/java/test-executor				\
                   examples/java/test-exception-framework		\
@@ -569,17 +557,25 @@ EXAMPLESSCRIPTS = examples/java/test-framework				\
                   examples/python/test_executor.py			\
                   examples/python/test-executor
 
+# For now, we don't support running the example Java framework with its scripts
+# outside of the build directory.
+
+COPIEDEXAMPLESSCRIPTS = examples/java/test-framework		        \
+                        examples/java/test-executor		        \
+                        examples/java/test-exception-framework		\
+                        examples/java/test-multiple-executors-framework
+
+copyexamplescripts:
+	 test $(srcdir) == $(builddir) ||        \
+         for path in $(COPIEDEXAMPLESSCRIPTS); do\
+             mkdir -p `dirname $$path`;          \
+             cp -f $(srcdir)/$$path $$path; done
+
+.PHONY: copyexamplescripts
+
+mesos_tests_DEPENDENCIES += copyexamplescripts
+
 dist_check_SCRIPTS += $(EXAMPLESSCRIPTS)
-
-mesos_tests_DEPENDENCIES += COPYEXAMPLESSCRIPTS
-
-COPYEXAMPLESSCRIPTS:
-	test $(srcdir) == $(builddir) ||	\
-	for path in $(EXAMPLESSCRIPTS); do	\
-          mkdir -p `dirname $$path`;		\
-          cp -f $(srcdir)/$$path $$path; done
-
-# We also need to copy the external scripts to run the tests.
 
 EXTERNALSCRIPTS =						\
   tests/external/LxcIsolation/HoldMoreMemThanRequested.sh	\
@@ -593,15 +589,6 @@ EXTERNALSCRIPTS =						\
   tests/external/KillTree/KillTreeTest.sh
 
 dist_check_SCRIPTS += $(EXTERNALSCRIPTS)
-
-mesos_tests_DEPENDENCIES += COPYEXTERNALSCRIPTS
-
-COPYEXTERNALSCRIPTS:
-	test $(srcdir) == $(builddir) ||	\
-	for path in $(EXTERNALSCRIPTS); do	\
-          mkdir -p `dirname $$path`;		\
-          cp -f $(srcdir)/$$path $$path; done
-
 
 TESTS += mesos-tests
 
