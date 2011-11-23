@@ -50,6 +50,7 @@ noinst_LTLIBRARIES =
 sbin_PROGRAMS =
 bin_PROGRAMS =
 pkglibexec_PROGRAMS =
+dist_pkglibexec_SCRIPTS = 
 webui_SCRIPTS =
 nobase_dist_webui_SCRIPTS =
 check_PROGRAMS =
@@ -324,6 +325,7 @@ mesos_mesos_SOURCES = mesos/main.cpp
 mesos_mesos_CPPFLAGS = $(MESOS_CPPFLAGS)
 mesos_mesos_LDADD = $(PTHREAD_LIBS) libmesos.la
 
+dist_pkglibexec_SCRIPTS += scripts/killtree.sh
 
 # Protocol buffers JAR for Java.
 PROTOBUF_JAR = $(top_builddir)/protobuf.jar
