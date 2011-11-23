@@ -71,7 +71,7 @@ class MyScheduler(mesos.Scheduler):
       self.tasksFinished += 1
       if self.tasksFinished == TOTAL_TASKS:
         print "All tasks done, exiting"
-        driver.stop()
+        driver.stop(False)
 
 if __name__ == "__main__":
   print "Connecting to %s" % sys.argv[1]
@@ -82,5 +82,5 @@ if __name__ == "__main__":
   execInfo.executor_id.value = "default"
   execInfo.uri = execPath
 
-  mesos.MesosSchedulerDriver(MyScheduler(), "Python test framework",
-                             execInfo, sys.argv[1]).run()
+  sys.exit(mesos.MesosSchedulerDriver(MyScheduler(), "Python test framework",
+                                      execInfo, sys.argv[1]).run())
