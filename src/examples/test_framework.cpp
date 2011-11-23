@@ -154,6 +154,9 @@ int main(int argc, char** argv)
   char buf[4096];
   realpath(dirname(argv[0]), buf);
   string uri = string(buf) + "/test-executor";
+  if (getenv("MESOS_BUILD_DIR")) {
+    uri = string(getenv("MESOS_BUILD_DIR")) + "/src/test-executor";
+  }
   // Run a Mesos scheduler
   MyScheduler sched;
 
