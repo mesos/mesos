@@ -423,7 +423,7 @@ pythonegg_DATA = $(PYTHON_EGG)
 # libraries that link against the system libmesos.so. This should be the
 # default mode if we eventually are able to rely on system versions of our
 # dependencies (since we won't be able to create a standalone egg anyways).
-$(PYTHON_EGG): python/setup.py $(srcdir)/python/src/mesos.py mesos.pb.cc
+$(PYTHON_EGG): python/setup.py $(srcdir)/python/src/mesos.py libmesos_pre.la
 	mkdir -p python/src
 	cp -p $(srcdir)/python/src/mesos.py python/src
 	cp -p python/mesos_pb2.py python/src
