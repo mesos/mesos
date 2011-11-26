@@ -1,0 +1,3 @@
+# This file represents dummy contents of the m4 directory since
+# autoconf will puke if the m4 directory doesn't exist and our
+# source control doesn't allow an empty directory to be checked in.
