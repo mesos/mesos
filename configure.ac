@@ -21,7 +21,9 @@ AC_PREREQ(2.61)
 AC_INIT([mesos], [1.0])
 
 # Have autoconf setup some variables related to the system.
-AC_CANONICAL_SYSTEM
+AC_CANONICAL_HOST
+AC_CANONICAL_BUILD
+AC_CANONICAL_TARGET
 
 # Initialize automake.
 AM_INIT_AUTOMAKE([-Wall -Werror silent-rules foreign])
@@ -138,7 +140,7 @@ JAVA_HEADERS=""
 JAVA_REQUIRED=no
 JAVA_REQUESTED=yes
 
-AC_ARG_ENABLE([java], AC_HELP_STRING([--enable-java=yes],
+AC_ARG_ENABLE([java], AS_HELP_STRING([--enable-java=yes],
                                      [Build Java bindings (default: enabled)]),
               if test x$enableval = xyes; then
                 JAVA_REQUIRED=yes
@@ -147,7 +149,7 @@ AC_ARG_ENABLE([java], AC_HELP_STRING([--enable-java=yes],
               fi,[])
 
 AC_ARG_WITH([java-home],
-  AC_HELP_STRING([--with-java-home=DIR],
+  AS_HELP_STRING([--with-java-home=DIR],
                  [find Java Development Kit in DIR]),
 	         [case "$with_java_home" in
 		    yes) 
@@ -161,7 +163,7 @@ AC_ARG_WITH([java-home],
 	         [])
 
 AC_ARG_WITH([java-headers],
-  AC_HELP_STRING([--with-java-headers=DIR],
+  AS_HELP_STRING([--with-java-headers=DIR],
                  [find Java headers in DIR (if different from JAVA_HOME/include)]),
 	         [case "$with_java_headers" in
 		    yes) 
@@ -271,7 +273,7 @@ AM_CONDITIONAL([HAS_PYTHON], [test x$has_python = xtrue])
 
 WITH_WEBUI="0"
 AC_ARG_WITH([webui],
-  AC_HELP_STRING([--with-webui],
+  AS_HELP_STRING([--with-webui],
                  [enable web UI (requires Python)]),
             [case "$with_webui" in
               yes) webui=true
@@ -297,7 +299,7 @@ AM_CONDITIONAL([WITH_WEBUI], [test x$webui = xtrue])
 
 
 AC_ARG_WITH([included-zookeeper],
-  AC_HELP_STRING([--with-included-zookeeper],
+  AS_HELP_STRING([--with-included-zookeeper],
                  [build with included ZooKeeper]),
 	    [case "$with_included_zookeeper" in
               yes) included_zookeeper=true ;;
