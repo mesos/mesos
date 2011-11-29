@@ -59,6 +59,7 @@ BUILT_SOURCES =
 TESTS =
 CLEANFILES =
 EXTRA_DIST =
+PHONY_TARGETS = 
 
 # TODO(benh): Remove $(PTHREAD_LIBS) from each LDADD.
 
@@ -339,6 +340,9 @@ CLEANFILES += $(PROTOBUF_JAR)
 # Java Mesos JAR.
 MESOS_JAR = $(top_builddir)/src/mesos.jar
 
+MESOS_SOURCES_JAR = $(top_builddir)/src/mesos-sources.jar
+
+MESOS_JAR_SRCROOT = $(srcdir)/java/src
 MESOS_JAR_SRCDIR = $(srcdir)/java/src/org/apache/mesos
 MESOS_JAR_SRC = $(MESOS_JAR_SRCDIR)/*.java $(PROTOS_JAVA_GEN)
 
@@ -353,8 +357,14 @@ if HAS_JAVA
 	$(JAVA_HOME)/bin/jar cf $@ -C java/classes org
 endif
 
-CLEANFILES += java/classes $(MESOS_JAR)
+$(MESOS_SOURCES_JAR): $(MESOS_JAR_SRC)
+if HAS_JAVA
+	rm -f $(MESOS_SOURCES_JAR)
+	$(JAVA_HOME)/bin/jar cf $@ -C $(MESOS_JAR_SRCROOT) org
+	$(JAVA_HOME)/bin/jar uf $@ -C java/generated org
+endif
 
+CLEANFILES += java/classes $(MESOS_JAR) $(MESOS_SOURCES_JAR)
 
 # Support library for Java bindings.
 if HAS_JAVA
@@ -404,6 +414,13 @@ java/jni/org_apache_mesos_MesosExecutorDriver.h: $(MESOS_JAR)
 java/jni/org_apache_mesos_Log.h: $(MESOS_JAR)
 	@$(JAVA_HOME)/bin/javah -d java/jni -classpath                        \
           $(PROTOBUF_JAR):java/classes org.apache.mesos.Log
+
+maven-install: $(MESOS_JAR) $(MESOS_SOURCES_JAR) java/mesos.pom
+	mvn install:install-file \
+	  -Dfile=$(MESOS_JAR) -Dsources=$(MESOS_SOURCES_JAR) \
+	  -DpomFile=java/mesos.pom
+
+PHONY_TARGETS += maven-install
 endif
 
 
@@ -571,7 +588,7 @@ copyexamplescripts:
              mkdir -p `dirname $$path`;          \
              cp -f $(srcdir)/$$path $$path; done
 
-.PHONY: copyexamplescripts
+PHONY_TARGETS += copyexamplescripts
 
 mesos_tests_DEPENDENCIES += copyexamplescripts
 
@@ -593,3 +610,5 @@ dist_check_SCRIPTS += $(EXTERNALSCRIPTS)
 TESTS += mesos-tests
 
 FORCE:
+
+.PHONY: $(PHONY_TARGETS)

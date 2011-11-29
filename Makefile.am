@@ -84,3 +84,10 @@ if WITH_INCLUDED_ZOOKEEPER
 endif
 	@cd $(LIBPROCESS) && $(MAKE) $(AM_MAKEFLAGS) clean
 	@cd $(LEVELDB) && $(MAKE) $(AM_MAKEFLAGS) clean
+
+if HAS_JAVA
+maven-install:
+	@cd src && $(MAKE) $(AM_MAKEFLAGS) maven-install
+
+.PHONY: maven-install
+endif
