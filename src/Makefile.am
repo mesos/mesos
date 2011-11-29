@@ -423,14 +423,16 @@ maven-install: $(MESOS_JAR) $(MESOS_SOURCES_JAR) java/mesos.pom
 PHONY_TARGETS += maven-install
 endif
 
-
-# TODO(benh): Create a protobuf egg.
-# PROTOBUF_EGG = $(PROTOBUF)/dist/
-
-PYTHON_EGG = python/dist/mesos-$(PACKAGE_VERSION)$(PYTHON_EGG_POSTFIX).egg
-
 if HAS_PYTHON
+PYTHON_EGG = python/dist/mesos-$(PACKAGE_VERSION)$(PYTHON_EGG_POSTFIX).egg
+# TODO(Charles Reiss): Don't hard code this verison number
+PROTOBUF_EGG = @top_builddir@/$(PROTOBUF)/python/dist/protobuf-2.3.0$(PYTHON_EGG_PUREPY_POSTFIX).egg
+
 pythonegg_DATA = $(PYTHON_EGG)
+
+# TODO(Charles Reiss): Figure out how to do a proper out-of-source build 
+# of these python eggs. Right now we copy the entire source directories into
+# the build directory.
 
 # This builds a python egg against that is self-contained. It currently
 # depends on the libraries in third_party being built as .a's. (If this is
@@ -440,7 +442,7 @@ pythonegg_DATA = $(PYTHON_EGG)
 # libraries that link against the system libmesos.so. This should be the
 # default mode if we eventually are able to rely on system versions of our
 # dependencies (since we won't be able to create a standalone egg anyways).
-$(PYTHON_EGG): python/setup.py $(srcdir)/python/src/mesos.py libmesos_pre.la
+$(PYTHON_EGG): python/setup.py $(srcdir)/python/src/mesos.py libmesos_pre.la $(PROTOBUF_EGG)
 	mkdir -p python/src
 	cp -p $(srcdir)/python/src/mesos.py python/src
 	cp -p python/mesos_pb2.py python/src
@@ -453,6 +455,14 @@ $(PYTHON_EGG): python/setup.py $(srcdir)/python/src/mesos.py libmesos_pre.la
 	  mkdir -p @top_builddir@/$(PROTOBUF)/src/google/protobuf; \
 	  cp -f @top_srcdir@/$(PROTOBUF)/src/google/protobuf/descriptor.proto @top_builddir@/$(PROTOBUF)/src/google/protobuf/descriptor.proto; \
 	fi
+
+$(PROTOBUF_EGG):
+	rm -r -f @top_builddir@/$(PROTOBUF)/python
+	cp -r @top_srcdir@/$(PROTOBUF)/python @top_builddir@/$(PROTOBUF)/python
+	mkdir -p @top_builddir@/$(PROTOBUF)/src/google/protobuf
+	cd @top_builddir@/$(PROTOBUF)/python && PYTHONPATH=@abs_top_builddir@/$(SETUPTOOLS) $(PYTHON) setup.py bdist_egg
+
+CLEANFILES += $(PYTHON_EGG) $(PROTOBUF_EGG)
 
 all-local: $(PYTHON_EGG)
 endif
@@ -563,6 +573,10 @@ if HAS_JAVA
 
   # TODO(benh): Consider building the Java examples independently.
   mesos_tests_DEPENDENCIES += $(EXAMPLES_JAR)
+endif
+
+if HAS_PYTHON
+  mesos_tests_DEPENDENCIES += $(PYTHON_EGG)
 endif
 
 EXAMPLESSCRIPTS = examples/java/test-framework				\

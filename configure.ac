@@ -265,9 +265,11 @@ if test "$PYTHON" != :; then
   HAS_PYTHON="1"
   has_python=true
   PYTHON_EGG_POSTFIX=`$PYTHON -c 'import sys; from distutils.util import get_platform; print "-py" + sys.version[[0:3]] + "-" + get_platform()'`
+  PYTHON_EGG_PUREPY_POSTFIX=`$PYTHON -c 'import sys; from distutils.util import get_platform; print "-py" + sys.version[[0:3]]'`
 fi
 AC_SUBST(PYTHON)
 AC_SUBST(PYTHON_EGG_POSTFIX)
+AC_SUBST(PYTHON_EGG_PUREPY_POSTFIX)
 AC_SUBST(HAS_PYTHON)
 AM_CONDITIONAL([HAS_PYTHON], [test x$has_python = xtrue])
 
