@@ -33,6 +33,7 @@ LIBEV = $(LIBPROCESS)/third_party/libev-3.8
 
 webuidir = $(pkgdatadir)
 pythoneggdir = $(pythondir)
+javalibdir = $(libdir)/java
 
 AM_CPPFLAGS = -DMESOS_WEBUIDIR=\"$(webuidir)\" \
 	      -DMESOS_LIBEXECDIR=\"$(pkglibexecdir)\"
@@ -321,9 +322,9 @@ dist_pkglibexec_SCRIPTS += scripts/killtree.sh
 # Protocol buffers JAR for Java.
 PROTOBUF_JAR = $(top_builddir)/protobuf.jar
 
+if HAS_JAVA
 # TODO(charles): Specify dependencies for the jar.
 $(PROTOBUF_JAR):
-if HAS_JAVA
 	@mkdir -p $(top_builddir)/$(PROTOBUF)/java/src/main/java
 	$(PROTOC) --java_out=$(top_builddir)/$(PROTOBUF)/java/src/main/java \
           -I$(top_srcdir)/$(PROTOBUF)/src                                   \
@@ -348,20 +349,20 @@ MESOS_JAR_SRC = $(MESOS_JAR_SRCDIR)/*.java $(PROTOS_JAVA_GEN)
 
 EXTRA_DIST += $(MESOS_JAR_SRCDIR)/*.java
 
-$(MESOS_JAR): $(PROTOBUF_JAR) $(MESOS_JAR_SRC)
 if HAS_JAVA
+$(MESOS_JAR): $(PROTOBUF_JAR) $(MESOS_JAR_SRC)
 	@rm -f java/classes/org/apache/mesos/*
 	@mkdir -p java/classes/org/apache/mesos
 	$(JAVA_HOME)/bin/javac -cp $(PROTOBUF_JAR) -sourcepath java/generated \
           -d java/classes $(MESOS_JAR_SRC)
 	$(JAVA_HOME)/bin/jar cf $@ -C java/classes org
-endif
 
 $(MESOS_SOURCES_JAR): $(MESOS_JAR_SRC)
-if HAS_JAVA
 	rm -f $(MESOS_SOURCES_JAR)
 	$(JAVA_HOME)/bin/jar cf $@ -C $(MESOS_JAR_SRCROOT) org
 	$(JAVA_HOME)/bin/jar uf $@ -C java/generated org
+
+javalib_DATA = $(MESOS_JAR)
 endif
 
 CLEANFILES += java/classes $(MESOS_JAR) $(MESOS_SOURCES_JAR)
