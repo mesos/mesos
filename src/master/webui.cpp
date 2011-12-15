@@ -26,7 +26,6 @@
 
 #include <Python.h>
 
-
 namespace mesos {
 namespace internal {
 namespace master {
@@ -34,7 +33,7 @@ namespace webui {
 
 void start(const process::PID<Master>& master, const Configuration& conf)
 {
-  utils::webui::spawnWebui(conf, "webui/master/webui.py", master.port, 8080);
+  utils::webui::start(conf, "webui/master/webui.py", master.port, 8080);
 }
 
 } // namespace webui {

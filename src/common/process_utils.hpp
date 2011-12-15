@@ -24,7 +24,7 @@ inline Try<int> killtree(
     // Set by mesos-build-env.sh.
     cmdline = utils::os::getenv("MESOS_KILLTREE");
   } else if (utils::os::hasenv("MESOS_SOURCE_DIR")) {
-    // Set by test hardness for external tests.
+    // Set by test harness for external tests.
     cmdline = utils::os::getenv("MESOS_SOURCE_DIR") +
         "/src/scripts/killtree.sh";
   } else {

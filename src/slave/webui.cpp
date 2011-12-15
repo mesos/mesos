@@ -26,7 +26,6 @@
 
 #ifdef MESOS_WEBUI
 
-
 namespace mesos {
 namespace internal {
 namespace slave {
@@ -34,7 +33,7 @@ namespace webui {
 
 void start(const process::PID<Slave>& slave, const Configuration& conf)
 {
-  utils::webui::spawnWebui(conf, "webui/slave/webui.py", slave.port, 8081);
+  utils::webui::start(conf, "webui/slave/webui.py", slave.port, 8081);
 }
 
 } // namespace webui {

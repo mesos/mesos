@@ -47,7 +47,8 @@ fi
 
 # Launch memhog
 echo "Running scheduled-memhog"
-$MESOS_BUILD_DIR/src/examples/scheduled-memhog master@localhost:5432 schedule > memhog.log 2>&1
+$MESOS_BUILD_DIR/src/examples/scheduled-memhog master@localhost:5432 \
+  schedule > memhog.log 2>&1
 EXIT_CODE=$?
 echo "Memhog exit code: $?"
 sleep 2

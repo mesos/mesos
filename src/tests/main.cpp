@@ -54,7 +54,7 @@ string getRealpath(const string& relPath)
 
 string getMesosSourceDirectory()
 {
-  return getRealpath(ROOT_DIR);
+  return getRealpath(SOURCE_DIR);
 }
 
 

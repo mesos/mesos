@@ -43,10 +43,10 @@ public class MesosSchedulerDriver implements SchedulerDriver {
       throw new NullPointerException("Not expecting a null scheduler");
     }
 
-    if (frameworkName == null) throw new NullPointerException("Not expecting a null scheduler");
-    if (sched == null) throw new NullPointerException("Not expecting a null scheduler");
-    if (sched == null) throw new NullPointerException("Not expecting a null scheduler");
-    if (sched == null) throw new NullPointerException("Not expecting a null scheduler");
+    if (frameworkName == null) {
+      throw new NullPointerException("Not expecting a null scheduler");
+    }
+
     this.sched = sched;
     this.url = url;
     this.frameworkId = frameworkId;

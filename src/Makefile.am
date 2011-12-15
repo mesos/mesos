@@ -19,8 +19,6 @@
 # master/http.cpp and slave/http.cpp.
 AUTOMAKE_OPTIONS = subdir-objects
 
-SUFFIXES = .pb.cc .pb.h .proto
-
 BOOST = third_party/boost-1.37.0
 PROTOBUF = third_party/protobuf-2.3.0
 GLOG = third_party/glog-0.3.1
@@ -30,7 +28,7 @@ LEVELDB = third_party/leveldb
 ZOOKEEPER = third_party/zookeeper-3.3.1/src/c
 LIBPROCESS = third_party/libprocess
 LIBEV = $(LIBPROCESS)/third_party/libev-3.8
-
+ 
 webuidir = $(pkgdatadir)
 pythoneggdir = $(pythondir)
 javalibdir = $(libdir)/java
@@ -75,6 +73,7 @@ libmesos_la_SOURCES =
 libmesos_la_LIBADD = libmesos_pre.la
 
 libmesos_la_LDFLAGS = -version-info 0:0 -shared
+
 # Since we don't have any sources, we need to tell automake that this is a
 # C++ library
 libmesos_la_LIBTOOLFLAGS = --tag=CXX
@@ -104,9 +103,9 @@ libmesos_pre_la_SOURCES = sched/sched.cpp local/local.cpp master/master.cpp \
                           zookeeper/authentication.cpp zookeeper/group.cpp
 
 if OS_LINUX
-libmesos_pre_la_SOURCES += slave/lxc_isolation_module.cpp
+  libmesos_pre_la_SOURCES += slave/lxc_isolation_module.cpp
 else
-EXTRA_DIST += slave/lxc_isolation_module.cpp
+  EXTRA_DIST += slave/lxc_isolation_module.cpp
 endif
 
 EXTRA_DIST += slave/solaris_project_isolation_module.cpp
@@ -172,19 +171,14 @@ libmesos_pre_la_LIBADD = libbuild.la					  \
 # For non-convenience libraries we need to link them in to make the shared
 # library each time. (Currently, we don't support platforms where this is not
 # possible.)
-LIBMESOS_LIBS = 
-
-LIBMESOS_LIBS += $(top_builddir)/$(PROTOBUF)/src/.libs/libprotobuf.la
-LIBMESOS_LIBS += $(top_builddir)/$(GLOG)/.libs/libglog.la
-LIBMESOS_LIBS += $(top_builddir)/$(LIBPROCESS)/libprocess.a
-LIBMESOS_LIBS += $(top_builddir)/$(LIBEV)/.libs/libev.la
+libmesos_la_LIBADD += $(top_builddir)/$(PROTOBUF)/src/.libs/libprotobuf.la
+libmesos_la_LIBADD += $(top_builddir)/$(GLOG)/.libs/libglog.la
+libmesos_la_LIBADD += $(top_builddir)/$(LIBPROCESS)/libprocess.a
+libmesos_la_LIBADD += $(top_builddir)/$(LIBEV)/.libs/libev.la
 
 if WITH_INCLUDED_ZOOKEEPER
-  LIBMESOS_LIBS += $(top_builddir)/$(ZOOKEEPER)/.libs/libzookeeper_mt.a
+  libmesos_la_LIBADD += $(top_builddir)/$(ZOOKEEPER)/.libs/libzookeeper_mt.a
 endif
-
-libmesos_la_LIBADD += $(LIBMESOS_LIBS)
-
 
 # Convenience library that *always* gets rebuilt to ensure accurate info.
 noinst_LTLIBRARIES += libbuild.la
@@ -452,9 +446,11 @@ $(PYTHON_EGG): python/setup.py $(srcdir)/python/src/mesos.py libmesos_pre.la $(P
 	PYTHONPATH=$(top_builddir)/$(SETUPTOOLS) $(PYTHON)	\
         python/setup.py bdist_egg
 	if test "$(top_srcdir)" != "$(top_builddir)"; then \
-	  cp -r $(top_srcdir)/$(PROTOBUF)/python $(top_builddir)/$(PROTOBUF)/python; \
+	  cp -r $(top_srcdir)/$(PROTOBUF)/python \
+	  	$(top_builddir)/$(PROTOBUF)/python; \
 	  mkdir -p @top_builddir@/$(PROTOBUF)/src/google/protobuf; \
-	  cp -f @top_srcdir@/$(PROTOBUF)/src/google/protobuf/descriptor.proto @top_builddir@/$(PROTOBUF)/src/google/protobuf/descriptor.proto; \
+	  cp -f @top_srcdir@/$(PROTOBUF)/src/google/protobuf/descriptor.proto \
+	    @top_builddir@/$(PROTOBUF)/src/google/protobuf/descriptor.proto; \
 	fi
 
 $(PROTOBUF_EGG):
@@ -548,7 +544,7 @@ mesos_tests_SOURCES = tests/main.cpp tests/utils.cpp			\
 	              tests/killtree_tests.cpp				\
 	              tests/exception_tests.cpp
 
-mesos_tests_CPPFLAGS = -DROOT_DIR=\"$(abs_top_srcdir)\"                 \
+mesos_tests_CPPFLAGS = -DSOURCE_DIR=\"$(abs_top_srcdir)\"               \
                        -DBUILD_DIR=\"$(abs_top_builddir)\"              \
                        -I$(top_srcdir)/$(GTEST)/include	                \
                        -I$(top_srcdir)/$(GMOCK)/include                 \

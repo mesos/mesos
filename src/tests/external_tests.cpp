@@ -71,6 +71,9 @@ void mesos::internal::test::runExternalTest(const char* testCase,
       fatalerror("freopen failed");
     setenv("MESOS_SOURCE_DIR", mesosSourceDirectory.c_str(), 1);
     setenv("MESOS_BUILD_DIR", mesosBuildDirectory.c_str(), 1);
+    setenv("MESOS_WEBUI_DIR",
+           (mesosSourceDirectory + "/src/webui").c_str(), 1);
+    setenv("MESOS_LAUNCHER_DIR", (mesosBuildDirectory + "/src").c_str(), 1);
     execl(script.c_str(), script.c_str(), (char*) NULL);
     // If we get here, execl failed; report the error
     fatalerror("Could not execute %s", script.c_str());

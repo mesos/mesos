@@ -5,9 +5,9 @@
 # to you under the Apache License, Version 2.0 (the
 # "License"); you may not use this file except in compliance
 # with the License.  You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -40,24 +40,6 @@ AC_LANG(C++)
 
 AC_CONFIG_MACRO_DIR([m4])
 
-# Update CFLAGS and CXXFLAGS with environment args.
-# TODO(benh): Stop passing -fPIC, instead assume libtool will do the
-# right thing and get libprocess to correctly use autotools.
-dnl CFLAGS="-O2 -fno-strict-aliasing -fPIC ${CFLAGS}"
-dnl CXXFLAGS="-O2 -fno-strict-aliasing -fPIC ${CXXFLAGS}"
-
-dnl export CFLAGS
-dnl export CXXFLAGS
-
-# Update CFLAGS and CXXFLAGS in configure args.
-# TODO(benh): Don't send args just for us (e.g., --with-webui).
-dnl ac_configure_args=`echo $ac_configure_args | \
-dnl                    sed -e "s/CFLAGS=/CFLAGS=-O2 -fno-strict-aliasing /"`
-dnl ac_configure_args=`echo $ac_configure_args | \
-dnl                    sed -e "s/CXXFLAGS=/CXXFLAGS=-O2 -fno-strict-aliasing /"`
-
-dnl ac_configure_args="$ac_configure_args --enable-shared=no --with-pic"
-
 # Force all third_party libraries to only build static libraries so
 # that we can produce a final shared library which includes everything
 # necessary.
@@ -79,10 +61,6 @@ AC_CONFIG_SUBDIRS([third_party/libprocess])
 
 AC_CONFIG_FILES([Makefile])
 AC_CONFIG_FILES([src/Makefile])
-dnl AC_CONFIG_FILES([src/examples/Makefile])
-dnl AC_CONFIG_FILES([src/examples/java/Makefile])
-dnl AC_CONFIG_FILES([src/examples/python/Makefile])
-dnl AC_CONFIG_FILES([src/tests/Makefile])
 AC_CONFIG_FILES([src/config/config.hpp])
 AC_CONFIG_FILES([src/python/setup.py])
 AC_CONFIG_FILES([mesos-build-env.sh])
@@ -153,7 +131,7 @@ AC_ARG_WITH([java-home],
   AS_HELP_STRING([--with-java-home=DIR],
                  [find Java Development Kit in DIR]),
 	         [case "$with_java_home" in
-		    yes) 
+		    yes)
                       AC_MSG_ERROR([
 *** --with-java-home requires an argument]) ;;
 		    *)
@@ -167,7 +145,7 @@ AC_ARG_WITH([java-headers],
   AS_HELP_STRING([--with-java-headers=DIR],
                  [find Java headers in DIR (if different from JAVA_HOME/include)]),
 	         [case "$with_java_headers" in
-		    yes) 
+		    yes)
                       AC_MSG_ERROR([
 *** --with-java-headers requires an argument]) ;;
 		    *)

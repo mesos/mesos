@@ -16,9 +16,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# This is a wrapper script for running mesos-master before it is uninstalled.
+# This is a wrapper script for running mesos-slave before it is uninstalled.
 
-# It will run mesos-master so it will look for file dependencies (such as the
+# It will run mesos-slave so it will look for file dependencies (such as the
 # WebUI) outside their installed locations.
 
 . @abs_top_builddir@/mesos-build-env.sh

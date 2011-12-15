@@ -11,9 +11,8 @@ namespace utils {
 namespace webui {
 
 #ifdef MESOS_WEBUI
-void spawnWebui(const Configuration& conf,
-                const std::string& script,
-                int rpcPort, int defaultWebuiPort);
+void start(const Configuration& conf, const std::string& script,
+           int rpcPort, int defaultWebuiPort);
 #endif
 
 } // namespace process {
