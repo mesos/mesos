@@ -10,3 +10,7 @@ or its Git mirror:
     git clone git://github.com/apache/mesos.git
 
 For issue tracking, please use the [JIRA issue tracker](https://issues.apache.org/jira/browse/MESOS) instead of the GitHub one.
+
+Thanks!
+
+-- The Mesos developers
