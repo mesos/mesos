@@ -1,6 +1,9 @@
 # Mesos Has Moved!
 
 Mesos is now hosted in the [Apache incubator](http://incubator.apache.org/mesos).
+
+The documentation can be [viewed via github here](https://github.com/apache/mesos/blob/trunk/docs/Home.md).
+
 Please check out the source code from Apache's SVN:
 
     svn checkout https://svn.apache.org/repos/asf/incubator/mesos/trunk
