@@ -8,10 +8,6 @@ Please check out the source code from Apache's git:
   
     git clone git://git.apache.org/incubator-mesos.git
 
-or SVN:
-
-    svn checkout https://svn.apache.org/repos/asf/incubator/mesos/trunk
-
 or its GitHub mirror:
 
     git clone git://github.com/apache/incubator-mesos.git
