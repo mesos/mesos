@@ -6,7 +6,7 @@ Please check out the source code from Apache's git repostory:
   
     git clone https://git-wip-us.apache.org/repos/asf/mesos.git
 
-or if you prefer GitHub, use the [GitHub mirror](https://github.com/apache/incubator-mesos):
+or if you prefer GitHub, use the [GitHub mirror](https://github.com/apache/mesos):
 
     git clone git://github.com/apache/mesos.git
 
