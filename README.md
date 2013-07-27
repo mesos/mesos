@@ -1,4 +1,4 @@
-# The Apache Mesos Respository Has Moved
+# Apache Mesos Repository Has Moved
 
 [Apache Mesos](http://mesos.apache.org) is now a Top-Level [Apache](http://www.apache.org) project, and we've moved the codebase. The [downloads page](http://mesos.apache.org/downloads) explains the essential information, but here's the scoop:
 
