@@ -1,18 +1,18 @@
-# Mesos Has Moved!
+# The Apache Mesos Respository Has Moved
 
-Mesos is now hosted in the [Apache incubator](http://incubator.apache.org/mesos). Here is [GitHub mirror](https://github.com/apache/incubator-mesos)
+[Apache Mesos](http://mesos.apache.org) is now a Top-Level [Apache](http://www.apache.org) project, and we've moved the codebase. The [downloads page](http://mesos.apache.org/downloads) explains the essential information, but here's the scoop:
 
-The documentation can be [viewed via github here](https://github.com/apache/incubator-mesos/blob/master/docs/Home.md).
-
-Please check out the source code from Apache's git:
+Please check out the source code from Apache's git repostory:
   
-    git clone git://git.apache.org/incubator-mesos.git
+    git clone https://git-wip-us.apache.org/repos/asf/mesos.git
 
-or its GitHub mirror:
+or if you prefer GitHub, use the [GitHub mirror](https://github.com/apache/incubator-mesos):
 
-    git clone git://github.com/apache/incubator-mesos.git
+    git clone git://github.com/apache/mesos.git
 
-For issue tracking, please use the [JIRA issue tracker](https://issues.apache.org/jira/browse/MESOS) instead of the GitHub one.
+For issue tracking and patches, we use Apache-maintained infrastructure including the [JIRA issue tracker](https://issues.apache.org/jira/browse/MESOS) instead of the GitHub one, and [review board](hreviews.apache.org) for patches instead of pull requests.
+
+Other information including documentation and a getting started guide are available on the Mesos website: [http://mesos.apache.org](http://mesos.apache.org)
 
 Thanks!
 
