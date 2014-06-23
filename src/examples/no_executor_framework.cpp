@@ -99,7 +99,12 @@ public:
         task.set_name("Task " + lexical_cast<string>(taskId));
         task.mutable_task_id()->set_value(lexical_cast<string>(taskId));
         task.mutable_slave_id()->MergeFrom(offer.slave_id());
-        task.mutable_command()->set_value("echo hello");
+        task.mutable_command()->set_value("sleep 18");
+
+        CommandInfo::ContainerInfo* container =
+          task.mutable_command()->mutable_container();
+
+        container->set_image("docker://ubuntu");
 
         Resource* resource;
 
