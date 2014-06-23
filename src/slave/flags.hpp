@@ -261,6 +261,14 @@ public:
         "The path to the external containerizer executable used when\n"
         "external isolation is activated (--isolation=external).\n");
 
+    add(&Flags::containerizers,
+        "containerizers",
+        "Comma separated list of containerizer implementations\n"
+        "to compose in order to provide containerization.\n"
+        "Available options are 'mesos', 'external', and \n"
+        "'docker' (on Linux) (--containerizers=mesos).\n",
+        "mesos");
+
     add(&Flags::default_container_image,
         "default_container_image",
         "The default container image to use if not specified by a task,\n"
@@ -329,6 +337,7 @@ public:
 #endif
   Option<std::string> credential;
   Option<std::string> containerizer_path;
+  std::string containerizers;
   Option<std::string> default_container_image;
 #ifdef WITH_NETWORK_ISOLATOR
   uint16_t ephemeral_ports_per_container;
