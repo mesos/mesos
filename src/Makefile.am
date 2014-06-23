@@ -223,6 +223,8 @@ nodist_libmesos_no_3rdparty_la_SOURCES =				\
 
 libmesos_no_3rdparty_la_SOURCES =					\
 	authorizer/authorizer.cpp					\
+	docker/docker.cpp						\
+	docker/docker.hpp						\
 	sasl/authenticatee.hpp						\
 	sasl/authenticator.hpp						\
 	sasl/auxprop.hpp						\
