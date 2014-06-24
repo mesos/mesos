@@ -1015,6 +1015,7 @@ mesos_tests_SOURCES =				\
   tests/containerizer.cpp			\
   tests/containerizer_tests.cpp			\
   tests/credentials_tests.cpp			\
+  tests/docker_containerizer_tests.cpp          \
   tests/environment.cpp				\
   tests/examples_tests.cpp			\
   tests/exception_tests.cpp			\
