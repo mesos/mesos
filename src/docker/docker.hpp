@@ -29,6 +29,9 @@
 #include <stout/nothing.hpp>
 #include <stout/option.hpp>
 
+#include "mesos/resources.hpp"
+
+
 // Abstraction for working with Docker (modeled on CLI).
 class Docker
 {
@@ -62,7 +65,8 @@ public:
   process::Future<Option<int> > run(
       const std::string& image,
       const std::string& command,
-      const std::string& name) const;
+      const std::string& name,
+      const mesos::Resources& resources) const;
 
   // Performs 'docker kill CONTAINER'.
   process::Future<Option<int> > kill(
