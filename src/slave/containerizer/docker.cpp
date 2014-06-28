@@ -136,7 +136,7 @@ private:
 
   Future<ResourceStatistics> _usage(
     const ContainerID& containerId,
-    const Future<Docker::Container> container);
+    const Docker::Container& container);
 
   // Call back for when the executor exits. This will trigger
   // container destroy.
@@ -510,7 +510,7 @@ Future<bool> DockerContainerizerProcess::launch(
 
   // Start a docker container then launch the executor (but destroy
   // the Docker container if launching the executor failed).
-  return docker.run(image, command.value(), name)
+  return docker.run(image, command.value(), name, taskInfo.resources())
     .then(defer(self(),
                 &Self::_launch,
                 containerId,
@@ -649,18 +649,32 @@ Future<ResourceStatistics> DockerContainerizerProcess::usage(
 
 Future<ResourceStatistics> DockerContainerizerProcess::_usage(
     const ContainerID& containerId,
-    const Future<Docker::Container> container)
+    const Docker::Container& container)
 {
-  Option<pid_t> pid = container.get().pid();
-  if (pid.isNone()) {
+  Option<pid_t> pid = container.pid();
+      if (pid.isNone()) {
     return Failure("Container is not running");
   }
-  Try<ResourceStatistics> usage =
-    mesos::internal::usage(pid.get(), true, true);
-  if (usage.isError()) {
-    return Failure(usage.error());
+  Try<ResourceStatistics> result =
+    mesos::internal::usage(pid, true, true);
+  if (result.isError()) {
+    return Failure(result.error());
   }
-  return usage.get();
+
+  ResourceStatistics usage = result.get();
+
+  // Set the resource allocations.
+  Resources resource = resources[containerId];
+  Option<Bytes> mem = resource.mem();
+  if (mem.isSome()) {
+    usage.set_mem_limit_bytes(mem.get().bytes());
+  }
+
+  Option<double> cpus = resource.cpus();
+  if (cpus.isSome()) {
+    usage.set_cpus_limit(cpus.get());
+  }
+  return usage;
 }
 
 
