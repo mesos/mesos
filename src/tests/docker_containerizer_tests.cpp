@@ -24,8 +24,10 @@
 #include "tests/flags.hpp"
 #include "tests/mesos.hpp"
 
-#include "slave/slave.hpp"
 #include "slave/containerizer/docker.hpp"
+#include "slave/slave.hpp"
+#include "slave/state.hpp"
+
 
 using namespace mesos;
 using namespace mesos::internal;
@@ -44,43 +46,72 @@ using std::list;
 using std::string;
 
 using testing::_;
+using testing::DoAll;
 using testing::DoDefault;
 using testing::Eq;
+using testing::Invoke;
 using testing::Return;
 
 class DockerContainerizerTest : public MesosTest {};
 
-class MockDockerContainerizer : public slave::DockerContainerizer {
+class MockDockerContainerizer : public slave::DockerContainerizer
+{
 public:
   MockDockerContainerizer(
     const slave::Flags& flags,
     bool local,
-    const Docker& docker) : DockerContainerizer(flags, local, docker) {}
-
-  process::Future<bool> launch(
-    const ContainerID& containerId,
-    const TaskInfo& taskInfo,
-    const ExecutorInfo& executorInfo,
-    const std::string& directory,
-    const Option<std::string>& user,
-    const SlaveID& slaveId,
-    const process::PID<Slave>& slavePid,
-    bool checkpoint)
-  {
-    // Keeping the last launched container id.
-    lastContainerId = containerId;
-    return slave::DockerContainerizer::launch(
-             containerId,
-             taskInfo,
-             executorInfo,
-             directory,
-             user,
-             slaveId,
-             slavePid,
-             checkpoint);
+    const Docker& docker) : DockerContainerizer(flags, local, docker) {
+    setup();
   }
 
-  ContainerID lastContainerId;
+  MOCK_METHOD8(
+      launch,
+      process::Future<bool>(
+          const ContainerID&,
+          const TaskInfo&,
+          const ExecutorInfo&,
+          const std::string&,
+          const Option<string>&,
+          const SlaveID&,
+          const PID<Slave>&,
+          bool checkpoint));
+
+  // Default 'launch' implementation.
+  process::Future<bool> _launch(
+      const ContainerID& containerId,
+      const TaskInfo& taskInfo,
+      const ExecutorInfo& executorInfo,
+      const string& directory,
+      const Option<string>& user,
+      const SlaveID& slaveId,
+      const PID<Slave>& slavePid,
+      bool checkpoint)
+  {
+    return slave::DockerContainerizer::launch(
+        containerId,
+        taskInfo,
+        executorInfo,
+        directory,
+        user,
+        slaveId,
+        slavePid,
+        checkpoint);
+  }
+
+private:
+  void setup()
+  {
+    // NOTE: We use 'EXPECT_CALL' and 'WillRepeatedly' here instead of
+    // 'ON_CALL' and 'WillByDefault' because the latter gives the gmock
+    // warning "Uninteresting mock function call" unless each tests puts
+    // the expectations in place which would make the tests much more
+    // verbose.
+    // See groups.google.com/forum/#!topic/googlemock/EX4kLxddlko for a
+    // suggestion for how we might be able to use 'NiceMock' here
+    // instead.
+    EXPECT_CALL(*this, launch(_, _, _, _, _, _, _, _))
+      .WillRepeatedly(Invoke(this, &MockDockerContainerizer::_launch));
+  }
 };
 
 
@@ -133,17 +164,23 @@ TEST_F(DockerContainerizerTest, DOCKER_Launch)
 
   task.mutable_command()->CopyFrom(command);
 
-  Future<TaskStatus> statusRunning;
-
   vector<TaskInfo> tasks;
   tasks.push_back(task);
 
+  Future<ContainerID> containerId;
+  EXPECT_CALL(dockerContainer, launch(_, _, _, _, _, _, _, _))
+    .WillOnce(DoAll(FutureArg<0>(&containerId),
+                    Invoke(&dockerContainer,
+                           &MockDockerContainerizer::_launch)));
+
+  Future<TaskStatus> statusRunning;
   EXPECT_CALL(sched, statusUpdate(&driver, _))
     .WillOnce(FutureArg<1>(&statusRunning))
     .WillRepeatedly(DoDefault());
 
   driver.launchTasks(offers.get()[0].id(), tasks);
 
+  AWAIT_READY_FOR(containerId, Seconds(60));
   AWAIT_READY_FOR(statusRunning, Seconds(60));
   EXPECT_EQ(TASK_RUNNING, statusRunning.get().state());
 
@@ -155,7 +192,7 @@ TEST_F(DockerContainerizerTest, DOCKER_Launch)
 
   bool foundContainer = false;
   string expectedName =
-    slave::DOCKER_NAME_PREFIX + dockerContainerizer.lastContainerId.value();
+    slave::DOCKER_NAME_PREFIX + containerId.get().value();
 
   foreach (const Docker::Container& container, containers.get()) {
     // Docker inspect name contains an extra slash in the beginning.
@@ -167,7 +204,7 @@ TEST_F(DockerContainerizerTest, DOCKER_Launch)
 
   ASSERT_TRUE(foundContainer);
 
-  dockerContainerizer.destroy(dockerContainerizer.lastContainerId);
+  dockerContainer.destroy(containerId.get());
 
   driver.stop();
   driver.join();
@@ -189,7 +226,8 @@ TEST_F(DockerContainerizerTest, DOCKER_Usage)
 
   MockDockerContainerizer dockerContainerizer(flags, true, docker);
 
-  Try<PID<Slave> > slave = StartSlave(&dockerContainerizer);
+  Try<PID<Slave> > slave =
+    StartSlave(&dockerContainer, flags);
   ASSERT_SOME(slave);
 
   MockScheduler sched;
@@ -227,27 +265,28 @@ TEST_F(DockerContainerizerTest, DOCKER_Usage)
 
   task.mutable_command()->CopyFrom(command);
 
-  Future<TaskStatus> statusRunning;
-
   vector<TaskInfo> tasks;
   tasks.push_back(task);
 
+  Future<ContainerID> containerId;
+  EXPECT_CALL(dockerContainer, launch(_, _, _, _, _, _, _, _))
+    .WillOnce(DoAll(FutureArg<0>(&containerId),
+                    Invoke(&dockerContainer,
+                           &MockDockerContainerizer::_launch)));
+
+  Future<TaskStatus> statusRunning;
   EXPECT_CALL(sched, statusUpdate(&driver, _))
     .WillOnce(FutureArg<1>(&statusRunning))
     .WillRepeatedly(DoDefault());
 
-  // Usage() should fail since the container is not launched.
-  Future<ResourceStatistics> usage =
-    dockerContainerizer.usage(dockerContainerizer.lastContainerId);
-
-  AWAIT_FAILED(usage);
-
   driver.launchTasks(offers.get()[0].id(), tasks);
 
+  AWAIT_READY_FOR(containerId, Seconds(60));
   AWAIT_READY_FOR(statusRunning, Seconds(60));
   EXPECT_EQ(TASK_RUNNING, statusRunning.get().state());
 
-  usage = dockerContainerizer.usage(dockerContainerizer.lastContainerId);
+  Future<ResourceStatistics> usage =
+    dockerContainer.usage(containerId.get());
   AWAIT_READY(usage);
 
   // Verify the usage.
@@ -255,14 +294,14 @@ TEST_F(DockerContainerizerTest, DOCKER_Usage)
   EXPECT_EQ(1024*1024*1024, usage.get().mem_limit_bytes());
 
   Future<containerizer::Termination> termination =
-    dockerContainer.wait(dockerContainer.lastContainerId);
+    dockerContainer.wait(containerId.get());
 
-  dockerContainerizer.destroy(dockerContainerizer.lastContainerId);
+  dockerContainer.destroy(containerId.get());
 
   AWAIT_READY(termination);
 
   // Usage() should fail again since the container is destroyed
-  usage = dockerContainer.usage(dockerContainer.lastContainerId);
+  usage = dockerContainer.usage(containerId.get());
   AWAIT_FAILED(usage);
 
   driver.stop();
