@@ -386,6 +386,11 @@ Try<Nothing> shares(
     const std::string& cgroup,
     uint64_t shares);
 
+// Returns the cpu shares from cpu.shares.
+Try<uint64_t> shares(
+    const std::string& hierarchy,
+    const std::string& cgroup);
+
 
 // Sets the cfs period using cpu.cfs_period_us.
 Try<Nothing> cfs_period_us(
