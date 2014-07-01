@@ -640,6 +640,10 @@ Future<ResourceStatistics> DockerContainerizerProcess::usage(
     return Failure("Unknown container: " + stringify(containerId));
   }
 
+  if (destroying.contains(containerId)) {
+    return Failure("Container is being removed; " + stringify(containerId));
+  }
+
   // Construct the Docker container name.
   string name = DOCKER_NAME_PREFIX + stringify(containerId);
   return docker.inspect(name)
