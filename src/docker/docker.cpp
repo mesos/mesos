@@ -263,7 +263,9 @@ Future<Docker::Container> Docker::_inspect(const Subprocess& s)
 }
 
 
-Future<list<Docker::Container> > Docker::ps(const bool all) const
+Future<list<Docker::Container> > Docker::ps(
+    const bool all,
+    const string prefix) const
 {
   string cmd = all ? " ps -a" : " ps";
 
@@ -280,13 +282,14 @@ Future<list<Docker::Container> > Docker::ps(const bool all) const
   }
 
   return s.get().status()
-    .then(lambda::bind(&Docker::_ps, *this, s.get()));
+    .then(lambda::bind(&Docker::_ps, *this, s.get(), prefix));
 }
 
 
 Future<list<Docker::Container> > Docker::_ps(
     const Docker& docker,
-    const Subprocess& s)
+    const Subprocess& s,
+    const string prefix)
 {
   // Check the exit status of 'docker ps'.
   CHECK_READY(s.status());
@@ -320,12 +323,19 @@ Future<list<Docker::Container> > Docker::_ps(
   list<Future<Docker::Container> > futures;
 
   foreach (const string& line, lines) {
-    // Inspect the container.
-    futures.push_back(docker.inspect(strings::split(line, " ")[0]));
+    // Inspect the containers that we are interested in.
+    vector<string> columns =
+      strings::split(strings::trim(line), " ");
+    string name = columns[columns.size()-1];
+    if (prefix.size() == 0 ||
+        strings::startsWith(name, prefix)) {
+      futures.push_back(docker.inspect(name));
+    }
   }
 
   return collect(futures);
 }
+
 
 Future<std::string> Docker::info() const
 {

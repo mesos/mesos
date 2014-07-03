@@ -87,7 +87,8 @@ public:
 
   // Performs 'docker ps (-a)'.
   process::Future<std::list<Container> > ps(
-      const bool all = false) const;
+      const bool all = false,
+      const std::string prefix = "") const;
 
   process::Future<std::string> info() const;
 
@@ -97,7 +98,8 @@ private:
       const process::Subprocess& s);
   static process::Future<std::list<Container> > _ps(
       const Docker& docker,
-      const process::Subprocess& s);
+      const process::Subprocess& s,
+      const std::string prefix);
   static process::Future<Option<int> > _killAndRm(
       const Docker& docker,
       const std::string& container,
