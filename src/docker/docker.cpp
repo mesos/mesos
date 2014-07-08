@@ -133,7 +133,9 @@ Future<Option<int> > Docker::kill(const string& container) const
 }
 
 
-Future<Option<int> > Docker::rm(const string& container, const bool force) const
+Future<Option<int> > Docker::rm(
+    const string& container,
+    const bool force) const
 {
   string cmd = force ? " rm -f " : " rm ";
 
@@ -150,6 +152,26 @@ Future<Option<int> > Docker::rm(const string& container, const bool force) const
   }
 
   return s.get().status();
+}
+
+
+Future<Option<int> > Docker::killAndRm(const string& container) const
+{
+  return kill(container)
+    .then(lambda::bind(Docker::_killAndRm, *this, container, lambda::_1));
+}
+
+
+Future<Option<int> > Docker::_killAndRm(
+    const Docker& docker,
+    const string& container,
+    const Option<int>& status)
+{
+  // If 'kill' fails, then do a 'rm -f'.
+  if (status.isNone()) {
+    return docker.rm(container, true);
+  }
+  return docker.rm(container);
 }
 
 
@@ -259,7 +281,9 @@ Future<Docker::Container> Docker::_inspect(const Subprocess& s)
 }
 
 
-Future<list<Docker::Container> > Docker::ps(const bool all) const
+Future<list<Docker::Container> > Docker::ps(
+    const bool all,
+    const string prefix) const
 {
   string cmd = all ? " ps -a" : " ps";
 
@@ -276,13 +300,14 @@ Future<list<Docker::Container> > Docker::ps(const bool all) const
   }
 
   return s.get().status()
-    .then(lambda::bind(&Docker::_ps, Docker(path), s.get()));
+    .then(lambda::bind(&Docker::_ps, *this, s.get(), prefix));
 }
 
 
 Future<list<Docker::Container> > Docker::_ps(
     const Docker& docker,
-    const Subprocess& s)
+    const Subprocess& s,
+    const string prefix)
 {
   // Check the exit status of 'docker ps'.
   CHECK_READY(s.status());
@@ -316,12 +341,19 @@ Future<list<Docker::Container> > Docker::_ps(
   list<Future<Docker::Container> > futures;
 
   foreach (const string& line, lines) {
-    // Inspect the container.
-    futures.push_back(docker.inspect(strings::split(line, " ")[0]));
+    // Inspect the containers that we are interested in.
+    vector<string> columns =
+      strings::split(strings::trim(line), " ");
+    string name = columns[columns.size()-1];
+    if (prefix.size() == 0 ||
+        strings::startsWith(name, prefix)) {
+      futures.push_back(docker.inspect(name));
+    }
   }
 
   return collect(futures);
 }
+
 
 Future<std::string> Docker::info() const
 {
