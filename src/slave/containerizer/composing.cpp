@@ -322,7 +322,7 @@ Future<bool> ComposingContainerizerProcess::launch(
                 slaveId,
                 slavePid,
                 checkpoint,
-                ++containerizer,
+                containerizer,
                 lambda::_1));
 }
 
@@ -341,7 +341,12 @@ Future<bool> ComposingContainerizerProcess::_launch(
   if (launched) {
     containers_[*containerizer].insert(containerId);
     return true;
-  } else if (containerizer == containerizers_.end()) {
+  }
+
+  // Try the next containerizer.
+  ++containerizer;
+
+  if (containerizer == containerizers_.end()) {
     return false;
   }
 
@@ -362,7 +367,7 @@ Future<bool> ComposingContainerizerProcess::_launch(
                 slaveId,
                 slavePid,
                 checkpoint,
-                ++containerizer,
+                containerizer,
                 lambda::_1));
 }
 
@@ -400,7 +405,7 @@ Future<bool> ComposingContainerizerProcess::launch(
                 slaveId,
                 slavePid,
                 checkpoint,
-                ++containerizer,
+                containerizer,
                 lambda::_1));
 }
 
@@ -419,7 +424,12 @@ Future<bool> ComposingContainerizerProcess::_launch(
   if (launched) {
     containers_[*containerizer].insert(containerId);
     return true;
-  } else if (containerizer == containerizers_.end()) {
+  }
+
+  // Try the next containerizer.
+  ++containerizer;
+
+  if (containerizer == containerizers_.end()) {
     return false;
   }
 
@@ -442,7 +452,7 @@ Future<bool> ComposingContainerizerProcess::_launch(
                 slaveId,
                 slavePid,
                 checkpoint,
-                ++containerizer,
+                containerizer,
                 lambda::_1));
 }
 
