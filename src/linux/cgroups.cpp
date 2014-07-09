@@ -1785,6 +1785,42 @@ Try<hashmap<string, uint64_t> > stat(
 
 namespace cpu {
 
+Result<string> cgroup(pid_t pid)
+{
+  // Determine cgroup for hierarchy with the 'cpu' subsystem attached.
+  string path = path::join("/proc", stringify(pid), "cgroup");
+
+  Try<string> read = os::read(path);
+
+  if (read.isError()) {
+    return Error("Failed to read " + path + ": " + read.error());
+  }
+
+  // Now determine the cgroup by parsing each line of the output which
+  // should be of the form "N:subsystems:cgroup" where 'N' is the
+  // hierarchy number and 'subsystems' are the attached subsystems and
+  // 'cgroup' is the relative path to the cgroup from the hierarchy
+  // path.
+  Option<string> cgroup = None();
+
+  foreach (const string& line, strings::tokenize(read.get(), "\n")) {
+    vector<string> tokens = strings::tokenize(line, ":");
+
+    if (tokens.size() != 3) {
+      return Error("Unexpected format in " + path);
+    }
+
+    foreach (const string& subsystem, strings::tokenize(tokens[1], ",")) {
+      if (subsystem == "cpu") {
+        cgroup = tokens[2];
+      }
+    }
+  }
+
+  return cgroup;
+}
+
+
 Try<Nothing> shares(
     const string& hierarchy,
     const string& cgroup,
@@ -1860,6 +1896,42 @@ Try<Nothing> cfs_quota_us(
 
 
 namespace memory {
+
+Result<string> cgroup(pid_t pid)
+{
+  // Determine cgroup for hierarchy with the 'cpu' subsystem attached.
+  string path = path::join("/proc", stringify(pid), "cgroup");
+
+  Try<string> read = os::read(path);
+
+  if (read.isError()) {
+    return Error("Failed to read " + path + ": " + read.error());
+  }
+
+  // Now determine the cgroup by parsing each line of the output which
+  // should be of the form "N:subsystems:cgroup" where 'N' is the
+  // hierarchy number and 'subsystems' are the attached subsystems and
+  // 'cgroup' is the relative path to the cgroup from the hierarchy
+  // path.
+  Option<string> cgroup = None();
+
+  foreach (const string& line, strings::tokenize(read.get(), "\n")) {
+    vector<string> tokens = strings::tokenize(line, ":");
+
+    if (tokens.size() != 3) {
+      return Error("Unexpected format in " + path);
+    }
+
+    foreach (const string& subsystem, strings::tokenize(tokens[1], ",")) {
+      if (subsystem == "cpu") {
+        cgroup = tokens[2];
+      }
+    }
+  }
+
+  return cgroup;
+}
+
 
 Try<Bytes> limit_in_bytes(const string& hierarchy, const string& cgroup)
 {
