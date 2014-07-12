@@ -146,7 +146,7 @@ Future<Option<int> > Docker::run(
     }
   }
 
-  cmd += " --name=" + name + " " + image + " " + command;
+  cmd += " --net=host --name=" + name + " " + image + " " + command;
 
   VLOG(1) << "Running " << path << cmd;
 

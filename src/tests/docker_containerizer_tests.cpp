@@ -177,6 +177,10 @@ public:
 };
 
 
+// Only enable executor launch on linux as other platforms
+// requires running linux VM and need special port forwarding
+// to get host networking to work.
+#ifdef __linux__
 TEST_F(DockerContainerizerTest, DOCKER_Launch_Executor)
 {
   Try<PID<Master> > master = StartMaster();
@@ -225,7 +229,7 @@ TEST_F(DockerContainerizerTest, DOCKER_Launch_Executor)
   executorInfo.mutable_executor_id()->CopyFrom(executorId);
   CommandInfo command;
   command.set_value("test-executor");
-  command.mutable_container()->set_image("docker:///test_executor");
+  command.mutable_container()->set_image("docker:///mesos/test-executor");
   executorInfo.mutable_command()->CopyFrom(command);
 
   task.mutable_executor()->CopyFrom(executorInfo);
@@ -263,20 +267,19 @@ TEST_F(DockerContainerizerTest, DOCKER_Launch_Executor)
   Future<containerizer::Termination> termination =
     dockerContainerizer.wait(containerId.get());
 
-  dockerContainerizer.destroy(containerId.get());
+  driver.stop();
+  driver.join();
 
   AWAIT_READY(termination);
 
-  containers = docker.ps(true);
+  containers = docker.ps(true, slave::DOCKER_NAME_PREFIX);
   AWAIT_READY(containers);
 
   ASSERT_FALSE(containerExists(containers.get(), containerId.get()));
 
-  driver.stop();
-  driver.join();
-
   Shutdown();
 }
+#endif // __linux__
 
 
 TEST_F(DockerContainerizerTest, DOCKER_Launch)
