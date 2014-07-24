@@ -65,7 +65,6 @@ Try<Nothing> Docker::validate(const Docker &docker)
   } else if (info.isFailed()) {
     return Error("Failed to use Docker: " + info.failure());
   }
-
   return Nothing();
 }
 
@@ -119,7 +118,6 @@ Future<Option<int> > Docker::run(
     const Option<mesos::Resources>& resources,
     const Option<map<string, string> >& env) const
 {
-
   string cmd = " run -d";
 
   if (resources.isSome()) {
@@ -127,7 +125,7 @@ Future<Option<int> > Docker::run(
     Option<double> cpus = resources.get().cpus();
     if (cpus.isSome()) {
       uint64_t cpuShare =
-	std::max((uint64_t) (CPU_SHARES_PER_CPU * cpus.get()), MIN_CPU_SHARES);
+        std::max((uint64_t) (CPU_SHARES_PER_CPU * cpus.get()), MIN_CPU_SHARES);
       cmd += " -c " + stringify(cpuShare);
     }
 
@@ -176,7 +174,6 @@ Future<Option<int> > Docker::kill(const string& container) const
   if (s.isError()) {
     return Failure(s.error());
   }
-
   return s.get().status();
 }
 
@@ -198,7 +195,6 @@ Future<Option<int> > Docker::rm(
   if (s.isError()) {
     return Failure(s.error());
   }
-
   return s.get().status();
 }
 
@@ -236,7 +232,6 @@ Future<Docker::Container> Docker::inspect(const string& container) const
   if (s.isError()) {
     return Failure(s.error());
   }
-
   return s.get().status()
     .then(lambda::bind(&Docker::_inspect, s.get()));
 }
@@ -324,7 +319,6 @@ Future<Docker::Container> Docker::_inspect(const Subprocess& s)
 
   // TODO(benh): Handle the case where the short container ID was
   // not sufficiently unique and 'array.values.size() > 1'.
-
   return Failure("Failed to find container");
 }
 
@@ -346,7 +340,6 @@ Future<list<Docker::Container> > Docker::ps(
   if (s.isError()) {
     return Failure(s.error());
   }
-
   return s.get().status()
     .then(lambda::bind(&Docker::_ps, *this, s.get(), prefix));
 }
