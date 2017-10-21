@@ -19,6 +19,7 @@
 
 #include <stout/nothing.hpp>
 #include <stout/result_of.hpp>
+#include <stout/thread_local.hpp>
 
 namespace process {
 
@@ -103,7 +104,7 @@ public:
 
 // Per thread executor pointer. We use a pointer to lazily construct the
 // actual executor.
-extern thread_local Executor* _executor_;
+extern THREAD_LOCAL Executor* _executor_;
 
 #define __executor__                                                    \
   (_executor_ == nullptr ? _executor_ = new Executor() : _executor_)

@@ -23,6 +23,7 @@
 
 #include <stout/lambda.hpp>
 #include <stout/synchronized.hpp>
+#include <stout/thread_local.hpp>
 
 namespace process {
 
@@ -46,7 +47,7 @@ extern std::queue<lambda::function<void()>>* functions;
 
 // Per thread bool pointer. We use a pointer to lazily construct the
 // actual bool.
-extern thread_local bool* _in_event_loop_;
+extern THREAD_LOCAL bool* _in_event_loop_;
 
 #define __in_event_loop__ *(_in_event_loop_ == nullptr ?                \
   _in_event_loop_ = new bool(false) : _in_event_loop_)
