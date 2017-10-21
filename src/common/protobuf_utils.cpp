@@ -957,7 +957,7 @@ mesos::master::Event createFrameworkRemoved(const FrameworkInfo& frameworkInfo)
 
 mesos::master::Response::GetAgents::Agent createAgentResponse(
     const mesos::internal::master::Slave& slave,
-    const Option<Owned<AuthorizationAcceptor>>& rolesAcceptor)
+    const Option<Owned<ObjectApprovers>>& approvers)
 {
   mesos::master::Response::GetAgents::Agent agent;
 
@@ -977,27 +977,27 @@ mesos::master::Response::GetAgents::Agent createAgentResponse(
 
   agent.mutable_agent_info()->clear_resources();
   foreach (const Resource& resource, slave.info.resources()) {
-    if (authorizeResource(resource, rolesAcceptor)) {
+    if (authorizeResource(resource, approvers)) {
       agent.mutable_agent_info()->add_resources()->CopyFrom(resource);
     }
   }
 
   foreach (Resource resource, slave.totalResources) {
-    if (authorizeResource(resource, rolesAcceptor)) {
+    if (authorizeResource(resource, approvers)) {
       convertResourceFormat(&resource, ENDPOINT);
       agent.add_total_resources()->CopyFrom(resource);
     }
   }
 
   foreach (Resource resource, Resources::sum(slave.usedResources)) {
-    if (authorizeResource(resource, rolesAcceptor)) {
+    if (authorizeResource(resource, approvers)) {
       convertResourceFormat(&resource, ENDPOINT);
       agent.add_allocated_resources()->CopyFrom(resource);
     }
   }
 
   foreach (Resource resource, slave.offeredResources) {
-    if (authorizeResource(resource, rolesAcceptor)) {
+    if (authorizeResource(resource, approvers)) {
       convertResourceFormat(&resource, ENDPOINT);
       agent.add_offered_resources()->CopyFrom(resource);
     }

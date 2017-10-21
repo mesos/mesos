@@ -32,6 +32,7 @@
 #include <mesos/quota/quota.hpp>
 
 #include <process/authenticator.hpp>
+#include <process/collect.hpp>
 #include <process/dispatch.hpp>
 #include <process/future.hpp>
 #include <process/http.hpp>
@@ -862,6 +863,32 @@ const AuthorizationCallbacks createAuthorizationCallbacks(
 }
 
 
+Future<Owned<ObjectApprovers>> ObjectApprovers::create(
+    const Option<Authorizer*>& authorizer,
+    const Option<Principal>& principal,
+    std::initializer_list<authorization::Action> actions)
+  {
+    // TODO(benh): Ensure there aren't any duplicate actions.
+
+    Option<authorization::Subject> subject =
+      authorization::createSubject(principal);
+
+    return process::collect(lambda::map<std::list>(
+        [&](authorization::Action action) -> Future<Owned<ObjectApprover>> {
+          if (authorizer.isSome()) {
+            return authorizer.get()->getObjectApprover(subject, action);
+          } else {
+            return Owned<ObjectApprover>(new AcceptingObjectApprover());
+          }
+        },
+        actions))
+      .then([=](const std::list<Owned<ObjectApprover>>& approvers) {
+        return Owned<ObjectApprovers>(
+            new ObjectApprovers(lambda::zip(actions, approvers), principal));
+      });
+  }
+
+
 bool approveViewFrameworkInfo(
     const Owned<ObjectApprover>& frameworksApprover,
     const FrameworkInfo& frameworkInfo)
@@ -1027,6 +1054,39 @@ bool authorizeResource(
   return true;
 }
 
+
+bool authorizeResource(
+    const Resource& resource,
+    const Option<Owned<ObjectApprovers>>& approvers)
+{
+  if (approvers.isNone()) {
+    return true;
+  }
+
+  // Necessary because recovered agents are presented in old format.
+  if (resource.has_role() && resource.role() != "*" &&
+      !approvers.get()->approved<authorization::VIEW_ROLE>(resource.role())) {
+    return false;
+  }
+
+  if (resource.has_allocation_info() &&
+      !approvers.get()->approved<authorization::VIEW_ROLE>(
+          resource.allocation_info().role())) {
+    return false;
+  }
+
+  // Reservations follow a path model where each entry is a child of the
+  // previous one. Therefore, to accept the resource the acceptor has to
+  // accept all entries.
+  foreach (Resource::ReservationInfo reservation, resource.reservations()) {
+    if (!approvers.get()->approved<authorization::VIEW_ROLE>(
+            reservation.role())) {
+      return false;
+    }
+  }
+
+  return true;
+}
 
 namespace {
 

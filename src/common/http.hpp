@@ -26,6 +26,7 @@
 
 #include <mesos/quota/quota.hpp>
 
+#include <process/authenticator.hpp>
 #include <process/future.hpp>
 #include <process/http.hpp>
 #include <process/owned.hpp>
@@ -36,6 +37,30 @@
 #include <stout/jsonify.hpp>
 #include <stout/protobuf.hpp>
 #include <stout/unreachable.hpp>
+
+
+// TODO(benh): Remove this once we get C++14 as an enum should have a
+// default hash.
+namespace std {
+
+template <>
+struct hash<mesos::authorization::Action>
+{
+  typedef size_t result_type;
+
+  typedef mesos::authorization::Action argument_type;
+
+  result_type operator()(const argument_type& action) const
+  {
+    size_t seed = 0;
+    boost::hash_combine(
+        seed, static_cast<std::underlying_type<argument_type>::type>(action));
+    return seed;
+  }
+};
+
+} // namespace std {
+
 
 namespace mesos {
 
@@ -148,6 +173,7 @@ const Option<authorization::Subject> createSubject(
 
 } // namespace authorization {
 
+
 const process::http::authorization::AuthorizationCallbacks
   createAuthorizationCallbacks(Authorizer* authorizer);
 
@@ -161,6 +187,55 @@ public:
   {
     return true;
   }
+};
+
+
+class ObjectApprovers
+{
+public:
+  static process::Future<process::Owned<ObjectApprovers>> create(
+      const Option<Authorizer*>& authorizer,
+      const Option<process::http::authentication::Principal>& principal,
+      std::initializer_list<authorization::Action> actions);
+
+  template <authorization::Action action, typename... Args>
+  bool approved(Args&&... args)
+  {
+    if (!approvers.contains(action)) {
+      LOG(WARNING) << "Attempted to authorize "
+                   << (principal.isSome()
+                       ? "'" + stringify(principal.get()) + "'"
+                       : "")
+                   << " for UNEXPECTED action " << stringify(action);
+      return false;
+    }
+
+    Try<bool> approved = approvers[action]->approved(
+        ObjectApprover::Object(std::forward<Args>(args)...));
+
+    if (approved.isError()) {
+      // TODO(joerg84): Expose these errors back to the caller.
+      LOG(WARNING) << "Failed to authorize principal "
+                   << (principal.isSome()
+                       ? "'" + stringify(principal.get()) + "'"
+                       : "")
+                   << " for action " << stringify(action) << ": "
+                   << approved.error();
+      return false;
+    }
+
+    return approved.get();
+  }
+
+private:
+    ObjectApprovers(
+      hashmap<
+          authorization::Action, process::Owned<ObjectApprover>>&& approvers,
+      const Option<process::http::authentication::Principal>& principal)
+    : approvers(std::move(approvers)), principal(principal) {}
+
+  hashmap<authorization::Action, process::Owned<ObjectApprover>> approvers;
+  Option<process::http::authentication::Principal> principal;
 };
 
 
@@ -280,6 +355,10 @@ bool approveViewRole(
 bool authorizeResource(
     const Resource& resource,
     const Option<process::Owned<AuthorizationAcceptor>>& acceptor);
+
+bool authorizeResource(
+    const Resource& resource,
+    const Option<process::Owned<ObjectApprovers>>& approvers);
 
 
 /**

@@ -133,6 +133,10 @@ namespace master {
 using mesos::allocator::Allocator;
 
 using mesos::authorization::createSubject;
+using mesos::authorization::VIEW_ROLE;
+using mesos::authorization::VIEW_FRAMEWORK;
+using mesos::authorization::VIEW_TASK;
+using mesos::authorization::VIEW_EXECUTOR;
 
 using mesos::master::contender::MasterContender;
 
@@ -9816,64 +9820,23 @@ void Master::Subscribers::send(const mesos::master::Event& event)
           << " event";
 
   foreachvalue (const Owned<Subscriber>& subscriber, subscribed) {
-    Future<Owned<AuthorizationAcceptor>> authorizeRole =
-      AuthorizationAcceptor::create(
-          subscriber->principal,
-          subscriber->master->authorizer,
-          authorization::VIEW_ROLE);
-
-    Future<Owned<AuthorizationAcceptor>> authorizeFramework =
-      AuthorizationAcceptor::create(
-          subscriber->principal,
-          subscriber->master->authorizer,
-          authorization::VIEW_FRAMEWORK);
-
-    Future<Owned<AuthorizationAcceptor>> authorizeTask =
-      AuthorizationAcceptor::create(
-          subscriber->principal,
-          subscriber->master->authorizer,
-          authorization::VIEW_TASK);
-
-    Future<Owned<AuthorizationAcceptor>> authorizeExecutor =
-      AuthorizationAcceptor::create(
-          subscriber->principal,
-          subscriber->master->authorizer,
-          authorization::VIEW_EXECUTOR);
-
-    collect(authorizeRole, authorizeFramework, authorizeTask, authorizeExecutor)
-      .then(defer(subscriber->master->self(),
-          [=](const tuple<Owned<AuthorizationAcceptor>,
-                          Owned<AuthorizationAcceptor>,
-                          Owned<AuthorizationAcceptor>,
-                          Owned<AuthorizationAcceptor>>& acceptors) {
-        Owned<AuthorizationAcceptor> authorizeRole;
-        Owned<AuthorizationAcceptor> authorizeFramework;
-        Owned<AuthorizationAcceptor> authorizeTask;
-        Owned<AuthorizationAcceptor> authorizeExecutor;
-
-        tie(authorizeRole,
-            authorizeFramework,
-            authorizeTask,
-            authorizeExecutor) = acceptors;
-
-        subscriber->send(event,
-            authorizeRole,
-            authorizeFramework,
-            authorizeTask,
-            authorizeExecutor);
-
-        return Nothing();
-      }));
+    ObjectApprovers::create(
+        subscriber->master->authorizer,
+        subscriber->principal,
+        {VIEW_ROLE, VIEW_FRAMEWORK, VIEW_TASK, VIEW_EXECUTOR})
+      .then(defer(
+          subscriber->master->self(),
+          [=](const Owned<ObjectApprovers>& approvers) {
+            subscriber->send(event, approvers);
+            return Nothing();
+          }));
   }
 }
 
 
 void Master::Subscribers::Subscriber::send(
     const mesos::master::Event& event,
-    const Owned<AuthorizationAcceptor>& authorizeRole,
-    const Owned<AuthorizationAcceptor>& authorizeFramework,
-    const Owned<AuthorizationAcceptor>& authorizeTask,
-    const Owned<AuthorizationAcceptor>& authorizeExecutor)
+    const Owned<ObjectApprovers>& approvers)
 {
   switch (event.type()) {
     case mesos::master::Event::TASK_ADDED: {
@@ -9884,8 +9847,9 @@ void Master::Subscribers::Subscriber::send(
         break;
       }
 
-      if (authorizeTask->accept(event.task_added().task(), framework->info) &&
-          authorizeFramework->accept(framework->info)) {
+      if (approvers->approved<VIEW_TASK>(
+              event.task_added().task(), framework->info) &&
+          approvers->approved<VIEW_FRAMEWORK>(framework->info)) {
         http.send<mesos::master::Event, v1::master::Event>(event);
       }
       break;
@@ -9905,14 +9869,14 @@ void Master::Subscribers::Subscriber::send(
         break;
       }
 
-      if (authorizeTask->accept(*task, framework->info) &&
-          authorizeFramework->accept(framework->info)) {
+      if (approvers->approved<VIEW_TASK>(*task, framework->info) &&
+          approvers->approved<VIEW_FRAMEWORK>(framework->info)) {
         http.send<mesos::master::Event, v1::master::Event>(event);
       }
       break;
     }
     case mesos::master::Event::FRAMEWORK_ADDED: {
-      if (authorizeFramework->accept(
+      if (approvers->approved<VIEW_FRAMEWORK>(
               event.framework_added().framework().framework_info())) {
         mesos::master::Event event_(event);
         event_.mutable_framework_added()->mutable_framework()->
@@ -9923,7 +9887,7 @@ void Master::Subscribers::Subscriber::send(
         foreach(
             const Resource& resource,
             event.framework_added().framework().allocated_resources()) {
-          if (authorizeResource(resource, authorizeRole)) {
+          if (authorizeResource(resource, approvers)) {
             event_.mutable_framework_added()->mutable_framework()->
               add_allocated_resources()->CopyFrom(resource);
           }
@@ -9932,7 +9896,7 @@ void Master::Subscribers::Subscriber::send(
         foreach(
             const Resource& resource,
             event.framework_added().framework().offered_resources()) {
-          if (authorizeResource(resource, authorizeRole)) {
+          if (authorizeResource(resource, approvers)) {
             event_.mutable_framework_added()->mutable_framework()->
               add_offered_resources()->CopyFrom(resource);
           }
@@ -9943,7 +9907,7 @@ void Master::Subscribers::Subscriber::send(
       break;
     }
     case mesos::master::Event::FRAMEWORK_UPDATED: {
-      if (authorizeFramework->accept(
+      if (approvers->approved<VIEW_FRAMEWORK>(
               event.framework_updated().framework().framework_info())) {
         mesos::master::Event event_(event);
         event_.mutable_framework_updated()->mutable_framework()->
@@ -9954,7 +9918,7 @@ void Master::Subscribers::Subscriber::send(
         foreach(
             const Resource& resource,
             event.framework_updated().framework().allocated_resources()) {
-          if (authorizeResource(resource, authorizeRole)) {
+          if (authorizeResource(resource, approvers)) {
             event_.mutable_framework_updated()->mutable_framework()->
               add_allocated_resources()->CopyFrom(resource);
           }
@@ -9963,7 +9927,7 @@ void Master::Subscribers::Subscriber::send(
         foreach(
             const Resource& resource,
             event.framework_updated().framework().offered_resources()) {
-          if (authorizeResource(resource, authorizeRole)) {
+          if (authorizeResource(resource, approvers)) {
             event_.mutable_framework_updated()->mutable_framework()->
               add_offered_resources()->CopyFrom(resource);
           }
@@ -9974,7 +9938,7 @@ void Master::Subscribers::Subscriber::send(
       break;
     }
     case mesos::master::Event::FRAMEWORK_REMOVED: {
-      if (authorizeFramework->accept(
+      if (approvers->approved<VIEW_FRAMEWORK>(
               event.framework_removed().framework_info())) {
         http.send<mesos::master::Event, v1::master::Event>(event);
       }
@@ -9988,7 +9952,7 @@ void Master::Subscribers::Subscriber::send(
       foreach(
           const Resource& resource,
           event.agent_added().agent().total_resources()) {
-        if (authorizeResource(resource, authorizeRole)) {
+        if (authorizeResource(resource, approvers)) {
           event_.mutable_agent_added()->mutable_agent()->add_total_resources()
             ->CopyFrom(resource);
         }

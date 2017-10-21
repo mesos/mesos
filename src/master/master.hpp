@@ -93,6 +93,7 @@ namespace mesos {
 // Forward declarations.
 class Authorizer;
 class ObjectApprover;
+class ObjectApprovers;
 
 namespace internal {
 
@@ -1524,7 +1525,7 @@ private:
         ContentType contentType) const;
 
     mesos::master::Response::GetAgents _getAgents(
-        const process::Owned<AuthorizationAcceptor>& rolesAcceptor) const;
+        const process::Owned<ObjectApprovers>& approvers) const;
 
     process::Future<process::http::Response> getFlags(
         const mesos::master::Call& call,
@@ -1602,8 +1603,7 @@ private:
         ContentType contentType) const;
 
     mesos::master::Response::GetTasks _getTasks(
-        const process::Owned<ObjectApprover>& frameworksApprover,
-        const process::Owned<ObjectApprover>& tasksApprover) const;
+        const process::Owned<ObjectApprovers>& approvers) const;
 
     process::Future<process::http::Response> createVolumes(
         const mesos::master::Call& call,
@@ -1631,7 +1631,7 @@ private:
         ContentType contentType) const;
 
     mesos::master::Response::GetFrameworks _getFrameworks(
-        const process::Owned<ObjectApprover>& frameworksApprover) const;
+        const process::Owned<ObjectApprovers>& approvers) const;
 
     process::Future<process::http::Response> getExecutors(
         const mesos::master::Call& call,
@@ -1639,8 +1639,7 @@ private:
         ContentType contentType) const;
 
     mesos::master::Response::GetExecutors _getExecutors(
-        const process::Owned<ObjectApprover>& frameworksApprover,
-        const process::Owned<ObjectApprover>& executorsApprover) const;
+        const process::Owned<ObjectApprovers>& approvers) const;
 
     process::Future<process::http::Response> getState(
         const mesos::master::Call& call,
@@ -1648,10 +1647,7 @@ private:
         ContentType contentType) const;
 
     mesos::master::Response::GetState _getState(
-        const process::Owned<ObjectApprover>& frameworksApprover,
-        const process::Owned<ObjectApprover>& taskApprover,
-        const process::Owned<ObjectApprover>& executorsApprover,
-        const process::Owned<AuthorizationAcceptor>& rolesAcceptor) const;
+        const process::Owned<ObjectApprovers>& approvers) const;
 
     process::Future<process::http::Response> subscribe(
         const mesos::master::Call& call,
@@ -1951,11 +1947,9 @@ private:
       Subscriber(const Subscriber&) = delete;
       Subscriber& operator=(const Subscriber&) = delete;
 
-      void send(const mesos::master::Event& event,
-          const process::Owned<AuthorizationAcceptor>& authorizeRole,
-          const process::Owned<AuthorizationAcceptor>& authorizeFramework,
-          const process::Owned<AuthorizationAcceptor>& authorizeTask,
-          const process::Owned<AuthorizationAcceptor>& authorizeExecutor);
+      void send(
+          const mesos::master::Event& event,
+          const process::Owned<ObjectApprovers>& approvers);
 
       ~Subscriber()
       {
