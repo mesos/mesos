@@ -17,6 +17,7 @@
 #include <functional>
 #include <vector>
 
+#include <stout/hashmap.hpp>
 #include <stout/result_of.hpp>
 
 namespace lambda {
@@ -152,6 +153,71 @@ std::vector<V> map(F&& f, std::initializer_list<U> input)
       input.end(),
       std::inserter(output, output.begin()),
       std::forward<F>(f));
+  return output;
+}
+
+
+template <
+  template <typename...> class OutputIterable,
+  template <typename...> class InputIterable1,
+  template <typename...> class InputIterable2,
+  typename U1,
+  typename U2,
+  typename... U1s,
+  typename... U2s>
+OutputIterable<std::pair<U1, U2>> zipto(
+    const InputIterable1<U1, U1s...>& input1,
+    const InputIterable2<U2, U2s...>& input2)
+{
+  OutputIterable<std::pair<U1, U2>> output;
+
+  auto iterator1 = input1.begin();
+  auto iterator2 = input2.begin();
+
+  auto inserter = std::inserter(output, output.begin());
+
+  // We zip only as many elements as we can.
+  while (iterator1 != input1.end() && iterator2 != input2.end()) {
+    inserter = std::make_pair(*iterator1, *iterator2);
+    iterator1++;
+    iterator2++;
+  }
+
+  return output;
+}
+
+
+// NOTE: by default we zip into a `hashmap`. See the `zip()` overload
+// for zipping into another iterable as `std::pair`.
+template <
+  template <typename...> class InputIterable1,
+  template <typename...> class InputIterable2,
+  typename U1,
+  typename U2,
+  typename... U1s,
+  typename... U2s>
+hashmap<U1, U2> zip(
+    const InputIterable1<U1, U1s...>& input1,
+    const InputIterable2<U2, U2s...>& input2)
+{
+  // TODO(benh): Use the overload of `zip()`, something like:
+  //   std::vector<std::pair<U1, U2>> vector = zip<std::vector>(input1, input2);
+  //   return hashmap<U1, U2>(
+  //     std::make_move_iterator(vector.begin()),
+  //     std::make_move_iterator(vector.end()));
+
+  hashmap<U1, U2> output;
+
+  auto iterator1 = input1.begin();
+  auto iterator2 = input2.begin();
+
+  // We zip only as many elements as we can.
+  while (iterator1 != input1.end() && iterator2 != input2.end()) {
+    output.put(*iterator1, *iterator2);
+    iterator1++;
+    iterator2++;
+  }
+
   return output;
 }
 
