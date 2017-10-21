@@ -232,7 +232,7 @@ private:
 // used to wait on the actual semaphore. Because a thread can only be
 // waiting on a single semaphore at a time it's safe for each thread
 // to only have one.
-thread_local KernelSemaphore* __semaphore__ = nullptr;
+THREAD_LOCAL KernelSemaphore* __semaphore__ = nullptr;
 
 // Using Clang we weren't able to initialize `__semaphore__` likely
 // because it is declared `thread_local` so instead we dereference the
