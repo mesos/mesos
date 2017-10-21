@@ -864,7 +864,7 @@ inline Object protobuf(const google::protobuf::Message& message)
   for (int i = 0; i < descriptor->field_count(); i++) {
     const google::protobuf::FieldDescriptor* field = descriptor->field(i);
     if (field->is_repeated()) {
-      if (reflection->FieldSize(message, descriptor->field(i)) > 0) {
+      if (reflection->FieldSize(message, field) > 0) {
         // Has repeated field with members, output as JSON.
         fields.push_back(field);
       }
