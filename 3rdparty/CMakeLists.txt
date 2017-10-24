@@ -872,6 +872,41 @@ if (NOT WIN32)
 endif ()
 
 
+# libgraphqlparser: A GraphQL query parser in C++ with C and C++ APIs
+# https://github.com/graphql/libgraphqlparser
+############################################
+if (WIN32)
+  # TODO(benh): Implement Windows support!
+else ()
+  EXTERNAL(libgraphqlparser ${LIBGRAPHQLPARSER_VERSION} ${CMAKE_CURRENT_BINARY_DIR})
+  add_library(libgraphqlparser ${LIBRARY_LINKAGE} IMPORTED GLOBAL)
+  add_dependencies(libgraphqlparser ${LIBGRAPHQLPARSER_TARGET})
+
+  set_target_properties(
+    libgraphqlparser PROPERTIES
+    IMPORTED_LOCATION ${LIBGRAPHQLPARSER_ROOT}-build/libgraphqlparser${LIBRARY_SUFFIX}
+    # TODO(benh): Implement Windows support!
+    INTERFACE_INCLUDE_DIRECTORIES ${LIBGRAPHQLPARSER_ROOT}-build/usr/local/include)
+
+  MAKE_INCLUDE_DIR(libgraphqlparser)
+  GET_BYPRODUCTS(libgraphqlparser)
+
+  set(LIBGRAPHQLPARSER_URL https://github.com/graphql/libgraphqlparser/archive/${LIBGRAPHQLPARSER_VERSION}.tar.gz)
+
+  set(LIBGRAPHQLPARSER_INSTALL_CMD make DESTDIR=${LIBGRAPHQLPARSER_ROOT}-build install)
+
+  ExternalProject_Add(
+    ${LIBGRAPHQLPARSER_TARGET}
+    PREFIX            ${LIBGRAPHQLPARSER_CMAKE_ROOT}
+    BUILD_BYPRODUCTS  ${LIBGRAPHQLPARSER_BYPRODUCTS}
+    PATCH_COMMAND     ${CMAKE_NOOP}
+    CMAKE_ARGS        ${CMAKE_FORWARD_ARGS}
+    INSTALL_COMMAND   ${LIBGRAPHQLPARSER_INSTALL_CMD}
+    URL               ${LIBGRAPHQLPARSER_URL}
+    URL_HASH          ${LIBGRAPHQLPARSER_HASH})
+endif ()
+
+
 # In-tree dependencies.
 #######################
 add_subdirectory(stout)

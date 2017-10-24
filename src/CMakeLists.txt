@@ -628,7 +628,7 @@ target_link_libraries(
   $<$<BOOL:${HAS_JAVA}>:mesos-java>)
 
 if (NOT WIN32)
-  target_link_libraries(mesos PUBLIC leveldb)
+  target_link_libraries(mesos PUBLIC leveldb libgraphqlparser)
 endif ()
 
 if (ENABLE_PRECOMPILED_HEADERS)
