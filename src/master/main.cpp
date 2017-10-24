@@ -68,6 +68,10 @@
 #include "logging/flags.hpp"
 #include "logging/logging.hpp"
 
+//#ifdef HAVE_LIBGRAPHQLPARSER
+#include "master/graphql.hpp"
+#include <process/route.hpp>
+//#endif // HAVE_LIBGRAPHQLPARSER
 #include "master/master.hpp"
 #include "master/registrar.hpp"
 
@@ -127,7 +131,6 @@ using std::set;
 using std::shared_ptr;
 using std::string;
 using std::vector;
-
 
 int main(int argc, char** argv)
 {
@@ -528,6 +531,49 @@ int main(int argc, char** argv)
     // appoint this Master as the leader.
     dynamic_cast<StandaloneMasterDetector*>(detector)->appoint(master->info());
   }
+
+  process::http::Route graphql(
+      "/graphql",
+      None(),
+      [&master](const process::http::Request& request) {
+        return process::http::post(master->self(), "/api/v1/graphql")
+          .then([=](const process::http::Response& response)
+                  -> process::http::Response {
+            Try<JSON::Object> object = JSON::parse<JSON::Object>(response.body);
+            if (object.isError()) {
+              return process::http::InternalServerError(object.error());
+            }
+
+            Try<mesos::master::Response::GetState> state =
+              ::protobuf::parse<mesos::master::Response::GetState>(
+                  object.get());
+
+            if (state.isError()) {
+              return process::http::InternalServerError(state.error());
+            }
+
+            Option<Error> error = None();
+
+            process::http::Response r = process::http::OK(
+                jsonify([&](JSON::ObjectWriter* writer) {
+                  writer->field("data", [&](JSON::ObjectWriter* writer) {
+                    error = graphql::execute(request.body, state.get(), writer);
+                  });
+                }),
+                request.url.query.get("jsonp"));
+
+            if (error.isNone()) {
+              return r;
+            }
+
+            return process::http::OK(jsonify([&](JSON::ObjectWriter* writer) {
+              writer->field("errors", [&](JSON::ArrayWriter* writer) {
+                writer->element(error->message);
+              });
+            }),
+            request.url.query.get("jsonp"));
+          });
+      });
 
   process::spawn(master);
   process::wait(master->self());

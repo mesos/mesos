@@ -1275,6 +1275,12 @@ private:
         const Option<process::http::authentication::Principal>&
             principal) const;
 
+    // /api/v1/graphql
+    process::Future<process::http::Response> graphql(
+        const process::http::Request& request,
+        const Option<process::http::authentication::Principal>&
+            principal) const;
+
     // /master/create-volumes
     process::Future<process::http::Response> createVolumes(
         const process::http::Request& request,

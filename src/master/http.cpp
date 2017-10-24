@@ -75,6 +75,7 @@
 
 #include "logging/logging.hpp"
 
+//#include "master/graphql.hpp"
 #include "master/machine.hpp"
 #include "master/maintenance.hpp"
 #include "master/master.hpp"
@@ -5149,6 +5150,60 @@ Future<Response> Master::Http::_markAgentGone(const SlaveID& slaveId) const
   return gone.then([]() -> Future<Response> {
     return OK();
   });
+}
+
+
+Future<Response> Master::Http::graphql(
+    const Request& request,
+    const Option<Principal>& principal) const
+{
+  if (request.method != "POST") {
+    return MethodNotAllowed({"POST"});
+  }
+
+  // TODO(greggomann): Remove this check once the `Principal` type is used in
+  // `ReservationInfo`, `DiskInfo`, and within the master's `principals` map.
+  // See MESOS-7202.
+  if (principal.isSome() && principal->value.isNone()) {
+    return Forbidden(
+        "The request's authenticated principal contains claims, but no value "
+        "string. The master currently requires that principals have a value");
+  }
+
+  return ObjectApprovers::create(
+      master->authorizer,
+      principal,
+      {VIEW_FRAMEWORK, VIEW_TASK, VIEW_EXECUTOR, VIEW_ROLE})
+    .then(defer(
+        master->self(),
+        [=](const Owned<ObjectApprovers>& approvers) -> Response {
+          // TODO(benh): Get all of the body if we have a pipe.
+          CHECK_EQ(Request::BODY, request.type);
+
+          mesos::master::Response::GetState state = _getState(approvers);
+
+          return OK(jsonify(JSON::Protobuf(state)));
+
+          // Option<Error> error = None();
+
+          // Response response = OK(jsonify([&](JSON::ObjectWriter* writer) {
+          //   writer->field("data", [&](JSON::ObjectWriter* writer) {
+          //     error = graphql::execute(request.body, state, writer);
+          //   });
+          // }),
+          // request.url.query.get("jsonp"));
+
+          // if (error.isNone()) {
+          //   return response;
+          // }
+
+          // return OK(jsonify([&](JSON::ObjectWriter* writer) {
+          //   writer->field("errors", [&](JSON::ArrayWriter* writer) {
+          //     writer->element(error->message);
+          //   });
+          // }),
+          // request.url.query.get("jsonp"));
+        }));
 }
 
 } // namespace master {

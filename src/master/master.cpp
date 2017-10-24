@@ -914,6 +914,16 @@ void Master::initialize()
           logRequest(request);
           return http.scheduler(request, principal);
         });
+  route("/api/v1/graphql",
+        // TODO(benh): Make this READWRITE authentication domain in
+        // the future if we support mutations.
+        READONLY_HTTP_AUTHENTICATION_REALM,
+        None(),
+        [this](const process::http::Request& request,
+               const Option<Principal>& principal) {
+          logRequest(request);
+          return http.graphql(request, principal);
+        });
   route("/create-volumes",
         READWRITE_HTTP_AUTHENTICATION_REALM,
         Http::CREATE_VOLUMES_HELP(),
