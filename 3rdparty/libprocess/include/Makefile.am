@@ -58,6 +58,7 @@ nobase_include_HEADERS =		\
   process/protobuf.hpp			\
   process/queue.hpp			\
   process/reap.hpp			\
+  process/route.hpp			\
   process/run.hpp			\
   process/sequence.hpp			\
   process/shared.hpp			\

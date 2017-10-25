@@ -78,6 +78,7 @@
 #include <process/owned.hpp>
 #include <process/process.hpp>
 #include <process/profiler.hpp>
+#include <process/route.hpp>
 #include <process/reap.hpp>
 #include <process/sequence.hpp>
 #include <process/socket.hpp>
@@ -342,56 +343,6 @@ private:
   queue<Item*> items;
 
   Option<http::Pipe::Reader> pipe; // Current pipe, if streaming.
-};
-
-
-// Helper for creating routes without a process.
-// TODO(benh): Move this into route.hpp.
-class Route
-{
-public:
-  Route(const string& name,
-        const Option<string>& help,
-        const lambda::function<Future<Response>(const Request&)>& handler)
-    : process(name, help, handler)
-  {
-    spawn(process);
-  }
-
-  ~Route()
-  {
-    terminate(process);
-    wait(process);
-  }
-
-private:
-  class RouteProcess : public Process<RouteProcess>
-  {
-  public:
-    RouteProcess(
-        const string& name,
-        const Option<string>& _help,
-        const lambda::function<Future<Response>(const Request&)>& _handler)
-      : ProcessBase(strings::remove(name, "/", strings::PREFIX)),
-        help(_help),
-        handler(_handler) {}
-
-  protected:
-    virtual void initialize()
-    {
-      route("/", help, &RouteProcess::handle);
-    }
-
-    Future<Response> handle(const Request& request)
-    {
-      return handler(request);
-    }
-
-    const Option<string> help;
-    const lambda::function<Future<Response>(const Request&)> handler;
-  };
-
-  RouteProcess process;
 };
 
 
@@ -661,7 +612,7 @@ static AuthenticatorManager* authenticator_manager = nullptr;
 static AuthorizationCallbacks* authorization_callbacks = nullptr;
 
 // Global route that returns process information.
-static Route* processes_route = nullptr;
+static http::Route* processes_route = nullptr;
 
 // Global help.
 PID<Help> help;
@@ -1379,7 +1330,7 @@ bool initialize(
   lambda::function<Future<Response>(const Request&)> __processes__ =
     lambda::bind(&ProcessManager::__processes__, process_manager, lambda::_1);
 
-  processes_route = new Route("/__processes__", None(), __processes__);
+  processes_route = new http::Route("/__processes__", None(), __processes__);
 
   VLOG(1) << "libprocess is initialized on " << address() << " with "
           << num_worker_threads << " worker threads";
