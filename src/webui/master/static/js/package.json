@@ -1,0 +1,26 @@
+{
+  "name": "@apache/mesos",
+  "version": "1.5.0",
+  "description": "Apache Mesos Web UI",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://git-wip-us.apache.org/repos/asf/mesos.git"
+  },
+  "keywords": [
+    "mesos"
+  ],
+  "author": "Benjamin Mahler, Benjamin Hindman, Vinod Kone",
+  "license": "Apache-2.0",
+  "dependencies": {
+  },
+  "devDependencies": {
+    "babel-core": "^6.26.0",
+    "babel-loader": "^7.1.2",
+    "babel-preset-env": "^1.6.1",
+    "webpack": "^3.8.1"
+  }
+}
