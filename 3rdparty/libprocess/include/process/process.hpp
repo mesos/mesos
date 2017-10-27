@@ -690,7 +690,7 @@ inline bool wait(const ProcessBase* process, const Duration& duration)
 
 
 // Per thread process pointer.
-extern thread_local ProcessBase* __process__;
+extern __thread ProcessBase* __process__;
 
 // NOTE: Methods in this namespace should only be used in tests to
 // inject arbitrary events.

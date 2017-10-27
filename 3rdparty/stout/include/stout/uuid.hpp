@@ -42,7 +42,7 @@ struct UUID : boost::uuids::uuid
 public:
   static UUID random()
   {
-    static thread_local boost::uuids::random_generator* generator = nullptr;
+    static __thread boost::uuids::random_generator* generator = nullptr;
 
     if (generator == nullptr) {
       generator = new boost::uuids::random_generator();
@@ -72,7 +72,7 @@ public:
   static Try<UUID> fromString(const std::string& s)
   {
     try {
-      // NOTE: We don't use `thread_local` for the `string_generator`
+      // NOTE: We don't use `__thread` for the `string_generator`
       // (unlike for the `random_generator` above), because it is cheap
       // to construct one each time.
       boost::uuids::string_generator gen;

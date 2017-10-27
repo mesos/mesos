@@ -25,7 +25,7 @@ extern event_base* base;
 
 // Per thread bool pointer. We use a pointer to lazily construct the
 // actual bool.
-extern thread_local bool* _in_event_loop_;
+extern __thread bool* _in_event_loop_;
 
 
 #define __in_event_loop__ *(_in_event_loop_ == nullptr ?                \

@@ -668,10 +668,10 @@ PID<Help> help;
 PID<Logging> _logging;
 
 // Per-thread process pointer.
-thread_local ProcessBase* __process__ = nullptr;
+__thread ProcessBase* __process__ = nullptr;
 
 // Per-thread executor pointer.
-thread_local Executor* _executor_ = nullptr;
+__thread Executor* _executor_ = nullptr;
 
 namespace metrics {
 namespace internal {

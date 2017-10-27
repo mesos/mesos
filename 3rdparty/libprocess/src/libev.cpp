@@ -39,7 +39,7 @@ std::mutex* watchers_mutex = new std::mutex();
 std::queue<lambda::function<void()>>* functions =
   new std::queue<lambda::function<void()>>();
 
-thread_local bool* _in_event_loop_ = nullptr;
+__thread bool* _in_event_loop_ = nullptr;
 
 
 void handle_async(struct ev_loop* loop, ev_async* _, int revents)
