@@ -4,7 +4,7 @@
   </li>
   <li class="active">
     <span class="badge badge-type">Framework</span>
-    {{framework.id}}
+    {{framework.framework_info.id.value}}
   </li>
 </ol>
 
@@ -18,28 +18,29 @@
     <div class="well">
       <dl class="inline clearfix">
         <dt>Name:</dt>
-        <dd>{{framework.name}}</dd>
-        <dt ng-show="framework.webui_url">Web UI:</dt>
-        <dd ng-show="framework.webui_url"><a href="{{framework.webui_url}}">{{framework.webui_url}}</a></dd>
+        <dd>{{framework.framework_info.name}}</dd>
+        <dt ng-show="framework.framework_info.webui_url">Web UI:</dt>
+        <dd ng-show="framework.framework_info.webui_url"><a href="{{framework.framework_info.webui_url}}">{{framework.framework_info.webui_url}}</a></dd>
         <dt>User:</dt>
-        <dd>{{framework.user}}</dd>
+        <dd>{{framework.framework_info.user}}</dd>
         <!-- TODO(bmahler): Consider having a break between each role
              in order to increase readability. Also, this doesn't
              display well when there are a lot of roles (e.g. a large
              organization with a lot of teams & services, using roles
              like /engineering/frontend/webserver, etc). -->
         <dt>Roles:</dt>
-        <dd>{{framework.roles.toString()}}</dd>
+        <dd>{{framework.framework_info.roles.toString()}}</dd>
         <dt>Principal:</dt>
-        <dd>{{framework.principal}}</dd>
+        <dd>{{framework.framework_info.principal}}</dd>
         <dt>Registered:</dt>
-        <dd>
-          <m-timestamp value="{{framework.registered_time * 1000}}"></m-timestamp>
+        <dd ng-if="!framework.registered_time">-</dd>
+        <dd ng-if="framework.registered_time">
+          <m-timestamp value="{{framework.registered_time.nanoseconds / 1000000}}"></m-timestamp>
         </dd>
         <dt>Re-registered:</dt>
         <dd ng-if="!framework.reregistered_time">-</dd>
         <dd ng-if="framework.reregistered_time">
-          <m-timestamp value="{{framework.reregistered_time * 1000}}"></m-timestamp>
+          <m-timestamp value="{{framework.reregistered_time.nanoseconds / 1000000}}"></m-timestamp>
         </dd>
         <dt>Active tasks:</dt>
         <dd>{{framework.tasks.length | number}}</dd>
@@ -100,37 +101,37 @@
           <tr>
             <td>CPUs</td>
             <td class="text-right">
-              {{framework.used_resources.cpus | number}}
+              {{framework.allocated_cpus | number}}
             </td>
             <td class="text-right">
-              {{framework.offered_resources.cpus | number}}
+              -
             </td>
           </tr>
           <tr>
             <td>GPUs</td>
             <td class="text-right">
-              {{framework.used_resources.gpus | number}}
+              {{framework.allocated_gpus | number}}
             </td>
             <td class="text-right">
-              {{framework.offered_resources.gpus | number}}
+              -
             </td>
           </tr>
           <tr>
             <td>Memory</td>
             <td class="text-right">
-              {{framework.used_resources.mem * (1024 * 1024) | dataSize}}
+              {{framework.allocated_mem * (1024 * 1024) | dataSize}}
             </td>
             <td class="text-right">
-              {{framework.offered_resources.mem * (1024 * 1024) | dataSize}}
+              -
             </td>
           </tr>
           <tr>
             <td>Disk</td>
             <td class="text-right">
-              {{framework.used_resources.mem * (1024 * 1024) | dataSize}}
+              {{framework.allocated_mem * (1024 * 1024) | dataSize}}
             </td>
             <td class="text-right">
-              {{framework.offered_resources.mem * (1024 * 1024) | dataSize}}
+              -
             </td>
           </tr>
         </tbody>
@@ -156,8 +157,8 @@
       <tbody>
         <tr ng-repeat="task in $data">
           <td>
-            <a href="#/agents/{{task.slave_id}}/frameworks/{{task.framework_id}}/executors/{{task.executor_id}}">
-              {{task.id}}
+            <a href="#/agents/{{task.agent_id.value}}/frameworks/{{task.framework_id.value}}/executors/{{task.executor_id.value}}">
+              {{task.task_id.value}}
             </a>
           </td>
           <td>{{task.name}}</td>
@@ -168,18 +169,18 @@
             <m-timestamp value="{{task.start_time}}"></m-timestamp>
           </td>
           <td>
-            <span data-ng-show="agents[task.slave_id]">
-              {{agents[task.slave_id].hostname}}
+            <span data-ng-show="agents[task.agent_id.value]">
+              {{agents[task.agent_id.value].agent_info.hostname}}
             </span>
-            <span class="text-muted" data-ng-show="!agents[task.slave_id]">
+            <span class="text-muted" data-ng-show="!agents[task.agent_id.value]">
               Agent offline
             </span>
           </td>
           <td>
-            <a data-ng-show="agents[task.slave_id]" href="#/agents/{{task.slave_id}}/frameworks/{{task.framework_id}}/executors/{{task.executor_id}}/tasks/{{task.id}}/browse">
+            <a data-ng-show="agents[task.agent_id.value]" href="#/agents/{{task.agent_id.value}}/frameworks/{{task.framework_id.value}}/executors/{{task.executor_id.value}}/tasks/{{task.task_id.value}}/browse">
               Sandbox
             </a>
-            <span class="text-muted" data-ng-show="!agents[task.slave_id]">
+            <span class="text-muted" data-ng-show="!agents[task.agent_id.value]">
               Agent offline
             </span>
           </td>
@@ -206,7 +207,7 @@
           <td>
             <m-timestamp value="{{task.start_time}}"></m-timestamp>
           </td>
-          <td>{{task.slave_id}}</td>
+          <td>{{task.agent_id.value}}</td>
         </tr>
       </tbody>
     </table>
@@ -227,7 +228,7 @@
       </thead>
       <tbody>
         <tr ng-repeat="task in $data">
-          <td>{{task.id}}</td>
+          <td>{{task.task_id.value}}</td>
           <td>{{task.name}}</td>
           <td>{{task.role}}</td>
           <td>{{task.state | truncateMesosState}}</td>
@@ -238,19 +239,19 @@
             <m-timestamp value="{{task.finish_time}}"></m-timestamp>
           </td>
           <td>
-            <a data-ng-show="agents[task.slave_id]"
-                href="#/agents/{{task.slave_id}}/frameworks/{{task.framework_id}}/executors/{{task.executor_id}}">
-              {{agents[task.slave_id].hostname}}
+            <a data-ng-show="agents[task.agent_id.value]"
+                href="#/agents/{{task.agent_id.value}}/frameworks/{{task.framework_id.value}}/executors/{{task.executor_id.value}}">
+              {{agents[task.agent_id.value].agent_info.hostname}}
             </a>
-            <span class="text-muted" data-ng-show="!agents[task.slave_id]">
+            <span class="text-muted" data-ng-show="!agents[task.agent_id.value]">
               Agent offline
             </span>
           </td>
           <td>
-            <a data-ng-show="agents[task.slave_id]" href="#/agents/{{task.slave_id}}/frameworks/{{task.framework_id}}/executors/{{task.executor_id}}/tasks/{{task.id}}/browse">
+            <a data-ng-show="agents[task.agent_id.value]" href="#/agents/{{task.agent_id.value}}/frameworks/{{task.framework_id.value}}/executors/{{task.executor_id.value}}/tasks/{{task.task_id.value}}/browse">
               Sandbox
             </a>
-            <span class="text-muted" data-ng-show="!agents[task.slave_id]">
+            <span class="text-muted" data-ng-show="!agents[task.agent_id.value]">
               Agent offline
             </span>
           </td>

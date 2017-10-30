@@ -14,18 +14,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import { request, stream } from '@dcos/mesos-client';
+
 (function() {
   'use strict';
 
   var mesosApp = angular.module('mesos');
-
-  function hasSelectedText() {
-    if (window.getSelection) {  // All browsers except IE before version 9.
-      var range = window.getSelection();
-      return range.toString().length > 0;
-    }
-    return false;
-  }
 
   // Returns the URL prefix for an agent, there are two cases
   // to consider:
@@ -54,7 +48,7 @@
     var port = agent.pid.substring(agent.pid.lastIndexOf(':') + 1);
     var processId = agent.pid.substring(0, agent.pid.indexOf('@'));
 
-    var url = '//' + agent.hostname + ':' + port;
+    var url = '//' + agent.agent_info.hostname + ':' + port;
 
     if (includeProcessId) {
       url += '/' + processId;
@@ -126,224 +120,536 @@
     });
   }
 
+  var isStateTerminal = function(taskState) {
+    var terminalStates = [
+      'TASK_ERROR',
+      'TASK_FAILED',
+      'TASK_FINISHED',
+      'TASK_KILLED',
+      'TASK_LOST',
+      'TASK_DROPPED',
+      'TASK_GONE',
+      'TASK_GONE_BY_OPERATOR'
+    ];
+    return terminalStates.indexOf(taskState) > -1;
+  };
 
-  // Update the outermost scope with the new state.
-  function updateState($scope, $timeout, state) {
-    // Don't do anything if the state hasn't changed.
-    if ($scope.state == state) {
-      return true; // Continue polling.
+  var setTaskMetadata = function(task) {
+    task.role = task.resources[0].allocation_info.role;
+
+    if (!task.executor_id) {
+      task.executor_id = task.task_id;
     }
 
-    $scope.state = state;
-
-    // A cluster is named if the state returns a non-empty string name.
-    // Track whether this cluster is named in a Boolean for display purposes.
-    $scope.clusterNamed = !!$scope.state.cluster;
-
-    // Check for selected text, and allow up to 20 seconds to pass before
-    // potentially wiping the user highlighted text.
-    // TODO(bmahler): This is to avoid the annoying loss of highlighting when
-    // the tables update. Once we can have tighter granularity control on the
-    // angular.js dynamic table updates, we should remove this hack.
-    $scope.time_since_update += $scope.delay;
-
-    if (hasSelectedText() && $scope.time_since_update < 20000) {
-      return true;
+    // Task might not have any statuses if it's just been added and we
+    // received a streamed event TASK_ADDED. We add one by default so
+    // the rest of the code can expect it to be present.
+    if (!_.has(task, 'statuses')) {
+      task.statuses = [];
     }
 
-    // Pass this pollTime to all relativeDate calls to make them all relative to
-    // the same moment in time.
-    //
-    // If relativeDate is called without a reference time, it instantiates a new
-    // Date to be the reference. Since there can be hundreds of dates on a given
-    // page, they would all be relative to slightly different moments in time.
-    $scope.pollTime = new Date();
-
-    // Update the maps.
-    $scope.agents = {};
-    $scope.frameworks = {};
-    $scope.offers = {};
-    $scope.completed_frameworks = {};
-    $scope.active_tasks = [];
-    $scope.unreachable_tasks = [];
-    $scope.completed_tasks = [];
-
-    // Update the stats.
-    $scope.cluster = $scope.state.cluster;
-    $scope.total_cpus = 0;
-    $scope.total_gpus = 0;
-    $scope.total_mem = 0;
-    $scope.total_disk = 0;
-    $scope.used_cpus = 0;
-    $scope.used_gpus = 0;
-    $scope.used_mem = 0;
-    $scope.used_disk = 0;
-    $scope.offered_cpus = 0;
-    $scope.offered_gpus = 0;
-    $scope.offered_mem = 0;
-    $scope.offered_disk = 0;
-
-    $scope.activated_agents = $scope.state.activated_slaves;
-    $scope.deactivated_agents = $scope.state.deactivated_slaves;
-    $scope.unreachable_agents = $scope.state.unreachable_slaves;
-
-    _.each($scope.state.slaves, function(agent) {
-      $scope.agents[agent.id] = agent;
-      $scope.total_cpus += agent.resources.cpus;
-      $scope.total_gpus += agent.resources.gpus;
-      $scope.total_mem += agent.resources.mem;
-      $scope.total_disk += agent.resources.disk;
-    });
-
-    var setTaskMetadata = function(task) {
-      if (!task.executor_id) {
-        task.executor_id = task.id;
+    if (task.statuses.length > 0) {
+      var firstStatus = task.statuses[0];
+      if (!isStateTerminal(firstStatus.state)) {
+        task.start_time = firstStatus.timestamp * 1000;
       }
-      if (task.statuses.length > 0) {
-          var firstStatus = task.statuses[0];
-          if (!isStateTerminal(firstStatus.state)) {
-              task.start_time = firstStatus.timestamp * 1000;
-          }
-          var lastStatus = task.statuses[task.statuses.length - 1];
-          if (isStateTerminal(task.state)) {
-              task.finish_time = lastStatus.timestamp * 1000;
-          }
-          task.healthy = lastStatus.healthy;
+      var lastStatus = task.statuses[task.statuses.length - 1];
+      if (isStateTerminal(task.state)) {
+        task.finish_time = lastStatus.timestamp * 1000;
       }
-    };
+      task.healthy = lastStatus.healthy;
+    }
+  };
 
-    var isStateTerminal = function(taskState) {
-      var terminalStates = [
-          'TASK_ERROR',
-          'TASK_FAILED',
-          'TASK_FINISHED',
-          'TASK_KILLED',
-          'TASK_LOST',
-          'TASK_DROPPED',
-          'TASK_GONE',
-          'TASK_GONE_BY_OPERATOR'
-      ];
-      return terminalStates.indexOf(taskState) > -1;
-    };
+  function safeApply($scope, f) {
+    return ($scope.$$phase || $scope.$root.$$phase)
+      ? f()
+      : $scope.$apply(f);
+  }
 
-    _.each($scope.state.frameworks, function(framework) {
-      $scope.frameworks[framework.id] = framework;
-
-      // Fill in the `roles` field for non-MULTI_ROLE schedulers.
-      if (framework.role) {
-        framework.roles = [framework.role];
+  function subscribed($scope, state) {
+    return safeApply($scope, function() {
+      // Don't do anything if the state hasn't changed.
+      if ($scope.state == state) {
+        return;
       }
 
-      _.each(framework.offers, function(offer) {
-        $scope.offers[offer.id] = offer;
-        $scope.offered_cpus += offer.resources.cpus;
-        $scope.offered_gpus += offer.resources.gpus;
-        $scope.offered_mem += offer.resources.mem;
-        $scope.offered_disk += offer.resources.disk;
-        offer.framework_name = $scope.frameworks[offer.framework_id].name;
-        offer.hostname = $scope.agents[offer.slave_id].hostname;
+      $scope.state = state;
+
+      // Reset the maps and arrays.
+      $scope.agents = {};
+      $scope.frameworks = {};
+      $scope.completed_frameworks = {};
+      $scope.offers = {};
+      $scope.active_tasks = [];
+      $scope.unreachable_tasks = [];
+      $scope.completed_tasks = [];
+
+      // Update the stats.
+      $scope.total_cpus = 0;
+      $scope.total_gpus = 0;
+      $scope.total_mem = 0;
+      $scope.total_disk = 0;
+      $scope.allocated_cpus = 0;
+      $scope.allocated_gpus = 0;
+      $scope.allocated_mem = 0;
+      $scope.allocated_disk = 0;
+
+      $scope.activated_agents = 0;
+      $scope.deactivated_agents = 0;
+
+      // NOTE: ordering is important here! Must do agents and
+      // frameworks and completed frameworks before tasks so that when
+      // we do the tasks we properly update the agents and frameworks.
+
+      _.each($scope.state.get_agents.agents, function(agent) {
+        agentAdded($scope, agent);
       });
 
-      $scope.used_cpus += framework.resources.cpus;
-      $scope.used_gpus += framework.resources.gpus;
-      $scope.used_mem += framework.resources.mem;
-      $scope.used_disk += framework.resources.disk;
+      _.each($scope.state.get_frameworks.frameworks, function(framework) {
+        frameworkAdded($scope, framework);
+      });
 
-      framework.cpus_share = 0;
-      if ($scope.total_cpus > 0) {
-        framework.cpus_share = framework.used_resources.cpus / $scope.total_cpus;
+      _.each($scope.state.get_frameworks.completed_frameworks, function(framework) {
+        frameworkAdded($scope, framework);
+        frameworkRemoved($scope, framework.framework_info);
+      });
+
+      // TODO(benh): Do something with `$scope.state.get_tasks.pending_tasks`?
+
+      _.each($scope.state.get_tasks.tasks, function(task) {
+        taskAdded($scope, task);
+      });
+
+      if (_.has($scope.state.get_tasks, 'unreachable_tasks')) {
+        _.each($scope.state.get_tasks.unreachable_tasks, function(task) {
+          setTaskMetadata(task);
+
+          var framework = _.has($scope.frameworks, task.framework_id.value)
+              ? $scope.frameworks[task.framework_id.value]
+              : undefined;
+
+          framework.unreachable_tasks = framework.unreachable_tasks.concat(task);
+
+          // TODO(benh): Update `allocation_*` of framework and agent.
+
+          $scope.unreachable_tasks = $scope.unreachable_tasks.concat(task);
+        });
       }
 
-      framework.gpus_share = 0;
-      if ($scope.total_gpus > 0) {
-        framework.gpus_share = framework.used_resources.gpus / $scope.total_gpus;
+      _.each($scope.state.get_tasks.completed_tasks, function(task) {
+        setTaskMetadata(task);
+
+        var framework = undefined;
+
+        if (_.has($scope.frameworks, task.framework_id.value)) {
+          framework = $scope.frameworks[task.framework_id.value];
+        } else if (_.has($scope.completed_frameworks, task.framework_id.value)) {
+          framework = $scope.completed_frameworks[task.framework_id.value];
+        }
+
+        if (!_.isUndefined(framework)) {
+          framework.completed_tasks = framework.completed_tasks.concat(task);
+          switch (task.state) {
+          case "TASK_FINISHED": framework.finished_tasks++; break;
+          case "TASK_KILLED": framework.killed_tasks++; break;
+          case "TASK_FAILED": framework.failed_tasks++; break;
+          case "TASK_LOST": framework.lost_tasks++; break;
+          }
+        }
+
+        $scope.completed_tasks = $scope.completed_tasks.concat(task);
+      });
+
+      $scope.idle_cpus = $scope.total_cpus - $scope.allocated_cpus;
+      $scope.idle_gpus = $scope.total_gpus - $scope.allocated_gpus;
+      $scope.idle_mem = $scope.total_mem - $scope.allocated_mem;
+      $scope.idle_disk = $scope.total_disk - $scope.allocated_disk;
+    });
+  }
+
+  function taskAdded($scope, task) {
+    return safeApply($scope, function() {
+      setTaskMetadata(task);
+
+      $scope.active_tasks = $scope.active_tasks.concat(task);
+
+      // TODO(benh): Do we need to be so defensive?
+      var framework = _.has($scope.frameworks, task.framework_id.value)
+          ? $scope.frameworks[task.framework_id.value]
+          : undefined;
+
+      if (_.isUndefined(framework)) {
+        return;
       }
 
-      framework.mem_share = 0;
-      if ($scope.total_mem > 0) {
-        framework.mem_share = framework.used_resources.mem / $scope.total_mem;
+      framework.tasks = framework.tasks.concat(task);
+
+      switch (task.state) {
+        case "TASK_STAGING": framework.staging_tasks++; break;
+        case "TASK_STARTING": framework.starting_tasks++; break;
+        case "TASK_RUNNING": framework.running_tasks++; break;
+        case "TASK_KILLING": framework.killing_tasks++; break;
       }
 
-      framework.disk_share = 0;
-      if ($scope.total_disk > 0) {
-        framework.disk_share = framework.used_resources.disk / $scope.total_disk;
+      _.each(task.resources, function(resource) {
+        if (resource.name === "cpus") {
+          framework.allocated_cpus += resource.scalar.value;
+        } else if (resource.name === "gpus") {
+          framework.allocated_gpus = resource.scalar.value;
+        } else if (resource.name === "mem") {
+          framework.allocated_mem = resource.scalar.value;
+        } else if (resource.name === "disk") {
+          framework.allocated_disk += resource.scalar.value;
+        }
+      });
+
+      // TODO(benh): Do we need to be so defensive?
+      var agent = _.has($scope.agents, task.agent_id.value)
+          ? $scope.agents[task.agent_id.value]
+          : undefined;
+
+      if (_.isUndefined(agent)) {
+        return;
       }
 
-      framework.max_share = Math.max(
-          framework.cpus_share,
-          framework.gpus_share,
-          framework.mem_share,
-          framework.disk_share);
+      _.each(task.resources, function(resource) {
+        if (resource.name === "cpus") {
+          agent.allocated_cpus += resource.scalar.value;
+        } else if (resource.name === "gpus") {
+          agent.allocated_gpus = resource.scalar.value;
+        } else if (resource.name === "mem") {
+          agent.allocated_mem = resource.scalar.value;
+        } else if (resource.name === "disk") {
+          agent.allocated_disk += resource.scalar.value;
+        }
+      });
+    });
+  }
 
-      // If the executor ID is empty, this is a command executor with an
-      // internal executor ID generated from the task ID.
-      // TODO(brenden): Remove this once
-      // https://issues.apache.org/jira/browse/MESOS-527 is fixed.
-      _.each(framework.tasks, setTaskMetadata);
-      _.each(framework.unreachable_tasks, setTaskMetadata);
-      _.each(framework.completed_tasks, setTaskMetadata);
+  function findFramework($scope, framework_id) {
+    if (_.has($scope.frameworks, framework_id.value)) {
+      return $scope.frameworks[framework_id.value];
+    } else if (_.has($scope.completed_frameworks, framework_id.value)) {
+      return $scope.completed_frameworks[framework_id.value];
+    }
+    return undefined;
+  }
+
+  function findTask($scope, framework, task_id) {
+    return _.find(framework.tasks, function (task) {
+      return task.task_id.value === task_id.value;
+    });
+  }
+
+  function taskUpdated($scope, framework_id, status, state) {
+    return safeApply($scope, function() {
+      var framework = findFramework($scope, framework_id);
+
+      if (_.isUndefined(framework)) {
+        return;
+      }
+
+      var task = findTask($scope, framework, status.task_id);
+
+      if (_.isUndefined(task)) {
+        return;
+      }
+
+      framework.tasks = _.filter(framework.tasks, function(t) {
+        return t.task_id.value !== task.task_id.value;
+      });
+
+      framework.unreachable_tasks = _.filter(framework.unreachable_tasks, function(t) {
+        return t.task_id.value !== task.task_id.value;
+      });
+
+      framework.completed_tasks = _.filter(framework.completed_tasks, function(t) {
+        return t.task_id.value !== task.task_id.value;
+      });
+
+      $scope.active_tasks = _.filter($scope.active_tasks, function(t) {
+        return t.task_id.value !== task.task_id.value;
+      });
+
+      $scope.unreachable_tasks = _.filter($scope.unreachable_tasks, function(t) {
+        return t.task_id.value !== task.task_id.value;
+      });
+
+      $scope.completed_tasks = _.filter($scope.completed_tasks, function(t) {
+        return t.task_id.value !== task.task_id.value;
+      });
+
+      if (state === "TASK_UNREACHABLE") {
+        framework.unreachable_tasks = framework.unreachable_tasks.concat(task);
+        $scope.unreachable_tasks = $scope.unreachable_tasks.concat(task);
+      } else if (isStateTerminal(state)) {
+        framework.completed_tasks = framework.completed_tasks.concat(task);
+        $scope.completed_tasks = $scope.completed_tasks.concat(task);
+      } else {
+        framework.tasks = framework.tasks.concat(task);
+        $scope.active_tasks = $scope.active_tasks.concat(task);
+      }
+
+      switch (task.state) {
+        case "TASK_STAGING": framework.staging_tasks--; break;
+        case "TASK_STARTING": framework.starting_tasks--; break;
+        case "TASK_RUNNING": framework.running_tasks--; break;
+        case "TASK_KILLING": framework.killing_tasks--; break;
+        case "TASK_FINISHED": framework.finished_tasks--; break;
+        case "TASK_KILLED": framework.killed_tasks--; break;
+        case "TASK_FAILED": framework.failed_tasks--; break;
+        case "TASK_LOST": framework.lost_tasks--; break;
+      }
+
+      task.statuses = task.statuses.concat(status);
+      task.state = state;
+
+      switch (task.state) {
+        case "TASK_STAGING": framework.staging_tasks++; break;
+        case "TASK_STARTING": framework.starting_tasks++; break;
+        case "TASK_RUNNING": framework.running_tasks++; break;
+        case "TASK_KILLING": framework.killing_tasks++; break;
+        case "TASK_FINISHED": framework.finished_tasks++; break;
+        case "TASK_KILLED": framework.killed_tasks++; break;
+        case "TASK_FAILED": framework.failed_tasks++; break;
+        case "TASK_LOST": framework.lost_tasks++; break;
+      }
+
+      // TODO(benh): Update framework and agent `allocated_*`.
+    });
+  }
+
+  function agentAdded($scope, agent) {
+    return safeApply($scope, function() {
+      if (agent.active) {
+        $scope.activated_agents += 1;
+      } else {
+        $scope.deactivated_agents += 1;
+      }
+
+      agent.total_cpus = 0;
+      agent.total_gpus = 0;
+      agent.total_mem = 0;
+      agent.total_disk = 0;
+
+      agent.allocated_cpus = 0;
+      agent.allocated_gpus = 0;
+      agent.allocated_mem = 0;
+      agent.allocated_disk = 0;
+
+      _.each(agent.total_resources, function(resource) {
+        if (resource.name == "cpus") {
+          agent.total_cpus = resource.scalar.value;
+        } else if (resource.name == "gpus") {
+          agent.total_gpus = resource.scalar.value;
+        } else if (resource.name == "mem") {
+          agent.total_mem = resource.scalar.value;
+        } else if (resource.name == "disk") {
+          agent.total_disk = resource.scalar.value;
+        }
+      });
+
+      $scope.total_cpus += agent.total_cpus;
+      $scope.total_gpus += agent.total_gpus;
+      $scope.total_mem += agent.total_mem;
+      $scope.total_disk += agent.total_disk;
+
+      $scope.agents = _.clone($scope.agents);
+      $scope.agents[agent.agent_info.id.value] = agent;
+    });
+  }
+
+  function agentRemoved($scope, agent_id) {
+    return safeApply($scope, function() {
+      // TODO(benh): Do we need to be so defensive?
+      var agent = _.has($scope.agents, agent_id.value)
+          ? $scope.agents[agent_id.value]
+          : undefined;
+
+      if (!_.isUndefined(agent)) {
+        if (agent.active) {
+          $scope.activated_agents -= 1;
+        } else {
+          $scope.deactivated_agents -= 1;
+        }
+
+        $scope.total_cpus -= agent.total_cpus;
+        $scope.total_gpus -= agent.total_gpus;
+        $scope.total_mem -= agent.total_mem;
+        $scope.total_disk -= agent.total_disk;
+
+        $scope.agents = _.omit($scope.agents, agent_id.value);
+      }
+    });
+  }
+
+  function frameworkAdded($scope, framework) {
+    return safeApply($scope, function() {
+      // Fill in the `roles` field for non-MULTI_ROLE schedulers.
+      if (framework.framework_info.role) {
+        framework.framework_info.roles = [framework.framework_info.role];
+      }
+
+      framework.tasks = [];
+      framework.unreachable_tasks = [];
+      framework.completed_tasks = [];
+
+      framework.allocated_cpus = 0;
+      framework.allocated_gpus = 0;
+      framework.allocated_mem = 0;
+      framework.allocated_disk = 0;
 
       // TODO(bmahler): Add per-framework metrics to the master so that
       // the webui does not need to loop over all tasks!
-      framework.running_tasks = 0;
       framework.staging_tasks = 0;
       framework.starting_tasks = 0;
+      framework.running_tasks = 0;
       framework.killing_tasks = 0;
-
-      _.each(framework.tasks, function(task) {
-        switch (task.state) {
-            case "TASK_STAGING": framework.staging_tasks++; break;
-            case "TASK_STARTING": framework.starting_tasks++; break;
-            case "TASK_RUNNING": framework.running_tasks++; break;
-            case "TASK_KILLING": framework.killing_tasks++; break;
-        }
-      })
-
       framework.finished_tasks = 0;
       framework.killed_tasks = 0;
       framework.failed_tasks = 0;
       framework.lost_tasks = 0;
 
-      _.each(framework.completed_tasks, function(task) {
-        switch (task.state) {
+      _.each($scope.active_tasks, function(task) {
+        if (task.framework_id.value === framework.framework_info.id.value) {
+          framework.tasks = framework.tasks.concat(task);
+          _.each(task.resources, function(resource) {
+            if (resource.name === "cpus") {
+              framework.allocated_cpus += resource.scalar.value;
+            } else if (resource.name === "gpus") {
+              framework.allocated_gpus += resource.scalar.value;
+            } else if (resource.name === "mem") {
+              framework.allocated_mem += resource.scalar.value;
+            } else if (resource.name === "disk") {
+              framework.allocated_disk += resource.scalar.value;
+            }
+          });
+          switch (task.state) {
+            case "TASK_STAGING": framework.staging_tasks++; break;
+            case "TASK_STARTING": framework.starting_tasks++; break;
+            case "TASK_RUNNING": framework.running_tasks++; break;
+            case "TASK_KILLING": framework.killing_tasks++; break;
+          }
+        }
+      });
+
+      framework.cpus_share = 0;
+      if ($scope.total_cpus > 0) {
+        framework.cpus_share = framework.allocated_cpus / $scope.total_cpus;
+      }
+
+      framework.gpus_share = 0;
+      if ($scope.total_gpus > 0) {
+        framework.gpus_share = framework.allocated_gpus / $scope.total_gpus;
+      }
+
+      framework.mem_share = 0;
+      if ($scope.total_mem > 0) {
+        framework.mem_share = framework.allocated_mem / $scope.total_mem;
+      }
+
+      framework.disk_share = 0;
+      if ($scope.total_disk > 0) {
+        framework.disk_share = framework.allocated_disk / $scope.total_disk;
+      }
+
+      framework.max_share = Math.max(
+        framework.cpus_share,
+        framework.gpus_share,
+        framework.mem_share,
+        framework.disk_share);
+
+      _.each($scope.unreachable_tasks, function (task) {
+        if (task.framework_id.value === framework.framework_info.id.value) {
+          framework.unreachable_tasks = framework.unreachable_tasks.concat(task);
+          switch (task.state) {
+            case "TASK_STAGING": framework.staging_tasks++; break;
+            case "TASK_STARTING": framework.starting_tasks++; break;
+            case "TASK_RUNNING": framework.running_tasks++; break;
+            case "TASK_KILLING": framework.killing_tasks++; break;
+          }
+        }
+      });
+
+      _.each($scope.completed_tasks, function (task) {
+        if (task.framework_id.value === framework.framework_info.id.value) {
+          framework.completed_tasks = framework.completed_tasks.concat(task);
+          switch (task.state) {
             case "TASK_FINISHED": framework.finished_tasks++; break;
             case "TASK_KILLED": framework.killed_tasks++; break;
             case "TASK_FAILED": framework.failed_tasks++; break;
             case "TASK_LOST": framework.lost_tasks++; break;
+          }
         }
-      })
+      });
 
-      $scope.active_tasks = $scope.active_tasks.concat(framework.tasks);
-      $scope.unreachable_tasks = $scope.unreachable_tasks.concat(framework.unreachable_tasks);
-      $scope.completed_tasks =
-        $scope.completed_tasks.concat(framework.completed_tasks);
+      $scope.frameworks = _.clone($scope.frameworks);
+      $scope.frameworks[framework.framework_info.id.value] = framework;
     });
+  }
 
-    _.each($scope.state.completed_frameworks, function(framework) {
-      $scope.completed_frameworks[framework.id] = framework;
+  function frameworkUpdated($scope, framework) {
+    return safeApply($scope, function() {
+      $scope.frameworks = _.omit($scope.frameworks, framework.framework_info.id.value)
+      frameworkAdded(framework);
+    });
+  }
 
-      // Fill in the `roles` field for non-MULTI_ROLE schedulers.
-      if (framework.role) {
-        framework.roles = [framework.role];
+  function frameworkRemoved($scope, framework_info) {
+    return safeApply($scope, function() {
+      // TODO(benh): Do we need to be so defensive?
+      var framework = _.has($scope.frameworks, framework_info.id.value)
+          ? $scope.frameworks[framework_info.id.value]
+          : undefined;
+
+      $scope.frameworks = _.omit($scope.frameworks, framework_info.id.value);
+
+      if (!_.isUndefined(framework)) {
+        framework.allocated_cpus = 0;
+        framework.allocated_gpus = 0;
+        framework.allocated_mem = 0;
+        framework.allocated_disk = 0;
+
+        // TODO(bmahler): Add per-framework metrics to the master so that
+        // the webui does not need to loop over all tasks!
+        framework.staging_tasks = 0;
+        framework.starting_tasks = 0;
+        framework.running_tasks = 0;
+        framework.killing_tasks = 0;
+        framework.finished_tasks = 0;
+        framework.killed_tasks = 0;
+        framework.failed_tasks = 0;
+        framework.lost_tasks = 0;
+
+        framework.cpus_share = 0;
+        framework.gpus_share = 0;
+        framework.mem_share = 0;
+        framework.disk_share = 0;
+        framework.max_share = 0;
+
+        _.each(framework.tasks, function(task) {
+          // TODO(benh): Change the task state?
+          $scope.active_tasks = _.filter($scope.active_tasks, function(task) {
+            return task.framework_id.value !== framework.framework_info.id.value;
+          });
+          $scope.completed_tasks = $scope.completed_tasks.concat(task);
+          framework.completed_tasks = framework.completed_tasks.concat(task);
+        });
+
+        _.each(framework.unreachable_tasks, function(task) {
+          // TODO(benh): Change the task state?
+          $scope.unreachable_tasks = _.filter($scope.unreachable_tasks, function(task) {
+            return task.framework_id.value !== framework.framework_info.id.value;
+          });
+          $scope.completed_tasks = $scope.completed_tasks.concat(task);
+          framework.completed_tasks = framework.completed_tasks.concat(task);
+        });
+
+        $scope.completed_frameworks = _.clone($scope.completed_frameworks);
+        $scope.completed_frameworks[framework.framework_info.id.value] = framework;
       }
-
-      _.each(framework.completed_tasks, setTaskMetadata);
     });
-
-    $scope.used_cpus -= $scope.offered_cpus;
-    $scope.used_gpus -= $scope.offered_gpus;
-    $scope.used_mem -= $scope.offered_mem;
-    $scope.used_disk -= $scope.offered_disk;
-
-    $scope.idle_cpus = $scope.total_cpus - ($scope.offered_cpus + $scope.used_cpus);
-    $scope.idle_gpus = $scope.total_gpus - ($scope.offered_gpus + $scope.used_gpus);
-    $scope.idle_mem = $scope.total_mem - ($scope.offered_mem + $scope.used_mem);
-    $scope.idle_disk = $scope.total_disk - ($scope.offered_disk + $scope.used_disk);
-
-    $scope.time_since_update = 0;
-    $scope.$broadcast('state_updated');
-
-    return true; // Continue polling.
   }
 
   // Update the outermost scope with the metrics/snapshot endpoint.
@@ -394,8 +700,16 @@
     $scope.$location = $location;
     $scope.delay = 2000;
     $scope.retry = 0;
-    $scope.time_since_update = 0;
     $scope.isErrorModalOpen = false;
+
+    // Pass this pollTime to all relativeDate calls to make them all
+    // relative to the same moment in time.
+    //
+    // If relativeDate is called without a reference time, it
+    // instantiates a new Date to be the reference. Since there can be
+    // hundreds of dates on a given page, they would all be relative
+    // to slightly different moments in time.
+    $scope.pollTime = new Date();
 
     // Ordered Array of path => activeTab mappings. On successful route changes,
     // the `pathRegexp` values are matched against the current route. The first
@@ -442,9 +756,9 @@
       // Use current location as address in case we could not find the
       // leading master.
       var address = location.hostname + ':' + location.port;
-      if ($scope.state && $scope.state.leader_info) {
-          address = $scope.state.leader_info.hostname + ':' +
-                    $scope.state.leader_info.port;
+      if ($scope.state && $scope.state.leader) {
+          address = $scope.state.leader.hostname + ':' +
+                    $scope.state.leader.port;
       }
 
       return '//' + address + path;
@@ -485,10 +799,10 @@
           }
         }
 
-        // Start polling again, but do it asynchronously (and wait at
-        // least a second because otherwise the error-modal won't get
-        // properly shown).
-        $timeout(pollState, 1000);
+        // Start streaming and polling again, but do it asynchronously
+        // (and wait at least a second because otherwise the
+        // error-modal won't get properly shown).
+        $timeout(streamState, 1000);
         $timeout(pollMetrics, 1000);
       });
 
@@ -502,25 +816,6 @@
         }
       };
       countdown();
-    };
-
-    var pollState = function() {
-      // When the current master is not the leader, the request is redirected to
-      // the leading master automatically. This would cause a CORS error if we
-      // use XMLHttpRequest here. To avoid the CORS error, we use JSONP as a
-      // workaround. Please refer to MESOS-5911 for further details.
-      $http.jsonp(leadingMasterURL('/master/state?jsonp=JSON_CALLBACK'))
-        .success(function(response) {
-          if (updateState($scope, $timeout, response)) {
-            $scope.delay = updateInterval(_.size($scope.agents));
-            $timeout(pollState, $scope.delay);
-          }
-        })
-        .error(function() {
-          if ($scope.isErrorModalOpen === false) {
-            popupErrorModal();
-          }
-        });
     };
 
     var pollMetrics = function() {
@@ -542,14 +837,103 @@
         });
     };
 
-    pollState();
+    function getFlags() {
+      // TODO(benh): Need to deal with redirected masters so we don't
+      // get a CORS error for either `request()` or `stream()` below.
+
+      // Get flags for things like 'cluster' and 'log_dir'.
+      request({ type: "GET_FLAGS" })
+        .subscribe(
+          response => {
+            var cluster = _.find(response.get_flags.flags, flag => {
+              return flag.name === "cluster";
+            });
+
+            if (!_.isUndefined(cluster)) {
+              $scope.cluster = cluster.value;
+            }
+
+            // Track whether this cluster is named for display purposes.
+            $scope.clusterNamed = !!$scope.cluster;
+
+            var external_log_file = _.find(response.get_flags.flags, flag => {
+              return flag.name === "external_log_file";
+            });
+
+            if (!_.isUndefined(external_log_file)) {
+              $scope.external_log_file = external_log_file.value;
+            }
+
+            var log_dir = _.find(response.get_flags.flags, flag => {
+              return flag.name === "log_dir";
+            });
+
+            if (!_.isUndefined(log_dir)) {
+              $scope.log_dir = log_dir.value;
+            }
+          },
+          error => console.log(error)
+        );
+    }
+
+    var streamState = function() {
+      // TODO(benh): Need to deal with redirected masters so we don't
+      // get a CORS error for either `request()` or `stream()` below.
+
+      // Stream updates from the master.
+      stream({ type: "SUBSCRIBE" })
+        .subscribe(
+          value => {
+            var event = JSON.parse(value);
+            console.log(event);
+            if (event.type === 'SUBSCRIBED') {
+              subscribed($scope, event.subscribed.get_state);
+            } else if (event.type === 'TASK_ADDED') {
+              taskAdded($scope, event.task_added.task);
+            } else if (event.type === 'TASK_UPDATED') {
+              taskUpdated(
+                $scope,
+                event.task_updated.framework_id,
+                event.task_updated.status,
+                event.task_updated.state);
+            } else if (event.type === 'AGENT_ADDED') {
+              agentAdded($scope, event.agent_added.agent);
+            } else if (event.type === 'AGENT_REMOVED') {
+              agentRemoved($scope, event.agent_removed.agent_id);
+            } else if (event.type === 'FRAMEWORK_ADDED') {
+              frameworkAdded($scope, event.framework_added.framework);
+            } else if (event.type === 'FRAMEWORK_UPDATED') {
+              frameworkUpdated($scope, event.framework_removed.framework);
+            } else if (event.type === 'FRAMEWORK_REMOVED') {
+              frameworkRemoved($scope, event.framework_removed.framework_info);
+            }
+
+            // Broadcast that the state has been updated so any
+            // listeners can perform necessary actions to stay up to
+            // date (e.g., the roles controller updates it's data by
+            // making another request).
+            $scope.$broadcast('state_updated');
+          },
+          error => {
+            // TODO(benh): Popup error modal.
+            console.log(error);
+          },
+          () => {
+            // TODO(benh): Retry the stream.
+            console.log("stream completed")
+          }
+        );
+    };
+
+    getFlags();
+    streamState();
     pollMetrics();
   }]);
 
 
   mesosApp.controller('HomeCtrl', function($dialog, $scope) {
     $scope.log = function($event) {
-      if (!$scope.state.external_log_file && !$scope.state.log_dir) {
+      if (!$scope.external_log_file && !$scope.log_dir) {
         $dialog.messageBox(
           'Logging to a file is not enabled',
           "Set the 'external_log_file' or 'log_dir' option if you wish to access the logs.",
@@ -664,7 +1048,7 @@
             [{label: 'Continue'}]
           ).open();
         } else {
-          pailer(agentURLPrefix(agent, false), '/slave/log', 'Mesos Agent (' + agent.id + ')');
+          pailer(agentURLPrefix(agent, false), '/slave/log', 'Mesos Agent (' + agent.agent_info.id + ')');
         }
       };
 
@@ -1129,7 +1513,7 @@
           pailer(
             agentURLPrefix(agent, false),
             path,
-            decodeURIComponent(path) + ' (' + agent.id + ')');
+            decodeURIComponent(path) + ' (' + agent.agent_info.id + ')');
         };
 
         var url = agentURLPrefix(agent, false) + '/files/browse?jsonp=JSON_CALLBACK';

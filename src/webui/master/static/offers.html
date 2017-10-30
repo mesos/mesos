@@ -15,16 +15,16 @@
       <th data-key="allocation_info.role">Role</th>
       <th data-key="framework_name">Framework</th>
       <th data-key="hostname">Host</th>
-      <th data-key="resources.cpus">CPUs</th>
-      <th data-key="resources.gpus">GPUs</th>
-      <th data-key="resources.mem">Mem</th>
-      <th data-key="resources.disk">Disk</th>
+      <th data-key="cpus">CPUs</th>
+      <th data-key="gpus">GPUs</th>
+      <th data-key="mem">Mem</th>
+      <th data-key="disk">Disk</th>
     </tr>
   </thead>
   <tbody>
     <tr ng-repeat="offer in $data">
       <td>
-        <abbr title="{{offer.id}}">{{offer.id | truncateMesosID}}</abbr>
+        <abbr title="{{offer.id.value}}">{{offer.id.value | truncateMesosID}}</abbr>
       </td>
       <!-- Make this a link to the role overview -->
       <td>{{offer.allocation_info.role}}</td>
@@ -34,14 +34,14 @@
         </a>
       </td>
       <td>
-        <a href="#/agents/{{agents[offer.slave_id].id}}">
+        <a href="#/agents/{{agents[offer.agent_id.value].agent_info.id.value}}">
           {{offer.hostname}}
         </a>
       </td>
-      <td>{{offer.resources.cpus | number}}</td>
-      <td>{{offer.resources.gpus | number}}</td>
-      <td>{{offer.resources.mem * (1024 * 1024) | dataSize}}</td>
-      <td>{{offer.resources.disk * (1024 * 1024) | dataSize}}</td>
+      <td>{{offer.cpus | number}}</td>
+      <td>{{offer.gpus | number}}</td>
+      <td>{{offer.mem * (1024 * 1024) | dataSize}}</td>
+      <td>{{offer.disk * (1024 * 1024) | dataSize}}</td>
     </tr>
   </tbody>
 </table>

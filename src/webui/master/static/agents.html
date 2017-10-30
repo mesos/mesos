@@ -23,34 +23,34 @@
   </thead>
   <tr ng-repeat="agent in $data">
     <td>
-      <a href="#/agents/{{agent.id}}">{{agent.id | truncateMesosID}}</a>
+      <a href="#/agents/{{agent.agent_info.id.value}}">{{agent.agent_info.id.value | truncateMesosID}}</a>
       <button class="btn btn-xs btn-default btn-toggle"
           clipboard
-          data-clipboard-text="{{agent.id}}"
+          data-clipboard-text="{{agent.agent_info.id.value}}"
           tooltip="Copy ID"
           tooltip-placement="right"
           tooltip-trigger="clipboardhover">
         <i class="icon-file"></i>
       </button>
     </td>
-    <td>{{agent.hostname}}</td>
+    <td>{{agent.agent_info.hostname}}</td>
     <td>
-      {{agent.used_resources.cpus | number}} / {{agent.resources.cpus | number}}
+      {{agent.allocated_cpus | number}} / {{agent.total_cpus | number}}
     </td>
     <td>
-      {{agent.used_resources.gpus | number}} / {{agent.resources.gpus | number}}
+      {{agent.allocated_gpus | number}} / {{agent.total_gpus | number}}
     </td>
     <td>
-      {{agent.used_resources.mem * (1024 * 1024) | dataSize}} / {{agent.resources.mem * (1024 * 1024) | dataSize}}
+      {{agent.allocated_mem * (1024 * 1024) | dataSize}} / {{agent.total_mem * (1024 * 1024) | dataSize}}
     </td>
     <td>
-      {{agent.used_resources.disk * (1024 * 1024) | dataSize}} / {{agent.resources.disk * (1024 * 1024) | dataSize}}
+      {{agent.allocated_disk * (1024 * 1024) | dataSize}} / {{agent.total_disk * (1024 * 1024) | dataSize}}
     </td>
     <td>
-      <m-timestamp value="{{agent.registered_time * 1000}}"></m-timestamp>
+      <m-timestamp value="{{agent.registered_time.nanoseconds / 1000000}}"></m-timestamp>
     </td>
     <td>
-      <m-timestamp value="{{agent.reregistered_time * 1000}}"></m-timestamp>
+      <m-timestamp value="{{agent.reregistered_time.nanoseconds / 1000000}}"></m-timestamp>
     </td>
   </tr>
 </table>

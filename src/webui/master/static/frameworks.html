@@ -16,53 +16,54 @@
       <th data-key="roles">Roles</th>
       <th data-key="principal">Principal</th>
       <th data-key="tasks.length">Active Tasks</th>
-      <th data-key="used_resources.cpus">CPUs</th>
-      <th data-key="used_resources.gpus">GPUs</th>
-      <th data-key="used_resources.mem">Mem</th>
-      <th data-key="used_resources.disk">Disk</th>
+      <th data-key="allocated_cpus">CPUs</th>
+      <th data-key="allocated_gpus">GPUs</th>
+      <th data-key="allocated_mem">Mem</th>
+      <th data-key="allocated_disk">Disk</th>
       <th data-key="max_share">Max Share</th>
       <th data-key="registered_time">Registered</th>
       <th data-key="reregistered_time">Re-Registered</th>
     </tr>
   </thead>
   <tbody>
-    <tr ng-repeat="framework in $data  | filter: { active: true }">
+    <tr ng-repeat="framework in $data | filter: { active: true }">
       <td>
-        <a href="{{'#/frameworks/' + framework.id}}">
-          {{framework.id | truncateMesosID}}
+        <a href="{{'#/frameworks/' + framework.framework_info.id.value}}">
+          {{framework.framework_info.id.value | truncateMesosID}}
         </a>
         <button class="btn btn-xs btn-toggle btn-default"
                 clipboard
-                data-clipboard-text="{{framework.id}}"
+                data-clipboard-text="{{framework.framework_info.id.value}}"
                 tooltip="Copy ID"
                 tooltip-placement="right"
                 tooltip-trigger="clipboardhover">
         </button>
       </td>
-      <td ng-switch="!!framework.webui_url">
-        <a ng-href="{{framework.webui_url}}" ng-switch-when="true">{{framework.hostname}}</a>
-        <span ng-switch-when="false">{{framework.hostname}}</span>
+      <td ng-switch="!!framework.framework_info.webui_url">
+        <a ng-href="{{framework.framework_info.webui_url}}" ng-switch-when="true">{{framework.framework_info.hostname}}</a>
+        <span ng-switch-when="false">{{framework.framework_info.hostname}}</span>
       </td>
-      <td>{{framework.user}}</td>
-      <td>{{framework.name}}</td>
+      <td>{{framework.framework_info.user}}</td>
+      <td>{{framework.framework_info.name}}</td>
       <!-- TODO(bmahler): This doesn't display well when there are a lot
            of roles (e.g. a large organization with a lot of teams &
            services, using roles like /engineering/frontend/webserver, etc).
            Figure out a way to display this without bloating the table. -->
-      <td>{{framework.roles.toString()}}</td>
-      <td>{{framework.principal}}</td>
-      <td>{{framework.tasks.length}}</td>
-      <td>{{framework.used_resources.cpus | number}}</td>
-      <td>{{framework.used_resources.gpus | number}}</td>
-      <td>{{framework.used_resources.mem * (1024 * 1024) | dataSize}}</td>
-      <td>{{framework.used_resources.disk * (1024 * 1024) | dataSize}}</td>
+      <td>{{framework.framework_info.roles.toString()}}</td>
+      <td>{{framework.framework_info.principal}}</td>
+      <td>{{framework.tasks.length | number}}</td>
+      <td>{{framework.allocated_cpus | number}}</td>
+      <td>{{framework.allocated_gpus | number}}</td>
+      <td>{{framework.allocated_mem * (1024 * 1024) | dataSize}}</td>
+      <td>{{framework.allocated_disk * (1024 * 1024) | dataSize}}</td>
       <td>{{framework.max_share * 100 | number}}%</td>
-      <td>
-        <m-timestamp value="{{framework.registered_time * 1000}}"></m-timestamp>
+      <td ng-show="!framework.registered_time">-</td>
+      <td ng-show="framework.registered_time">
+        <m-timestamp value="{{framework.registered_time.nanoseconds / 1000000}}"></m-timestamp>
       </td>
       <td ng-show="!framework.reregistered_time">-</td>
       <td ng-show="framework.reregistered_time">
-        <m-timestamp value="{{framework.reregistered_time * 1000}}"></m-timestamp>
+        <m-timestamp value="{{framework.reregistered_time.nanoseconds / 1000000}}"></m-timestamp>
       </td>
     </tr>
   </tbody>
@@ -79,53 +80,54 @@
     <th data-key="roles">Roles</th>
     <th data-key="principal">Principal</th>
     <th data-key="tasks.length">Active Tasks</th>
-    <th data-key="used_resources.cpus">CPUs</th>
-    <th data-key="used_resources.gpus">GPUs</th>
-    <th data-key="used_resources.mem">Mem</th>
-    <th data-key="used_resources.disk">Disk</th>
+    <th data-key="allocated_cpus">CPUs</th>
+    <th data-key="allocated_gpus">GPUs</th>
+    <th data-key="allocated_mem">Mem</th>
+    <th data-key="allocated_disk">Disk</th>
     <th data-key="max_share">Max Share</th>
     <th data-key="registered_time">Registered</th>
     <th data-key="reregistered_time">Re-Registered</th>
   </tr>
   </thead>
   <tbody>
-  <tr ng-repeat="framework in $data  | filter: { active: false }">
+  <tr ng-repeat="framework in $data | filter: { active: false }">
     <td>
-      <a href="{{'#/frameworks/' + framework.id}}">
-        {{framework.id | truncateMesosID}}
+      <a href="{{'#/frameworks/' + framework.framework_info.id.value}}">
+        {{framework.framework_info.id.value | truncateMesosID}}
       </a>
       <button class="btn btn-xs btn-toggle btn-default"
               clipboard
-              data-clipboard-text="{{framework.id}}"
+              data-clipboard-text="{{framework.framework_info.id.value}}"
               tooltip="Copy ID"
               tooltip-placement="right"
               tooltip-trigger="clipboardhover">
       </button>
     </td>
-    <td ng-switch="!!framework.webui_url">
-      <a ng-href="{{framework.webui_url}}" ng-switch-when="true">{{framework.hostname}}</a>
-      <span ng-switch-when="false">{{framework.hostname}}</span>
+    <td ng-switch="!!framework.framework_info.webui_url">
+      <a ng-href="{{framework.framework_info.webui_url}}" ng-switch-when="true">{{framework.framework_info.hostname}}</a>
+      <span ng-switch-when="false">{{framework.framework_info.hostname}}</span>
     </td>
-    <td>{{framework.user}}</td>
-    <td>{{framework.name}}</td>
+    <td>{{framework.framework_info.user}}</td>
+    <td>{{framework.framework_info.name}}</td>
     <!-- TODO(bmahler): This doesn't display well when there are a lot
          of roles (e.g. a large organization with a lot of teams &
          services, using roles like /engineering/frontend/webserver, etc).
          Figure out a way to display this without bloating the table. -->
-    <td>{{framework.roles.toString()}}</td>
-    <td>{{framework.principal}}</td>
-    <td>{{framework.tasks.length}}</td>
-    <td>{{framework.used_resources.cpus | number}}</td>
-    <td>{{framework.used_resources.gpus | number}}</td>
-    <td>{{framework.used_resources.mem * (1024 * 1024) | dataSize}}</td>
-    <td>{{framework.used_resources.disk * (1024 * 1024) | dataSize}}</td>
+    <td>{{framework.framework_info.roles.toString()}}</td>
+    <td>{{framework.framework_info.principal}}</td>
+    <td>{{framework.tasks.length | number}}</td>
+    <td>{{framework.allocated_cpus | number}}</td>
+    <td>{{framework.allocated_gpus | number}}</td>
+    <td>{{framework.allocated_mem * (1024 * 1024) | dataSize}}</td>
+    <td>{{framework.allocated_disk * (1024 * 1024) | dataSize}}</td>
     <td>{{framework.max_share * 100 | number}}%</td>
-    <td>
-      <m-timestamp value="{{framework.registered_time * 1000}}"></m-timestamp>
+    <td ng-show="!framework.registered_time">-</td>
+    <td ng-show="framework.registered_time">
+      <m-timestamp value="{{framework.registered_time.nanoseconds / 1000000}}"></m-timestamp>
     </td>
     <td ng-show="!framework.reregistered_time">-</td>
     <td ng-show="framework.reregistered_time">
-      <m-timestamp value="{{framework.reregistered_time * 1000}}"></m-timestamp>
+      <m-timestamp value="{{framework.reregistered_time.nanoseconds / 1000000}}"></m-timestamp>
     </td>
   </tr>
   </tbody>
@@ -148,31 +150,31 @@
   <tbody>
     <tr ng-repeat="framework in $data">
       <td>
-        <a href="{{'#/frameworks/' + framework.id}}" title="{{framework.id}}">
-          {{framework.id | truncateMesosID}}
+        <a href="{{'#/frameworks/' + framework.framework_info.id.value}}" title="{{framework.framework_info.id.value}}">
+          {{framework.framework_info.id.value | truncateMesosID}}
         </a>
         <button class="btn btn-xs btn-toggle btn-default"
                 clipboard
-                data-clipboard-text="{{framework.id}}"
+                data-clipboard-text="{{framework.framework_info.id.value}}"
                 tooltip="Copy ID"
                 tooltip-placement="right"
                 tooltip-trigger="clipboardhover">
         </button>
       </td>
-      <td>{{framework.hostname}}</td>
-      <td>{{framework.user}}</td>
-      <td>{{framework.name}}</td>
+      <td>{{framework.framework_info.hostname}}</td>
+      <td>{{framework.framework_info.user}}</td>
+      <td>{{framework.framework_info.name}}</td>
       <!-- TODO(bmahler): This doesn't display well when there are a lot
            of roles (e.g. a large organization with a lot of teams &
            services, using roles like /engineering/frontend/webserver, etc).
            Figure out a way to display this without bloating the table. -->
-      <td>{{framework.roles.toString()}}</td>
-      <td>{{framework.principal}}</td>
+      <td>{{framework.framework_info.roles.toString()}}</td>
+      <td>{{framework.framework_info.principal}}</td>
       <td>
-        <m-timestamp value="{{framework.registered_time * 1000}}"></m-timestamp>
+        <m-timestamp value="{{framework.registered_time.nanoseconds / 1000000}}"></m-timestamp>
       </td>
       <td>
-        <m-timestamp value="{{framework.unregistered_time * 1000}}"></m-timestamp>
+        <m-timestamp value="{{framework.unregistered_time.nanoseconds / 1000000}}"></m-timestamp>
       </td>
     </tr>
   </tbody>

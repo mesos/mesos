@@ -11,7 +11,7 @@
       <dl class="inline inline-toggle clearfix">
         <dt>Cluster:</dt>
         <dd>
-          <span ng-show="clusterNamed">{{state.cluster}}</span>
+          <span ng-show="clusterNamed">{{cluster}}</span>
           <span ng-show="!clusterNamed">
             (Unnamed)
             <i class="icon-info-sign"
@@ -21,27 +21,27 @@
         </dd>
         <dt>Leader:</dt>
         <dd>
-          <a ng-show="state.leader_info"
-             href="//{{state.leader_info.hostname}}:{{state.leader_info.port}}">
-            {{state.leader_info.hostname + ':' + state.leader_info.port}}
+          <a ng-show="state.leader"
+             href="//{{state.leader.hostname}}:{{state.leader.port}}">
+            {{state.leader.hostname + ':' + state.leader.port}}
           </a>
-          <span ng-show="!state.leader_info">(Unknown)</span>
+          <span ng-show="!state.leader">(Unknown)</span>
         </dd>
         <dt>Version:</dt>
         <dd>{{state.version}}</dd>
         <dt>Built:</dt>
         <dd>
-          <m-timestamp value="{{state.build_time * 1000}}">
+          <m-timestamp value="{{state.build_time.nanoseconds / 1000000}}">
             by <i>{{state.build_user}}</i>
           </m-timestamp>
         </dd>
         <dt>Started:</dt>
         <dd>
-          <m-timestamp value="{{state.start_time * 1000}}"></m-timestamp>
+          <m-timestamp value="{{state.start_time.nanoseconds / 1000000}}"></m-timestamp>
         </dd>
         <dt>Elected:</dt>
         <dd>
-          <m-timestamp value="{{state.elected_time * 1000}}"></m-timestamp>
+          <m-timestamp value="{{state.elected_time.nanoseconds / 1000000}}"></m-timestamp>
         </dd>
       </dl>
 
@@ -60,7 +60,7 @@
           </tr>
           <tr>
             <td>Unreachable</td>
-            <td class="text-right">{{unreachable_agents | number}}</td>
+            <td class="text-right">-</td>
           </tr>
         </tbody>
       </table>
@@ -128,17 +128,17 @@
           </tr>
           <tr>
             <td>Allocated</td>
-            <td class="text-right">{{used_cpus | decimalFloat}}</td>
-            <td class="text-right">{{used_gpus | decimalFloat}}</td>
-            <td class="text-right">{{used_mem * (1024 * 1024) | dataSize}}</td>
-            <td class="text-right">{{used_disk * (1024 * 1024) | dataSize}}</td>
+            <td class="text-right">{{allocated_cpus | decimalFloat}}</td>
+            <td class="text-right">{{allocated_gpus | decimalFloat}}</td>
+            <td class="text-right">{{allocated_mem * (1024 * 1024) | dataSize}}</td>
+            <td class="text-right">{{allocated_disk * (1024 * 1024) | dataSize}}</td>
           </tr>
           <tr>
             <td>Offered</td>
-            <td class="text-right">{{offered_cpus | decimalFloat}}</td>
-            <td class="text-right">{{offered_gpus | decimalFloat}}</td>
-            <td class="text-right">{{offered_mem * (1024 * 1024) | dataSize}}</td>
-            <td class="text-right">{{offered_disk * (1024 * 1024) | dataSize}}</td>
+            <td class="text-right">-</td>
+            <td class="text-right">-</td>
+            <td class="text-right">-</td>
+            <td class="text-right">-</td>
           </tr>
           <tr>
             <td>Idle</td>
@@ -174,20 +174,20 @@
         </tr>
         <tr ng-repeat="task in $data">
           <td>
-            <a href="#/frameworks/{{task.framework_id}}/">
-              {{task.framework_id | truncateMesosID}}
+            <a href="#/frameworks/{{task.framework_id.value}}/">
+              {{task.framework_id.value | truncateMesosID}}
             </a>
             <button class="btn btn-xs btn-toggle btn-default"
                     clipboard
-                    data-clipboard-text="{{task.framework_id}}"
+                    data-clipboard-text="{{task.framework_id.value}}"
                     tooltip="Copy ID"
                     tooltip-placement="right"
                     tooltip-trigger="clipboardhover">
             </button>
           </td>
           <td>
-            <a href="#/agents/{{task.slave_id}}/frameworks/{{task.framework_id}}/executors/{{task.executor_id}}">
-              {{task.id}}
+            <a href="#/agents/{{task.agent_id.value}}/frameworks/{{task.framework_id.value}}/executors/{{task.executor_id.value}}">
+              {{task.task_id.value}}
             </a>
           </td>
           <td>{{task.name}}</td>
@@ -198,18 +198,18 @@
             <m-timestamp value="{{task.start_time}}"></m-timestamp>
           </td>
           <td>
-            <span data-ng-show="agents[task.slave_id]">
-              {{agents[task.slave_id].hostname}}
+            <span data-ng-show="agents[task.agent_id.value]">
+              {{agents[task.agent_id.value].agent_info.hostname}}
             </span>
-            <span class="text-muted" data-ng-show="!agents[task.slave_id]">
+            <span class="text-muted" data-ng-show="!agents[task.agent_id.value]">
               Agent offline
             </span>
           </td>
           <td>
-            <a data-ng-show="agents[task.slave_id]" href="#/agents/{{task.slave_id}}/frameworks/{{task.framework_id}}/executors/{{task.executor_id}}/tasks/{{task.id}}/browse">
+            <a data-ng-show="agents[task.agent_id.value]" href="#/agents/{{task.agent_id.value}}/frameworks/{{task.framework_id.value}}/executors/{{task.executor_id.value}}/tasks/{{task.task_id.value}}/browse">
               Sandbox
             </a>
-            <span class="text-muted" data-ng-show="!agents[task.slave_id]">
+            <span class="text-muted" data-ng-show="!agents[task.agent_id.value]">
               Agent offline
             </span>
           </td>
@@ -235,24 +235,24 @@
         </tr>
         <tr ng-repeat="task in $data">
           <td>
-            <a href="#/frameworks/{{task.framework_id}}/">
-              {{task.framework_id | truncateMesosID}}
+            <a href="#/frameworks/{{task.framework_id.value}}/">
+              {{task.framework_id.value | truncateMesosID}}
             </a>
             <button class="btn btn-xs btn-toggle btn-default"
                     clipboard
-                    data-clipboard-text="{{task.framework_id}}"
+                    data-clipboard-text="{{task.framework_id.value}}"
                     tooltip="Copy ID"
                     tooltip-placement="right"
                     tooltip-trigger="clipboardhover">
             </button>
           </td>
-          <td>{{task.id}}</td>
+          <td>{{task.task_id.value}}</td>
           <td>{{task.name}}</td>
           <td>{{task.role}}</td>
           <td>
             <m-timestamp value="{{task.start_time}}"></m-timestamp>
           </td>
-          <td>{{task.slave_id}}</td>
+          <td>{{task.agent_id.value}}</td>
         </tr>
       </tbody>
     </table>
@@ -278,18 +278,18 @@
         </tr>
         <tr ng-repeat="task in $data">
          <td>
-            <a href="#/frameworks/{{task.framework_id}}/">
-              {{task.framework_id | truncateMesosID}}
+            <a href="#/frameworks/{{task.framework_id.value}}/">
+              {{task.framework_id.value | truncateMesosID}}
             </a>
             <button class="btn btn-xs btn-toggle btn-default"
                     clipboard
-                    data-clipboard-text="{{task.framework_id}}"
+                    data-clipboard-text="{{task.framework_id.value}}"
                     tooltip="Copy ID"
                     tooltip-placement="right"
                     tooltip-trigger="clipboardhover">
             </button>
           </td>
-          <td>{{task.id}}</td>
+          <td>{{task.task_id.value}}</td>
           <td>{{task.name}}</td>
           <td>{{task.role}}</td>
           <td>{{task.state | truncateMesosState}}</td>
@@ -300,19 +300,19 @@
             <m-timestamp value="{{task.finish_time}}"></m-timestamp>
           </td>
           <td>
-            <a data-ng-show="_.has(agents, task.slave_id)"
-                href="#/agents/{{task.slave_id}}/frameworks/{{task.framework_id}}/executors/{{task.executor_id}}">
-              {{agents[task.slave_id].hostname}}
+            <a data-ng-show="_.has(agents, task.agent_id.value)"
+                href="#/agents/{{task.agent_id.value}}/frameworks/{{task.framework_id.value}}/executors/{{task.executor_id.value}}">
+              {{agents[task.agent_id.value].agent_info.hostname}}
             </a>
-            <span class="text-muted" data-ng-show="!_.has(agents, task.slave_id)">
+            <span class="text-muted" data-ng-show="!_.has(agents, task.agent_id.value)">
               Agent offline
             </span>
           </td>
           <td>
-            <a data-ng-show="agents[task.slave_id]" href="#/agents/{{task.slave_id}}/frameworks/{{task.framework_id}}/executors/{{task.executor_id}}/tasks/{{task.id}}/browse">
+            <a data-ng-show="agents[task.agent_id.value]" href="#/agents/{{task.agent_id.value}}/frameworks/{{task.framework_id.value}}/executors/{{task.executor_id.value}}/tasks/{{task.task_id.value}}/browse">
               Sandbox
             </a>
-            <span class="text-muted" data-ng-show="!agents[task.slave_id]">
+            <span class="text-muted" data-ng-show="!agents[task.agent_id.value]">
               Agent offline
             </span>
           </td>
