@@ -1931,6 +1931,23 @@ mesos::master::Response::GetState Master::Http::_getState(
 
   getState.mutable_get_agents()->CopyFrom(_getAgents(rolesAcceptor));
 
+  getState.set_version(MESOS_VERSION);
+
+  getState.mutable_build_time()->set_nanoseconds(Seconds(build::TIME).ns());
+  getState.set_build_user(build::USER);
+
+  getState.mutable_start_time()->set_nanoseconds(
+      master->startTime.duration().ns());
+
+  if (master->leader.isSome()) {
+    getState.mutable_leader()->CopyFrom(master->leader.get());
+  }
+
+  if (master->electedTime.isSome()) {
+    getState.mutable_elected_time()->set_nanoseconds(
+        master->electedTime->duration().ns());
+  }
+
   return getState;
 }
 

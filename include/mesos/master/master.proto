@@ -319,6 +319,22 @@ message Response {
     optional GetExecutors get_executors = 2;
     optional GetFrameworks get_frameworks = 3;
     optional GetAgents get_agents = 4;
+
+    // Mesos version.
+    optional string version = 5;
+
+    // Build time and user.
+    optional TimeInfo build_time = 6;
+    optional string build_user = 7;
+
+    // Start time of this master.
+    optional TimeInfo start_time = 8;
+
+    // Information about the current leader if one exists.
+    optional MasterInfo leader = 9;
+
+    // Elected time of this master if it's the leader.
+    optional TimeInfo elected_time = 10;
   }
 
   message GetAgents {
