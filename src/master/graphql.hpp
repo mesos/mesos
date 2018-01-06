@@ -18,9 +18,11 @@
 
 #include <mesos/v1/master/master.hpp>
 
+#include <stout/base64.hpp>
 #include <stout/error.hpp>
 #include <stout/jsonify.hpp>
 #include <stout/option.hpp>
+#include <stout/protobuf.hpp>
 #include <stout/try.hpp>
 
 namespace graphql {

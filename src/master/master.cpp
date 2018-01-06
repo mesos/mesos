@@ -304,7 +304,8 @@ Master::Master(
     MasterDetector* _detector,
     const Option<Authorizer*>& _authorizer,
     const Option<shared_ptr<RateLimiter>>& _slaveRemovalLimiter,
-    const Flags& _flags)
+    const Flags& _flags,
+    Option<process::Queue<mesos::master::Event>>&& events)
   : ProcessBase("master"),
     flags(_flags),
     http(this),
@@ -317,7 +318,8 @@ Master::Master(
     frameworks(flags),
     authenticator(None()),
     metrics(new Metrics(*this)),
-    electedTime(None())
+    electedTime(None()),
+    events(events)
 {
   slaves.limiter = _slaveRemovalLimiter;
 
@@ -1807,6 +1809,25 @@ Future<Nothing> Master::_recover(const Registry& registry)
             << "; allowing " << flags.agent_reregister_timeout
             << " for agents to re-register";
 
+  if (events.isSome()) {
+    return ObjectApprovers::create(
+        None(),
+        None(),
+        {VIEW_FRAMEWORK, VIEW_TASK, VIEW_EXECUTOR, VIEW_ROLE})
+      .then(defer(
+          self(),
+          [=](const Owned<ObjectApprovers>& approvers) {
+            mesos::master::Event event;
+            event.set_type(mesos::master::Event::SUBSCRIBED);
+            event.mutable_subscribed()->mutable_get_state()->CopyFrom(
+                http._getState(approvers));
+
+            events->put(event);
+
+            return Nothing();
+          }));
+  }
+
   return Nothing();
 }
 
@@ -2750,10 +2771,7 @@ void Master::_subscribe(
     // Start the heartbeat after sending SUBSCRIBED event.
     framework->heartbeat();
 
-    if (!subscribers.subscribed.empty()) {
-      subscribers.send(
-          protobuf::master::event::createFrameworkAdded(*framework));
-    }
+    subscribers.send(protobuf::master::event::createFrameworkAdded(*framework));
 
     return;
   }
@@ -2801,10 +2819,7 @@ void Master::_subscribe(
     }
   }
 
-  if (!subscribers.subscribed.empty()) {
-    subscribers.send(
-        protobuf::master::event::createFrameworkUpdated(*framework));
-  }
+  subscribers.send(protobuf::master::event::createFrameworkUpdated(*framework));
 
   // Broadcast the new framework pid to all the slaves. We have to
   // broadcast because an executor might be running on a slave but
@@ -3055,10 +3070,7 @@ void Master::_subscribe(
     message.mutable_master_info()->MergeFrom(info_);
     framework->send(message);
 
-    if (!subscribers.subscribed.empty()) {
-      subscribers.send(
-          protobuf::master::event::createFrameworkAdded(*framework));
-    }
+    subscribers.send(protobuf::master::event::createFrameworkAdded(*framework));
 
     return;
   }
@@ -3132,10 +3144,8 @@ void Master::_subscribe(
       LOG(INFO) << "Framework " << *framework << " failed over";
       failoverFramework(framework, from);
 
-      if (!subscribers.subscribed.empty()) {
-        subscribers.send(
-            protobuf::master::event::createFrameworkUpdated(*framework));
-      }
+      subscribers.send(
+          protobuf::master::event::createFrameworkUpdated(*framework));
     } else {
       LOG(INFO) << "Allowing framework " << *framework
                 << " to subscribe with an already used id";
@@ -3184,10 +3194,9 @@ void Master::_subscribe(
       message.mutable_master_info()->MergeFrom(info_);
       framework->send(message);
 
-      if (!subscribers.subscribed.empty()) {
-        subscribers.send(
-            protobuf::master::event::createFrameworkUpdated(*framework));
-      }
+      subscribers.send(
+          protobuf::master::event::createFrameworkUpdated(*framework));
+
       return;
     }
   } else {
@@ -3205,10 +3214,8 @@ void Master::_subscribe(
       return;
     }
 
-    if (!subscribers.subscribed.empty()) {
-      subscribers.send(
-          protobuf::master::event::createFrameworkUpdated(*framework));
-    }
+    subscribers.send(
+        protobuf::master::event::createFrameworkUpdated(*framework));
   }
 
   // Broadcast the new framework pid to all the slaves. We have to
@@ -8627,10 +8634,8 @@ void Master::removeFramework(Framework* framework)
   // The framework pointer is now owned by `frameworks.completed`.
   frameworks.completed.set(framework->id(), Owned<Framework>(framework));
 
-  if (!subscribers.subscribed.empty()) {
-    subscribers.send(
-        protobuf::master::event::createFrameworkRemoved(framework->info));
-  }
+  subscribers.send(
+      protobuf::master::event::createFrameworkRemoved(framework->info));
 }
 
 
@@ -8797,9 +8802,7 @@ void Master::addSlave(
       slave->totalResources,
       slave->usedResources);
 
-  if (!subscribers.subscribed.empty()) {
-    subscribers.send(protobuf::master::event::createAgentAdded(*slave));
-  }
+  subscribers.send(protobuf::master::event::createAgentAdded(*slave));
 }
 
 
@@ -8973,9 +8976,7 @@ void Master::_removeSlave(
 
   sendSlaveLost(slave->info);
 
-  if (!subscribers.subscribed.empty()) {
-    subscribers.send(protobuf::master::event::createAgentRemoved(slave->id));
-  }
+  subscribers.send(protobuf::master::event::createAgentRemoved(slave->id));
 
   delete slave;
 }
@@ -9163,7 +9164,7 @@ void Master::updateTask(Task* task, const StatusUpdate& update)
   // MESOS-1746.
   task->mutable_statuses(task->statuses_size() - 1)->clear_data();
 
-  if (sendSubscribersUpdate && !subscribers.subscribed.empty()) {
+  if (sendSubscribersUpdate) {
     subscribers.send(protobuf::master::event::createTaskUpdated(
         *task, task->state(), status));
   }
@@ -9829,6 +9830,10 @@ void Master::Subscribers::send(const mesos::master::Event& event)
   VLOG(1) << "Notifying all active subscribers about " << event.type()
           << " event";
 
+  if (master->events.isSome()) {
+    master->events->put(event);
+  }
+
   foreachvalue (const Owned<Subscriber>& subscriber, subscribed) {
     ObjectApprovers::create(
         subscriber->master->authorizer,
@@ -10102,9 +10107,7 @@ void Slave::addTask(Task* task)
     usedResources[frameworkId] += task->resources();
   }
 
-  if (!master->subscribers.subscribed.empty()) {
-    master->subscribers.send(protobuf::master::event::createTaskAdded(*task));
-  }
+  master->subscribers.send(protobuf::master::event::createTaskAdded(*task));
 
   LOG(INFO) << "Adding task " << taskId
             << " with resources " << task->resources()

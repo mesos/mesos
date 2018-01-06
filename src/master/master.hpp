@@ -50,6 +50,7 @@
 #include <process/process.hpp>
 #include <process/protobuf.hpp>
 #include <process/timer.hpp>
+#include <process/queue.hpp>
 
 #include <process/metrics/counter.hpp>
 
@@ -375,7 +376,8 @@ public:
          const Option<Authorizer*>& authorizer,
          const Option<std::shared_ptr<process::RateLimiter>>&
            slaveRemovalLimiter,
-         const Flags& flags = Flags());
+         const Flags& flags = Flags(),
+         Option<process::Queue<mesos::master::Event>>&& events = None());
 
   virtual ~Master();
 
@@ -1421,6 +1423,8 @@ private:
     static std::string WEIGHTS_HELP();
 
   private:
+    friend Master;
+
     JSON::Object __flags() const;
 
     class FlagsError; // Forward declaration.
@@ -1920,6 +1924,8 @@ private:
 
   struct Subscribers
   {
+    Subscribers(Master* master) : master(master) {}
+
     // Represents a client subscribed to the 'api/vX' endpoint.
     //
     // TODO(anand): Add support for filtering. Some subscribers
@@ -1982,7 +1988,13 @@ private:
     // Active subscribers to the 'api/vX' endpoint keyed by the stream
     // identifier.
     hashmap<UUID, process::Owned<Subscriber>> subscribed;
-  } subscribers;
+
+    Master* master;
+  };
+
+  Subscribers subscribers = Subscribers(this);
+
+  Option<process::Queue<mesos::master::Event>> events;
 
   hashmap<OfferID, Offer*> offers;
   hashmap<OfferID, process::Timer> offerTimers;

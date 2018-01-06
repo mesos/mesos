@@ -45,6 +45,7 @@
 #include <process/limiter.hpp>
 #include <process/owned.hpp>
 #include <process/pid.hpp>
+#include <process/queue.hpp>
 
 #include <stout/check.hpp>
 #include <stout/duration.hpp>
@@ -74,6 +75,7 @@
 //#endif // HAVE_LIBGRAPHQLPARSER
 #include "master/master.hpp"
 #include "master/registrar.hpp"
+#include "master/state.hpp"
 
 #include "master/allocator/mesos/hierarchical.hpp"
 
@@ -515,6 +517,8 @@ int main(int argc, char** argv)
     slaveRemovalLimiter = new RateLimiter(permits.get(), duration.get());
   }
 
+  process::Queue<mesos::master::Event> events;
+
   Master* master =
     new Master(
       allocator.get(),
@@ -524,7 +528,10 @@ int main(int argc, char** argv)
       detector,
       authorizer_,
       slaveRemovalLimiter,
-      flags);
+      flags,
+      events);
+
+process::spawn(new StateProcess(std::move(events), flags, authorizer_), true);
 
   if (flags.zk.isNone() && flags.master_detector.isNone()) {
     // It means we are using the standalone detector so we need to

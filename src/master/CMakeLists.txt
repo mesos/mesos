@@ -18,6 +18,6 @@
 if (NOT WIN32)
   # THE MASTER EXECUTABLE.
   ########################
-  add_executable(mesos-master main.cpp)
+  add_executable(mesos-master main.cpp state.cpp)
   target_link_libraries(mesos-master PRIVATE mesos)
 endif ()
